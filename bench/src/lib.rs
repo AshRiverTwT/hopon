@@ -19,7 +19,7 @@ impl Client {
         let u: url_lite::Url = url_lite::parse(url)?;
         let tcp = TcpStream::connect((u.host.as_str(), u.port)).await?;
         tcp.set_nodelay(true)?;
-        let (ws, _) = tokio_tungstenite::client_async_tls(url, tcp).await?;
+        let (ws, _) = tokio_tungstenite::client_async_tls(versioned_url(url), tcp).await?;
         Ok(Self { ws, req: 0 })
     }
 

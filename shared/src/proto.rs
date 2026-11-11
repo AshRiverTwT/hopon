@@ -8,6 +8,17 @@ use serde::{Deserialize, Serialize};
 
 pub type Id = i64;
 
+/// Bumped on every wire-incompatible change. Sent as `?v=` on the WebSocket
+/// URL; the server answers HTTP 426 to any other version before any
+/// MessagePack is exchanged, so old and new builds fail loudly, not silently.
+pub const PROTOCOL_VERSION: u32 = 3;
+
+/// Append the protocol version to a chat URL (`ws://host:port/ws`).
+pub fn versioned_url(url: &str) -> String {
+    let sep = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{sep}v={PROTOCOL_VERSION}")
+}
+
 pub const MAX_MESSAGE_CHARS: usize = 4000;
 pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 pub const HISTORY_PAGE_MAX: u16 = 100;

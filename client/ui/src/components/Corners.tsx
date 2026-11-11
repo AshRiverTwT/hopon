@@ -42,7 +42,7 @@ export function Status() {
         <span class="status-voice">{s.voice.state === "connected" ? "Live" : s.voice.state === "reconnecting" ? "Reconnecting" : "Joining"} · {voiceName()}</span>
       </Show>
       <span classList={{ warn: s.conn.state !== "online" }}>
-        {s.conn.state === "online" ? (s.conn.rttMs != null ? (s.conn.rttMs < 1 ? "<1 ms" : `${s.conn.rttMs.toFixed(0)} ms`) : "Online") : s.conn.state === "connecting" ? "Connecting" : "Offline"}
+        {s.conn.state === "online" ? (s.conn.rttMs != null ? (s.conn.rttMs < 1 ? "<1 ms" : `${s.conn.rttMs.toFixed(0)} ms`) : "Online") : s.conn.state === "connecting" ? "Connecting" : s.conn.state === "incompatible" ? "Update needed" : "Offline"}
       </span>
       <span>{clock()}</span>
       <span class="live-dot" classList={{ idle: !s.voice.channelId && s.conn.state === "online", warn: s.conn.state !== "online" }} />

@@ -21,7 +21,24 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
 use tokio_stream::StreamMap;
 
-pub async fn handler(ws: WebSocketUpgrade, AxState(st): AxState<Arc<State>>) -> Response {
+#[derive(serde::Deserialize)]
+pub struct Params {
+    v: Option<u32>,
+}
+
+pub async fn handler(
+    ws: WebSocketUpgrade,
+    axum::extract::Query(q): axum::extract::Query<Params>,
+    AxState(st): AxState<Arc<State>>,
+) -> Response {
+    if q.v != Some(PROTOCOL_VERSION) {
+        use axum::response::IntoResponse;
+        return (
+            axum::http::StatusCode::UPGRADE_REQUIRED,
+            format!("protocol {} required, client sent {:?}; update the app and server together", PROTOCOL_VERSION, q.v),
+        )
+            .into_response();
+    }
     ws.max_message_size(MAX_FRAME_BYTES)
         .max_frame_size(MAX_FRAME_BYTES)
         .write_buffer_size(0)

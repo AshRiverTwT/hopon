@@ -108,7 +108,7 @@ impl From<&VoicePresence> for UiPresence {
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "t", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum UiEvent {
-    /// `state`: "connecting" | "online" | "offline".
+    /// `state`: "connecting" | "online" | "offline" | "incompatible".
     Conn { state: &'static str, rtt_ms: Option<f64> },
     /// Full session snapshot (also sent with `user: None` when logged out).
     Session { user: Option<UiUser>, servers: Vec<UiServer>, voice: Vec<UiPresence> },

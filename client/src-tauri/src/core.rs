@@ -185,22 +185,36 @@ impl Core {
     pub async fn run(self: Arc<Self>) {
         let mut backoff = 100u64;
         let mut first = true;
+        let mut incompatible = false;
         loop {
-            self.emit(UiEvent::Conn { state: "connecting", rtt_ms: None });
+            if !incompatible {
+                self.emit(UiEvent::Conn { state: "connecting", rtt_ms: None });
+            }
             let url = self.url.lock().clone();
+            incompatible = false;
             match tokio::time::timeout(Duration::from_secs(5), connect(&url)).await {
                 Ok(Ok(ws)) => {
                     backoff = 100;
                     self.clone().session(ws, &mut first).await;
                 }
-                Ok(Err(e)) => tracing::info!("connect {url}: {e}"),
+                Ok(Err(e)) => {
+                    incompatible = matches!(e.downcast_ref::<tokio_tungstenite::tungstenite::Error>(),
+                        Some(tokio_tungstenite::tungstenite::Error::Http(r)) if r.status().as_u16() == 426);
+                    if incompatible {
+                        self.emit(UiEvent::Conn { state: "incompatible", rtt_ms: None });
+                        backoff = 5_000;
+                    }
+                    tracing::info!("connect {url}: {e}");
+                }
                 Err(_) => tracing::info!("connect {url}: timeout"),
             }
             *self.out.lock() = None;
             for (_, w) in self.waiters.lock().drain() {
                 drop(w);
             }
-            self.emit(UiEvent::Conn { state: "offline", rtt_ms: None });
+            if !incompatible {
+                self.emit(UiEvent::Conn { state: "offline", rtt_ms: None });
+            }
             let jitter = (now_us() as u64) % (backoff / 2 + 1);
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_millis(backoff + jitter)) => {}
@@ -624,6 +638,6 @@ async fn connect(url: &str) -> anyhow::Result<tokio_tungstenite::WebSocketStream
     let mut cfg = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
     cfg.max_message_size = Some(MAX_FRAME_BYTES);
     cfg.write_buffer_size = 0;
-    let (ws, _) = tokio_tungstenite::client_async_tls_with_config(url, tcp, Some(cfg), None).await?;
+    let (ws, _) = tokio_tungstenite::client_async_tls_with_config(versioned_url(url), tcp, Some(cfg), None).await?;
     Ok(ws)
 }
