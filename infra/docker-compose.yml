@@ -27,7 +27,8 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
       RUST_LOG: info
-    ports: ["8080:8080"]
+    # Localhost only: put a TLS reverse proxy (e.g. Caddy) in front.
+    ports: ["127.0.0.1:8080:8080"]
     restart: unless-stopped
 
   livekit:

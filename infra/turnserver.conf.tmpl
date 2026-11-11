@@ -4,6 +4,8 @@ fingerprint
 lt-cred-mech
 user=hopon:@TURN_PASSWORD@
 realm=hopon
+# Behind NAT (e.g. AWS EC2) relay candidates must carry the public IP.
+@EXTERNAL_IP_LINE@
 min-port=50300
 max-port=50400
 no-cli
