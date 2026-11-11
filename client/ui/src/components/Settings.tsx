@@ -3,7 +3,7 @@
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { call } from "../ipc";
 import { s, toast } from "../store";
-import { setSoundsEnabled, soundsEnabled } from "../sounds";
+import { prefs, setPrefs } from "../prefs";
 import { toAvatarBytes } from "./Avatar";
 
 interface Devices {
@@ -31,16 +31,13 @@ export default function Settings(p: { close: () => void }) {
   const err = (e: unknown) => toast(String(e));
   const [devs, { mutate }] = createResource(() => call<Devices>("audio_devices").catch(() => null));
   const [cfg] = createResource(() => call<{ url: string }>("get_config"));
-  const [sounds, setSounds] = createSignal(soundsEnabled());
-  const ls = (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
-  const [ptt, setPtt] = createSignal(ls("ptt", "0") === "1");
-  const [pttKey, setPttKey] = createSignal(Number(ls("pttKey", "0")));
+  const ptt = () => prefs.ptt;
+  const pttKey = () => prefs.pttKey;
   const [capturing, setCapturing] = createSignal(false);
   let fileInput!: HTMLInputElement;
 
   const savePtt = (en: boolean, k: number) => {
-    setPtt(en); setPttKey(k);
-    try { localStorage.setItem("ptt", en ? "1" : "0"); localStorage.setItem("pttKey", String(k)); } catch {}
+    setPrefs({ ptt: en, pttKey: k });
     call("voice_ptt", { enabled: en, keyCode: k }).catch(err);
   };
   const onOff = (b: boolean) => (b ? "On" : "Off");
@@ -59,10 +56,8 @@ export default function Settings(p: { close: () => void }) {
     return (input ? d.inputs : d.outputs).find((x) => x.id === id)?.name ?? "System default";
   };
   const setProc = (k: "aec" | "ns" | "agc") => {
-    const d = devs(); if (!d) return;
-    const next = { ...d.processing, [k]: !d.processing[k] };
-    mutate({ ...d, processing: next });
-    call("audio_processing", next).catch(err);
+    setPrefs({ [k]: !prefs[k] });
+    call("audio_processing", { aec: prefs.aec, ns: prefs.ns, agc: prefs.agc }).catch(err);
   };
 
   const cats = createMemo<{ name: string; opts: Opt[] }[]>(() => [
@@ -74,12 +69,12 @@ export default function Settings(p: { close: () => void }) {
     { name: "Audio", opts: [
       { label: "Microphone", value: () => deviceName(true), step: (d) => cycleDevice(true, d) },
       { label: "Output", value: () => deviceName(false), step: (d) => cycleDevice(false, d) },
-      { label: "Join / leave sounds", value: () => onOff(sounds()), step: () => { setSounds(!sounds()); setSoundsEnabled(sounds()); } },
+      { label: "Join / leave sounds", value: () => onOff(prefs.sounds), step: () => setPrefs({ sounds: !prefs.sounds }) },
     ] },
     { name: "Voice", opts: [
-      { label: "Echo cancellation · off for headsets", value: () => onOff(!!devs()?.processing.aec), step: () => setProc("aec") },
-      { label: "Noise suppression", value: () => onOff(!!devs()?.processing.ns), step: () => setProc("ns") },
-      { label: "Auto gain", value: () => onOff(!!devs()?.processing.agc), step: () => setProc("agc") },
+      { label: "Echo cancellation · off for headsets", value: () => onOff(prefs.aec), step: () => setProc("aec") },
+      { label: "Noise suppression", value: () => onOff(prefs.ns), step: () => setProc("ns") },
+      { label: "Auto gain", value: () => onOff(prefs.agc), step: () => setProc("agc") },
     ] },
     { name: "Controls", opts: [
       { label: "Push to talk", value: () => onOff(ptt()), step: () => savePtt(!ptt(), pttKey()) },

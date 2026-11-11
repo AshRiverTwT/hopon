@@ -140,6 +140,8 @@ pub enum UiEvent {
     ReadUpdated { channel_id: String, last_read: String },
     Reaction { channel_id: String, message_id: String, emoji: String, user_id: String, add: bool },
     Typing { channel_id: String, user_id: String },
+    /// Account preferences (JSON object), on login and when another device saves.
+    Prefs { json: String },
     /// A message in this channel mentions you.
     Mentioned { channel_id: String },
     UserPresence { user_id: String, online: bool },

@@ -11,7 +11,7 @@ pub type Id = i64;
 /// Bumped on every wire-incompatible change. Sent as `?v=` on the WebSocket
 /// URL; the server answers HTTP 426 to any other version before any
 /// MessagePack is exchanged, so old and new builds fail loudly, not silently.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Append the protocol version to a chat URL (`ws://host:port/ws`).
 pub fn versioned_url(url: &str) -> String {
@@ -24,6 +24,7 @@ pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 pub const HISTORY_PAGE_MAX: u16 = 100;
 /// Avatars are small square images (the client uploads 128 px WebP).
 pub const MAX_AVATAR_BYTES: usize = 48 * 1024;
+pub const MAX_PREFS_BYTES: usize = 16 * 1024;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelKind {
@@ -190,6 +191,8 @@ pub enum C2S {
         data: Vec<u8>,
     },
     GetAvatar { user_id: Id },
+    /// Replace your saved preferences (a JSON object, at most MAX_PREFS_BYTES).
+    SavePrefs { json: String },
     /// "I'm typing in this channel" (ephemeral; send at most every 3 s).
     Typing { channel_id: Id },
     /// Everything up to and including `message_id` has been seen. Markers
@@ -233,6 +236,8 @@ pub enum S2C {
         refresh_token: String,
         servers: Vec<ServerInfo>,
         voice: Vec<VoicePresence>,
+        /// Your saved preferences (JSON object; opaque to the server).
+        prefs: String,
     },
     Error { code: ErrorCode, message: String },
     Pong { t_client: i64, t_server: i64 },
@@ -254,6 +259,8 @@ pub enum S2C {
     /// A user's profile changed (e.g. new avatar); sent to all their servers.
     UserUpdated(UserInfo),
     Reaction { channel_id: Id, message_id: Id, emoji: String, user_id: Id, add: bool },
+    /// Your preferences changed on another device.
+    PrefsUpdated { json: String },
     /// Someone is typing (show for ~6 s unless refreshed).
     Typing { channel_id: Id, user_id: Id },
     /// Your read marker moved (from another of your devices).

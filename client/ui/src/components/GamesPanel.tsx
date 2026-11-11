@@ -5,9 +5,10 @@ import { createEffect, createSignal, For, on, onCleanup, onMount } from "solid-j
 import { call } from "../ipc";
 import { s, toast } from "../store";
 import { GAMES, type GameId } from "../games";
+import { prefs, setPrefs } from "../prefs";
 
 export default function GamesPanel(p: { close: () => void }) {
-  const [game, setGame] = createSignal<GameId>((() => { try { return (localStorage.getItem("game") as GameId) || "wordle"; } catch { return "wordle"; } })());
+  const [game, setGame] = createSignal<GameId>((GAMES.some((g) => g.id === prefs.game) ? prefs.game : "wordle") as GameId);
   let host!: HTMLDivElement;
   const rect = () => {
     const r = host.getBoundingClientRect();
@@ -15,7 +16,7 @@ export default function GamesPanel(p: { close: () => void }) {
   };
   const open = (g: GameId) => {
     setGame(g);
-    try { localStorage.setItem("game", g); } catch {}
+    if (prefs.game !== g) setPrefs({ game: g });
     call("games_open", { game: g, serverId: s.selServer ?? "0", ...rect() }).catch((e) => toast(String(e)));
   };
   // Results go to the server you are looking at.

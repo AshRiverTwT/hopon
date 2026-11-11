@@ -360,13 +360,12 @@ impl Session {
             self.st.announce_presence(uid, true);
         }
         let access_token = self.st.keys.access_token(uid, &name);
-        let avatar_v = servers.iter().flat_map(|s| s.members.iter()).find(|m| m.id == uid).map(|m| m.avatar_v);
-        let avatar_v = match avatar_v {
-            Some(v) => v,
-            None => sqlx::query_as::<_, (i32,)>("SELECT avatar_v FROM users WHERE id = $1")
-                .bind(uid).fetch_one(&self.st.db).await.map(|r| r.0 as u32).unwrap_or(0),
-        };
-        self.send(req, S2C::Authed { user: UserInfo { id: uid, name, avatar_v }, access_token, refresh_token, servers, voice }).await;
+        let (avatar_v, prefs): (i32, String) = sqlx::query_as("SELECT avatar_v, prefs FROM users WHERE id = $1")
+            .bind(uid)
+            .fetch_one(&self.st.db)
+            .await
+            .map_err(internal)?;
+        self.send(req, S2C::Authed { user: UserInfo { id: uid, name, avatar_v: avatar_v as u32 }, access_token, refresh_token, servers, voice, prefs }).await;
         Ok(())
     }
 
@@ -651,6 +650,26 @@ impl Session {
                     Ok(true) => guild.publish(frame(0, S2C::Reaction { channel_id, message_id, emoji, user_id: uid, add })),
                     Ok(false) => {} // already in that state
                     Err(e) => return Err((ErrorCode::BadRequest, e.into())),
+                }
+                self.send(req, S2C::Ok).await;
+                Ok(())
+            }
+            C2S::SavePrefs { json } => {
+                if json.len() > MAX_PREFS_BYTES {
+                    return Err((ErrorCode::BadRequest, "preferences too large".into()));
+                }
+                // Must be a JSON object; the server never interprets it further.
+                if !matches!(serde_json::from_str::<serde_json::Value>(&json), Ok(serde_json::Value::Object(_))) {
+                    return Err((ErrorCode::BadRequest, "preferences must be a JSON object".into()));
+                }
+                sqlx::query("UPDATE users SET prefs = $2 WHERE id = $1").bind(uid).bind(&json).execute(&self.st.db).await.map_err(internal)?;
+                // Live sync to your other devices (not this one).
+                let f = frame(0, S2C::PrefsUpdated { json });
+                let me = self.conn;
+                if let Some(v) = self.st.conns.get(&uid) {
+                    for (_, tx) in v.iter().filter(|(c, _)| *c != me) {
+                        let _ = tx.try_send(Out::Frame(f.clone()));
+                    }
                 }
                 self.send(req, S2C::Ok).await;
                 Ok(())

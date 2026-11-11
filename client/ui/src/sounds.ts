@@ -5,12 +5,9 @@
 let ctx: AudioContext | null = null;
 let closeTimer = 0;
 
-export const soundsEnabled = () => {
-  try { return localStorage.getItem("sounds") !== "0"; } catch { return true; }
-};
-export const setSoundsEnabled = (on: boolean) => {
-  try { localStorage.setItem("sounds", on ? "1" : "0"); } catch {}
-};
+import { prefs } from "./prefs";
+
+export const soundsEnabled = () => prefs.sounds;
 
 /** Call from the click that joins voice (satisfies autoplay rules). */
 export function openAudio() {

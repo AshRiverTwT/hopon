@@ -129,6 +129,11 @@ pub fn typing(core: C<'_>, channel_id: String) -> Res<()> {
 }
 
 #[tauri::command]
+pub async fn save_prefs(core: C<'_>, json: String) -> Res<()> {
+    core.request(C2S::SavePrefs { json }).await.map(|_| ())
+}
+
+#[tauri::command]
 pub async fn react(core: C<'_>, channel_id: String, message_id: String, emoji: String, add: bool) -> Res<()> {
     core.request(C2S::React { channel_id: pid(&channel_id)?, message_id: pid(&message_id)?, emoji, add }).await.map(|_| ())
 }

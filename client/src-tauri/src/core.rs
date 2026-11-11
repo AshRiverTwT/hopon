@@ -43,6 +43,8 @@ pub struct Store {
     pub voice: HashMap<Id, (Id, VoicePresence)>,
     pub pending: HashMap<u64, PendingSend>,
     pub access_token: Option<(String, i64)>,
+    /// Latest account preferences JSON (sent to the UI before any snapshot).
+    pub prefs: Option<String>,
     pub refresh_token: Option<String>,
     pub open_channel: Option<Id>,
 }
@@ -132,7 +134,14 @@ impl Core {
 
     pub fn attach_ui(&self, ch: Channel<UiEvent>) {
         let mut ui = self.ui.lock();
-        let snap = self.store.lock().session_event();
+        let (prefs, snap) = {
+            let s = self.store.lock();
+            (s.prefs.clone(), s.session_event())
+        };
+        // Prefs first: the UI uses them to choose the server to open.
+        if let Some(json) = prefs.filter(|_| snap_has_user(&snap)) {
+            let _ = ch.send(UiEvent::Prefs { json });
+        }
         let _ = ch.send(snap);
         for ev in ui.1.drain(..) {
             let _ = ch.send(ev);
@@ -401,7 +410,10 @@ impl Core {
 
     fn apply(self: &Arc<Self>, msg: &S2C, t_recv: i64) {
         match msg {
-            S2C::Authed { user, access_token, refresh_token, servers, voice } => {
+            S2C::Authed { user, access_token, refresh_token, servers, voice, prefs } => {
+                // Before the session snapshot, so the UI can pick your last server.
+                self.store.lock().prefs = Some(prefs.clone());
+                self.emit(UiEvent::Prefs { json: prefs.clone() });
                 {
                     let mut s = self.store.lock();
                     if s.me.as_ref().map(|u| u.id) != Some(user.id) {
@@ -605,6 +617,10 @@ impl Core {
                 }
                 self.emit(UiEvent::Reaction { channel_id: sid(*channel_id), message_id: sid(*message_id), emoji: emoji.clone(), user_id: sid(*user_id), add: *add });
             }
+            S2C::PrefsUpdated { json } => {
+                self.store.lock().prefs = Some(json.clone());
+                self.emit(UiEvent::Prefs { json: json.clone() });
+            }
             S2C::Typing { channel_id, user_id } => {
                 if self.store.lock().me.as_ref().map(|u| u.id) != Some(*user_id) {
                     self.emit(UiEvent::Typing { channel_id: sid(*channel_id), user_id: sid(*user_id) });
@@ -782,6 +798,10 @@ impl Core {
             }
         }
     }
+}
+
+fn snap_has_user(ev: &UiEvent) -> bool {
+    matches!(ev, UiEvent::Session { user: Some(_), .. })
 }
 
 /// Apply one reaction change to an aggregated list (idempotent).

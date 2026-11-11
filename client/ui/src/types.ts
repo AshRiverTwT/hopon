@@ -25,6 +25,7 @@ export type UiEvent =
   | { t: "reaction"; channelId: string; messageId: string; emoji: string; userId: string; add: boolean }
   | { t: "mentioned"; channelId: string }
   | { t: "typing"; channelId: string; userId: string }
+  | { t: "prefs"; json: string }
   | { t: "userPresence"; userId: string; online: boolean }
   | { t: "messages"; channelId: string; msgs: Msg[] }
   | { t: "msgState"; channelId: string; nonce: string; id: string; state: number }

@@ -434,6 +434,23 @@ async fn main() -> Result<()> {
         ensure!(quiet(&mut o, 400, |e| matches!(e, S2C::Typing { .. })).await, "not rate-limited");
         Ok(())
     });
+    pass &= check!("preferences: saved to the account, in the login snapshot, synced live, validated", {
+        let mut a1 = Client::connect(&url).await?;
+        let u = a1.signup("pref").await?;
+        let mut a2 = Client::connect(&url).await?;
+        let S2C::Authed { prefs, .. } = a2.call(C2S::Login { username: u.name.clone(), password: "benchmark-pass".into() }).await? else { bail!("login") };
+        ensure!(prefs == "{}", "fresh prefs {prefs}");
+        let j = r#"{"sounds":false,"pttKey":20,"recentEmoji":["🔥"]}"#.to_string();
+        ensure!(matches!(a1.call(C2S::SavePrefs { json: j.clone() }).await?, S2C::Ok));
+        let got = wait_for(&mut a2, |e| if let S2C::PrefsUpdated { json } = e { Some(json.clone()) } else { None }).await?;
+        ensure!(got == j, "live sync");
+        let mut a3 = Client::connect(&url).await?;
+        let S2C::Authed { prefs, .. } = a3.call(C2S::Login { username: u.name.clone(), password: "benchmark-pass".into() }).await? else { bail!("login") };
+        ensure!(prefs == j, "not persisted: {prefs}");
+        ensure!(a1.call(C2S::SavePrefs { json: "[1,2]".into() }).await.is_err(), "non-object accepted");
+        ensure!(a1.call(C2S::SavePrefs { json: format!("{{\"x\":\"{}\"}}", "a".repeat(MAX_PREFS_BYTES)) }).await.is_err(), "oversized accepted");
+        Ok(())
+    });
     pass &= check!("logout revokes the refresh token", {
         let mut c = Client::connect(&url).await?;
         let S2C::Authed { refresh_token, .. } = c.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("login") };

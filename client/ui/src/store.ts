@@ -5,6 +5,7 @@ import { findId, mergeMsgs, trimTop } from "./merge";
 import { cmpId, type Channel, type Msg, type Presence, type Server, type UiEvent, type User } from "./types";
 import { chime, closeAudio } from "./sounds";
 import { encodeMentions } from "./rich";
+import { applyPrefs, prefs, resetPrefs, setPrefs } from "./prefs";
 
 /** The open channel holds at most this many messages in the DOM model. */
 const OPEN_CAP = 5000;
@@ -190,6 +191,7 @@ function apply(e: UiEvent, painted: string[]) {
     case "session": {
       set("ready", true);
       const changedUser = s.user?.id !== e.user?.id;
+      const loggingOut = !e.user && !!s.user;
       set("user", e.user);
       set("servers", reconcile(e.servers, { key: "id" }));
       const pres: Record<string, Presence & { serverId: string }> = {};
@@ -199,12 +201,13 @@ function apply(e: UiEvent, painted: string[]) {
       }
       set("presence", reconcile(pres));
       absorbServers(e.servers, true);
+      if (loggingOut) resetPrefs();
       if (changedUser) {
         set({ selServer: null, selChannel: null, stage: null, msgs: [] });
       }
       if (e.user && !s.selServer && e.servers.length) {
-        const last = remembered("lastServer");
-        selectServer(e.servers.some((x) => x.id === last) ? last! : e.servers[0].id);
+        const last = prefs.lastServer;
+        selectServer(last && e.servers.some((x) => x.id === last) ? last : e.servers[0].id);
       }
       break;
     }
@@ -244,6 +247,9 @@ function apply(e: UiEvent, painted: string[]) {
       }));
       break;
     }
+    case "prefs":
+      applyPrefs(e.json);
+      break;
     case "typing":
       noteTyping(e.channelId, e.userId, true);
       break;
@@ -350,18 +356,11 @@ function apply(e: UiEvent, painted: string[]) {
 
 // ---------- actions ----------
 
-function remembered(k: string): string | null {
-  try { return localStorage.getItem(k); } catch { return null; }
-}
-function remember(k: string, v: string) {
-  try { localStorage.setItem(k, v); } catch {}
-}
-
 export function selectServer(id: string) {
   set({ selServer: id, stage: null });
-  remember("lastServer", id);
+  if (prefs.lastServer !== id) setPrefs({ lastServer: id });
   const sv = s.servers.find((x) => x.id === id);
-  const last = remembered(`lastChannel:${id}`);
+  const last = prefs.lastChannel[id];
   const ch = sv?.channels.find((c) => c.id === last && !c.voice) ?? sv?.channels.find((c) => !c.voice);
   if (ch) selectChannel(ch.id);
 }
@@ -373,7 +372,7 @@ export async function selectChannel(id: string) {
     set({ selChannel: id, stage: null, msgs: [], more: true, loadingOlder: false, editing: null, replyTo: null, jump: null, dividerAfter: s.reads[id] ?? null });
     set("mentions", id, 0);
     const sv = s.servers.find((x) => x.channels.some((c) => c.id === id));
-    if (sv) remember(`lastChannel:${sv.id}`, id);
+    if (sv && prefs.lastChannel[sv.id] !== id) setPrefs({ lastChannel: { ...prefs.lastChannel, [sv.id]: id } });
   });
   const msgs = await call<Msg[]>("open_channel", { channelId: id });
   if (seq !== openSeq) return;
