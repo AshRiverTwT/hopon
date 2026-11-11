@@ -21,6 +21,16 @@ Three kinds of numbers below. Only the first kind is a real measurement of
 this code; please run the Windows steps in
 [Measuring on Windows](#measuring-on-windows) for the rest.
 
+### Measured on Windows (user's PC, local kit)
+
+| item | result | target |
+|---|---|---|
+| process start → first paint (5 runs) | **657 ms** median, 677 ms worst | < 1 s |
+| idle CPU, app + 6 WebView2 processes, 60 s | **0.13 %** of all cores | < 1 % |
+| idle RAM, app + WebView2, private | **190 MB** (working set 366 MB, counts shared pages per process) | < 200 MB (revised from 150) |
+| functional smoke test against the Windows server | 20 / 20 pass | — |
+| server-issued voice grants accepted by LiveKit (Windows build) | ok | — |
+
 ### Measured (Linux cloud container, 4 vCPU, server + clients on one host)
 
 **Text, protocol level** (`msg_rtt`, loopback network, 100 msg/s):
@@ -90,7 +100,6 @@ polling otherwise.
 - Voice mouth-to-ear with real devices (WASAPI path, MMCSS, echo cancellation).
 - Two-PC voice test and between-region voice.
 - 1-hour two-user call on real devices (the network path passed 1 hour with 0 missed clicks).
-- Windows cold start, idle RAM and idle CPU (WebView2).
 - Text round trip over a real LAN and over the internet.
 
 The exact commands are in [Measuring on Windows](#measuring-on-windows).
