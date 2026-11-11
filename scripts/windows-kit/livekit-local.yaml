@@ -1,8 +1,9 @@
 # LiveKit for a single Windows PC / LAN test. Not for production.
+# Media ports avoid 50000-50059, a common Windows reserved range.
 port: 7880
 rtc:
-  port_range_start: 50000
-  port_range_end: 50200
+  port_range_start: 51000
+  port_range_end: 51200
   tcp_port: 7881
   use_external_ip: false
 keys:
