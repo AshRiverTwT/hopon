@@ -29,8 +29,9 @@ pub enum H {
     WsRtt,
     /// Click "join" → SFU connected and mic published.
     VoiceJoin,
-    /// Click "join" → first remote audio frame played.
-    VoiceFirstAudio,
+    /// Click "join" → first remote audio track subscribed (media flowing;
+    /// a lower bound for "hear audio", which needs the device on Windows).
+    VoiceRemoteSubscribed,
 }
 const NAMES: [&str; 9] = [
     "text: input->local echo paint",
@@ -41,7 +42,7 @@ const NAMES: [&str; 9] = [
     "text: core emit->paint",
     "net: ws ping rtt",
     "voice: click->joined+publishing",
-    "voice: click->first remote audio",
+    "voice: click->remote track subscribed",
 ];
 
 #[derive(Clone, Copy)]

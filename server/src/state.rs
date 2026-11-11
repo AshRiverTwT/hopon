@@ -69,8 +69,13 @@ pub struct State {
     pub voice: Mutex<HashMap<Id, VoiceEntry>>,
     pub persist: mpsc::Sender<PersistOp>,
     pub metrics: Metrics,
+    /// (author, nonce) → (message, accepted at µs). Makes client resends after
+    /// a reconnect idempotent. Entries live `NONCE_TTL_US`.
+    pub nonces: DashMap<(Id, u64), (hopon_shared::Message, i64)>,
     next_conn: AtomicU64,
 }
+
+pub const NONCE_TTL_US: i64 = 5 * 60 * 1_000_000;
 
 pub fn kind_from_i16(k: i16) -> ChannelKind {
     if k == 1 { ChannelKind::Voice } else { ChannelKind::Text }
@@ -95,8 +100,15 @@ impl State {
             voice: Mutex::new(HashMap::new()),
             persist,
             metrics: Metrics::new(),
+            nonces: DashMap::new(),
             next_conn: AtomicU64::new(1),
         }
+    }
+
+    /// Drop expired nonce entries (called periodically).
+    pub fn prune_nonces(&self) {
+        let cutoff = hopon_shared::time::now_us() - NONCE_TTL_US;
+        self.nonces.retain(|_, (_, t)| *t > cutoff);
     }
 
     pub fn conn_id(&self) -> u64 {

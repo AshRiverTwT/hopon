@@ -8,7 +8,7 @@ use hopon_shared::{ChannelKind, C2S, S2C};
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::ipc::Channel;
-use tauri::{Manager, State};
+use tauri::State;
 
 type C<'a> = State<'a, Arc<Core>>;
 
@@ -21,8 +21,9 @@ pub fn ui_subscribe(core: C<'_>, events: Channel<UiEvent>) {
     core.attach_ui(events);
 }
 
-/// First frame painted: show the window (it starts hidden to avoid a white
-/// flash) and record cold-start timings.
+/// First frame painted: record cold-start timings. The window is visible from
+/// creation (a hidden webview does not run requestAnimationFrame, which would
+/// stall this signal); `backgroundColor` avoids a white flash.
 #[tauri::command]
 pub fn ui_ready(app: tauri::AppHandle, core: C<'_>, t_paint_ms: f64) {
     let t_paint = ms_to_us(t_paint_ms);
@@ -36,10 +37,6 @@ pub fn ui_ready(app: tauri::AppHandle, core: C<'_>, t_paint_ms: f64) {
     };
     *core.perf.startup.lock() = Some(s);
     tracing::info!("startup: {s:?}");
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
     if std::env::args().any(|a| a == "--perf-exit") {
         let p = std::env::temp_dir().join("hopon-startup.json");
         let _ = std::fs::write(p, serde_json::to_vec(&s).unwrap_or_default());

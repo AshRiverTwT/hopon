@@ -53,7 +53,8 @@ fn opts() -> RoomOptions {
 }
 
 fn publish_opts() -> TrackPublishOptions {
-    TrackPublishOptions { source: TrackSource::Microphone, dtx: false, red: true, ..Default::default() }
+    let red = arg::<String>("--red", "on".into()) == "on";
+    TrackPublishOptions { source: TrackSource::Microphone, dtx: false, red, ..Default::default() }
 }
 
 async fn first_audio(events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>, from: Option<&str>) -> Result<RemoteAudioTrack> {
@@ -135,7 +136,9 @@ async fn main() -> Result<()> {
     let n_clicks = (secs * 2) as usize;
     let sent: Arc<Vec<AtomicI64>> = Arc::new((0..n_clicks).map(|_| AtomicI64::new(0)).collect());
 
-    let src = || NativeAudioSource::new(AudioSourceOptions::default(), SR, 1, 20);
+    // Source queue: the app uses the platform ADM instead, so keep this minimal.
+    let queue_ms: u32 = arg("--queue-ms", 10);
+    let src = || NativeAudioSource::new(AudioSourceOptions::default(), SR, 1, queue_ms);
 
     let (lat, detected) = match mode.as_str() {
         "loopback" => {

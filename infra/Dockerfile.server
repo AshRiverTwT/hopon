@@ -1,7 +1,8 @@
 FROM rust:1-bookworm AS build
 WORKDIR /src
 COPY . .
-RUN cargo build --release -p hopon-server
+# The desktop client is not in the build context; drop it from the workspace.
+RUN sed -i 's|, "client/src-tauri"||' Cargo.toml && cargo build --release -p hopon-server
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*

@@ -121,6 +121,33 @@ async fn main() -> Result<()> {
         }
         Ok(())
     });
+    pass &= check!("resend with same nonce is idempotent (one row, same id)", {
+        let t = now_us();
+        let mut a2 = Client::connect(&url).await?;
+        a2.call(C2S::Refresh { refresh_token: refresh.clone() }).await.map(|r| if let S2C::Authed { refresh_token, .. } = r { refresh = refresh_token; }).ok();
+        let send = C2S::Send { channel_id: text, content: "once".into(), nonce: 4242, t_input: t, t_client_send: t };
+        a.send(send.clone()).await?;
+        let S2C::Message(first) = next_msg(&mut b).await? else { bail!("expected message") };
+        // Same nonce from another socket of the same user (as after a reconnect).
+        a2.send(send).await?;
+        let (mut echo_id, mut acked) = (0, false);
+        while echo_id == 0 || !acked {
+            let f = tokio::time::timeout(std::time::Duration::from_secs(5), a2.recv()).await??;
+            match f.msg {
+                S2C::Message(m) if m.nonce == 4242 => echo_id = m.id,
+                S2C::Ack { id, nonce: 4242, .. } => { ensure!(id == first.id, "ack id differs"); acked = true }
+                _ => {}
+            }
+        }
+        ensure!(echo_id == first.id, "resend got a new id");
+        // b must not see a second copy.
+        if let Ok(Ok(f)) = tokio::time::timeout(std::time::Duration::from_millis(300), b.recv()).await {
+            if let S2C::Message(m) = f.msg { bail!("duplicate broadcast: {}", m.content); }
+        }
+        let S2C::History { messages, .. } = b.call(C2S::History { channel_id: text, before: None, limit: 5 }).await? else { bail!("h") };
+        ensure!(messages.iter().filter(|m| m.content == "once").count() == 1, "duplicate row");
+        Ok(())
+    });
     pass &= check!("empty and oversized messages rejected", {
         ensure!(a.call(C2S::Send { channel_id: text, content: "   ".into(), nonce: 1, t_input: 0, t_client_send: 0 }).await.is_err());
         ensure!(a.call(C2S::Send { channel_id: text, content: "x".repeat(4001), nonce: 1, t_input: 0, t_client_send: 0 }).await.is_err());
@@ -138,11 +165,11 @@ async fn main() -> Result<()> {
     });
     pass &= check!("history paging (newest first, before cursor, more flag)", {
         let S2C::History { messages: p1, more, .. } = b.call(C2S::History { channel_id: text, before: None, limit: 8 }).await? else { bail!("h") };
-        ensure!(p1.len() == 8 && more && p1[0].content == "m19");
+        ensure!(p1.len() == 8 && more && p1[0].content == "once" && p1[1].content == "m19");
         let S2C::History { messages: p2, .. } = b.call(C2S::History { channel_id: text, before: Some(p1[7].id), limit: 8 }).await? else { bail!("h") };
-        ensure!(p2[0].id < p1[7].id && p2[0].content == "m11");
+        ensure!(p2[0].id < p1[7].id && p2[0].content == "m12");
         let S2C::History { messages: p3, more, .. } = b.call(C2S::History { channel_id: text, before: Some(p2[7].id), limit: 8 }).await? else { bail!("h") };
-        ensure!(p3.len() == 4 && !more, "got {} more={more}", p3.len());
+        ensure!(p3.len() == 5 && !more, "got {} more={more}", p3.len());
         ensure!(p3.last().unwrap().content == "edited", "edit not persisted");
         Ok(())
     });
@@ -150,7 +177,7 @@ async fn main() -> Result<()> {
         ensure!(matches!(a.call(C2S::Delete { channel_id: text, message_id: first_id }).await?, S2C::Ok));
         loop { if let S2C::Deleted { id, .. } = next_msg(&mut b).await? { ensure!(id == first_id); break; } }
         let S2C::History { messages, .. } = b.call(C2S::History { channel_id: text, before: None, limit: 100 }).await? else { bail!("h") };
-        ensure!(messages.len() == 19 && messages.iter().all(|m| m.id != first_id));
+        ensure!(messages.len() == 20 && messages.iter().all(|m| m.id != first_id));
         Ok(())
     });
     pass &= check!("owner creates channel; members are told", {

@@ -31,14 +31,14 @@ services:
     restart: unless-stopped
 
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.13.11
     network_mode: host
     command: ["--config", "/etc/livekit.yaml"]
     volumes: ["./generated/livekit.yaml:/etc/livekit.yaml:ro"]
     restart: unless-stopped
 
   coturn:
-    image: coturn/coturn:latest
+    image: coturn/coturn@sha256:bbefd3e1fdfdc0d58770fe01b581fd8b00d9f3a5580d00acb77cf719a6bc78e3  # 4.18.0
     network_mode: host
     command: ["-c", "/etc/turnserver.conf"]
     volumes: ["./generated/turnserver.conf:/etc/turnserver.conf:ro"]

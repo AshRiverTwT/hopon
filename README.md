@@ -1,0 +1,331 @@
+# HopOn
+
+Low-latency Windows chat app: real-time text channels and voice channels.
+Rust everywhere: Tauri 2 client (Rust core, thin SolidJS UI), Axum/Tokio
+server, PostgreSQL, LiveKit SFU for voice. Latency is the primary design
+constraint, and every stage is instrumented.
+
+```
+client/      Tauri 2 app: src-tauri/ (Rust core: net, cache, voice, PTT) + ui/ (SolidJS)
+server/      Axum + Tokio + SQLx chat server
+shared/      wire protocol (MessagePack), snowflake IDs, clock sync, HDR histograms
+bench/       msg_rtt, voice_loopback, e2e_feed, smoke, voice_grant_check
+infra/       docker compose: Postgres, server, LiveKit, coturn
+scripts/     Windows cross-build, size report, Windows measurement (PowerShell)
+results/     raw benchmark output (JSON lines)
+```
+
+## Results
+
+Three kinds of numbers below. Only the first kind is a real measurement of
+this code; please run the Windows steps in
+[Measuring on Windows](#measuring-on-windows) for the rest.
+
+### Measured (Linux cloud container, 4 vCPU, server + clients on one host)
+
+**Text, protocol level** (`msg_rtt`, loopback network, 100 msg/s):
+
+| stage | p50 | p95 | p99 |
+|---|---|---|---|
+| WebSocket ping RTT | 0.07 ms | 0.09 ms | 0.13 ms |
+| author send → receiver decoded | 0.30 ms | 0.43 ms | 0.50 ms |
+| author send → durable ack (Postgres commit) | 1.29 ms | 1.70 ms | 2.25 ms |
+| server recv → fan-out | 0.008 ms | 0.011 ms | 0.024 ms |
+| send → receiver, **200 receivers**, 200 msg/s (600k deliveries) | 0.96 ms | 1.44 ms | 1.75 ms |
+
+**Text, real client paint** (`e2e_feed` driving the actual app, Rust core +
+WebKitGTK under Xvfb with *software* rendering, 600 messages at 20/s):
+
+| stage | p50 | p95 | p99 |
+|---|---|---|---|
+| remote sender input → painted in app (clock-synced) | 21.3 ms | 28.7 ms | 33.1 ms |
+| core event emitted → painted | 21.0 ms | 28.2 ms | 32.7 ms |
+
+Target: < 100 ms LAN p95. Almost all of the 28 ms is waiting for the next
+frame plus CPU rasterization; WebView2 with a GPU should be lower.
+
+**Voice, network path** (`voice_loopback`, two participants through a local
+LiveKit v1.13.11, 20 ms Opus, RED on, no packet loss):
+
+| stage | p50 | p95 | p99 | clicks missed |
+|---|---|---|---|---|
+| encode → RTP/UDP → SFU → jitter buffer → decode | 67.5 ms | 67.6 ms | 77.4 ms | 0 / 120 |
+
+This excludes the audio devices but includes the SDK's synthetic 10 ms
+capture and playout timers, which the app replaces with the real WASAPI
+callbacks. **Mouth-to-ear estimate: ~98 ms** (= 68 + ~30 ms for the WASAPI
+capture and render buffers). The +30 ms is an estimate, not a measurement.
+Target: 150 ms.
+
+**Other measured items**
+
+| item | result | target |
+|---|---|---|
+| Windows installer (NSIS, LZMA) | **9.34 MB** | < 30 MB |
+| `hopon.exe` uncompressed (mostly libwebrtc) | 29.2 MB | — |
+| UI bundle | 43 KB JS + 6 KB CSS | — |
+| client start → chat socket connected | 2.3–6.4 ms | pre-connect |
+| client start → first paint (WebKitGTK, software GL) | 666–696 ms | < 1 s |
+| voice join (connect + publish + subscribe), loopback | 166 ms | < 1 s |
+| functional smoke test (`smoke`) | 20 / 20 checks pass | — |
+| 1-hour voice loopback, missed clicks | see `results/voice.jsonl` (`local-1h`) | 0 dropouts |
+
+### Not representative (measured here, but the wrong platform)
+
+Linux idle numbers are dominated by WebKitGTK's software renderer (llvmpipe)
+and say little about WebView2: idle CPU 0.97% (core process) + 2.5%
+(WebKit, repainting the caret on the CPU); RSS 160 MB + 290 MB. The Rust core
+itself does no work while idle: one 10 s keepalive ping, and no timers or
+polling otherwise.
+
+### Not yet measured (need Windows hardware)
+
+- Voice mouth-to-ear with real devices (WASAPI path, MMCSS, echo cancellation).
+- Two-PC voice test and between-region voice.
+- 1-hour two-user call on real devices.
+- Windows cold start, idle RAM and idle CPU (WebView2).
+- Text round trip over a real LAN and over the internet.
+
+The exact commands are in [Measuring on Windows](#measuring-on-windows).
+
+## Latency budget
+
+| voice stage | budget (LAN) | where |
+|---|---|---|
+| WASAPI capture buffer | 10 ms | libwebrtc platform ADM |
+| AEC3 / NS / AGC | ~1 ms | libwebrtc APM |
+| Opus framing (20 ms) + look-ahead | 26 ms | libwebrtc |
+| network client → SFU → client | 2 ms (LAN) / 40 ms (internet) | UDP/SRTP |
+| SFU forwarding | 1 ms | LiveKit |
+| jitter buffer (NetEq, adaptive) | 20–40 ms | libwebrtc |
+| decode + PLC, render buffer | ~15 ms | libwebrtc + WASAPI |
+| **total** | **~86 ms LAN, ~134 ms internet** | target 150 / 200 |
+
+| text stage | budget | measured |
+|---|---|---|
+| UI → core IPC, encode, send | 1 ms | — |
+| network + server + network | 2 ms LAN / 80 ms internet | 0.43 ms p95 loopback |
+| decode, state, IPC to webview | 1 ms | included below |
+| batched render (next frame) | ≤ 16 ms | 28 ms p95 with software rendering |
+| **total** | ~20 ms LAN / ~100 ms internet | target 100 / 200 |
+
+## Design (what makes it fast)
+
+**Transport**
+- One WebSocket per client, binary MessagePack frames. Structs are encoded as
+  arrays, so a chat message with its full trace is under 100 bytes.
+- `TCP_NODELAY` on every socket.
+- Writes are coalesced: everything that is ready gets fed to the socket, then
+  flushed once.
+- The client connects, syncs clocks and authenticates at startup, before the
+  user can click anything.
+- Voice uses LiveKit over UDP/SRTP. coturn is the TURN fallback and ICE-TCP the
+  step before it.
+
+**Server**
+- Messages are fanned out from memory before the database write. A
+  per-channel lock covers ID assignment and broadcast, so fan-out order equals
+  ID order.
+- A single persister batches inserts (one `UNNEST` insert per transaction) and
+  acks the author after commit.
+- Edits and deletes go through the same ordered queue, so they can never
+  overtake the insert they refer to.
+- Resends are idempotent: `(author, nonce)` is remembered for 5 minutes, so a
+  message resent after a reconnect keeps its ID and is never duplicated.
+- One `broadcast` per server (guild), not per channel. A user in 10 servers
+  costs 10 receivers, and each event is encoded once and shared as `Bytes`.
+- A receiver that lags behind is disconnected; the client reconnects and
+  resyncs rather than silently missing messages.
+- Graceful shutdown drains the persistence queue.
+- Argon2id runs on the blocking pool. Access tokens are 15-minute JWTs;
+  refresh tokens are opaque, rotated on every use and stored as SHA-256.
+  Refresh tokens are kept with Windows DPAPI on the client.
+- The history index is the primary key `(channel_id, id)`. IDs are snowflakes,
+  so "before X" paging needs no extra column.
+
+**Client**
+- All networking, state, cache and voice live in Rust. The webview only
+  renders.
+- Events are queued and applied once per animation frame in a single Solid
+  `batch`. Updates are fine-grained; the list is never re-rendered wholesale.
+- Your own message is painted optimistically in the same frame as Enter, then
+  reconciled by nonce when the server copy arrives.
+- The message list is virtualized: only rows near the viewport exist, and
+  measured row heights are cached. Merging into a 5,000-message channel takes
+  0.14 ms.
+- SQLite cache (WAL, one writer thread, coalesced transactions) gives instant
+  channel switches and offline scroll-back. When online, older pages come from
+  the server, so the cache can never show gaps.
+- Hovering a voice channel pre-fetches its join grant. Audio devices open in
+  parallel with SFU signaling and are closed when you leave, so idle voice
+  costs nothing.
+- Push-to-talk uses a `WH_KEYBOARD_LL` hook on its own thread. The hook only
+  flips an atomic and wakes a task.
+- Release builds use fat LTO, `panic = abort` and stripping, with no devtools
+  and no Tauri plugins. The CRT is linked statically, so no VC++
+  redistributable is needed.
+
+### Deviations from the original spec, and why
+
+1. **Voice audio uses libwebrtc's platform ADM, not `cpal` + `rtrb` +
+   `audiopus` + `webrtc-audio-processing`.** The LiveKit SDK already contains
+   Opus, NetEq (jitter buffer and packet loss concealment) and the APM
+   (AEC3/NS/AGC). On Windows its platform ADM is event-driven WASAPI with
+   10 ms buffers on MMCSS "Pro Audio" threads; the prebuilt `webrtc.lib`
+   imports `AvSetMmThreadCharacteristicsA` with "Pro Audio". NetEq feeds the
+   render callback directly, so there is no extra ring buffer, and AEC3 gets
+   the true playout signal. A cpal path would add a buffer stage, a second
+   copy of libwebrtc and a clock-drift problem.
+2. **20 ms Opus frames.** That is libwebrtc's default packet time, and it
+   meets the budget with room to spare. 10 ms would save about 10 ms but
+   double the packet rate; the Rust SDK does not expose it directly.
+3. **Speaking indicators come from the SFU's active-speaker events, every
+   100 ms** (configured in `livekit.yaml`; the default is 500 ms). The platform
+   ADM does not expose local PCM.
+4. **Broadcast per server rather than per channel.** See Server above.
+5. **IPC between the Rust core and the webview is JSON.** MessagePack is used
+   on the wire; for IPC, JSON parsing in the webview is faster than a JS
+   MessagePack decoder.
+6. **Not in v1:** Redis pub/sub for multiple server instances (single
+   instance only), `hopon://` deep-link registration (paste the invite link or
+   code instead), code signing of the installer.
+
+## Setup
+
+### Server (development)
+
+```bash
+# Postgres 16 and LiveKit running locally; see infra/ for compose.
+export DATABASE_URL=postgres://postgres@127.0.0.1/hopon
+export HOPON_JWT_SECRET=change-me
+export LIVEKIT_URL=ws://127.0.0.1:7880 LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=secret-secret-secret-secret-secret
+cargo run --release -p hopon-server   # migrations run automatically
+```
+
+Environment variables:
+
+| variable | default |
+|---|---|
+| `HOPON_BIND` | `0.0.0.0:8080` |
+| `HOPON_DB_POOL` | CPU count |
+| `HOPON_SEND_RATE` | 10 messages/s per connection, burst 3× |
+| `HOPON_NODE_ID` | 1 |
+
+### Production (one region)
+
+```bash
+cp infra/.env.example infra/.env      # set secrets, hostnames
+infra/render-config.sh                # writes infra/generated/{livekit.yaml,turnserver.conf}
+docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --build
+```
+
+Open these ports:
+
+| port | service |
+|---|---|
+| TCP 8080 | chat; put it behind TLS and use `wss://` |
+| TCP 7880 | LiveKit signaling; also behind TLS |
+| TCP 7881 | ICE-TCP |
+| UDP 50000–50200 | media |
+| TCP/UDP 3478, UDP 50300–50400 | TURN |
+
+Not verified in this session: the Docker image build itself. Docker Hub
+rate-limited the base image pull, so only the build context was checked: the
+server compiles from it.
+
+Check that the SFU accepts the server's grants:
+
+```bash
+cargo run --release -p hopon-bench --bin voice_grant_check -- --url ws://HOST:8080/ws
+```
+
+### Windows client
+
+Build on Linux (cross-compile) with Rust, the `x86_64-pc-windows-msvc`
+target, `cargo-xwin`, clang ≥ 19, lld, NSIS (`makensis`), node and pnpm:
+
+```bash
+scripts/build-windows.sh
+```
+
+It produces:
+
+- `target/x86_64-pc-windows-msvc/release/bundle/nsis/HopOn_0.1.0_x64-setup.exe`
+- `voice_loopback.exe`, `msg_rtt.exe`, `smoke.exe` and `e2e_feed.exe` in the
+  same `release/` directory.
+
+You can also build on Windows: `pnpm --dir client/ui install`, then
+`cd client/src-tauri && ../ui/node_modules/.bin/tauri build`.
+
+The installer installs per-user, with no admin needed, and pulls the WebView2
+runtime only if it is missing. Set the server URL on the login screen, under
+"Server", for example `wss://chat.example.com/ws`. Press Ctrl+Shift+P in the
+app for the live latency overlay.
+
+## Benchmarks
+
+```bash
+# text round trip, p50/p95/p99 per stage
+cargo run --release -p hopon-bench --bin msg_rtt -- --url ws://HOST:8080/ws --n 2000 --rate 50 [--receivers 200]
+# every chat feature, pass/fail
+cargo run --release -p hopon-bench --bin smoke -- --url ws://HOST:8080/ws
+# voice network path through the SFU (Linux needs clang >= 21 for libwebrtc: CC=clang-21 CXX=clang++-21)
+cargo run --release -p hopon-bench --features voice --bin voice_loopback -- --url ws://SFU:7880 --key KEY --secret SECRET --secs 60
+```
+
+Results are appended to `results/*.jsonl`.
+
+The server exposes its own stage timings at `GET /metrics`: recv → fan-out,
+enqueue → commit, rows per transaction, lagged disconnects and persistence
+failures. `GET /metrics/reset` clears them.
+
+### Measuring on Windows
+
+These cover the numbers still listed as unmeasured.
+
+1. **Cold start, idle RAM and idle CPU.** Install, log in once, then run:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\measure-windows.ps1
+   ```
+
+   It reports process start → first paint (median of 5), and RAM and CPU
+   summed over `hopon.exe` and all of its WebView2 processes. The targets are
+   < 1 s, < 150 MB and < 1%.
+
+2. **Text over LAN or internet**, from a second PC:
+
+   ```powershell
+   msg_rtt.exe --url ws://SERVER:8080/ws --n 2000 --rate 50 --label lan
+   ```
+
+   In the app, Ctrl+Shift+P shows "remote input → paint (synced)" for messages
+   arriving from another PC.
+
+3. **Voice network path, two PCs.** Start the echo side on PC B first:
+
+   ```powershell
+   voice_loopback.exe --mode echo --room t1 --url ws://SFU:7880 --key KEY --secret SECRET
+   ```
+
+   Then measure from PC A:
+
+   ```powershell
+   voice_loopback.exe --mode measure --room t1 --url ws://SFU:7880 --key KEY --secret SECRET --secs 120
+   ```
+
+   PC A reports one-way latency as RTT/2 with p50/p95/p99, plus missed clicks.
+
+4. **Mouth-to-ear with real devices.** Join the same voice channel in the app
+   on two PCs.
+   - Clap or tap near PC A's microphone while recording both PC A's mic and
+     PC B's speaker with one external recorder (a phone placed between them
+     works).
+   - The gap between the two waveforms is mouth-to-ear. Measure 20 or more
+     claps and take the p95.
+   - Ctrl+Shift+P also shows click → joined and click → remote track
+     subscribed.
+
+5. **One-hour call.** Keep two PCs in a voice channel for an hour with audio
+   playing, then check the app log and the overlay. `voice_loopback --secs
+   3600` gives the same check for the network path, reporting missed clicks.

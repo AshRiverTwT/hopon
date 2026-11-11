@@ -1,6 +1,7 @@
 //! Voice channels: LiveKit (WebRTC over UDP, SFU) with libwebrtc's platform
 //! audio device module. On Windows that is WASAPI, event-driven, 10 ms
-//! buffers, with its threads at MMCSS "Pro Audio" priority. NetEq (adaptive
+//! buffers, with its threads at MMCSS "Pro Audio" priority (the prebuilt
+//! webrtc.lib imports AvSetMmThreadCharacteristicsA with "Pro Audio"). NetEq (adaptive
 //! jitter buffer + packet loss concealment) feeds the render callback
 //! directly, so there is no extra playout buffer, and AEC3 gets the true
 //! playout signal as its reference.
@@ -205,13 +206,13 @@ impl Voice {
         let events = {
             let core = core.clone();
             tauri::async_runtime::spawn(async move {
-                let mut first_audio = true;
+                let mut first_track = true;
                 while let Some(ev) = events.recv().await {
                     match ev {
                         RoomEvent::TrackSubscribed { publication, .. } => {
-                            if first_audio {
-                                first_audio = false;
-                                core.perf.rec(H::VoiceFirstAudio, now_us() - t_click);
+                            if first_track {
+                                first_track = false;
+                                core.perf.rec(H::VoiceRemoteSubscribed, now_us() - t_click);
                             }
                             if core.voice.prefs.lock().deafened {
                                 publication.set_enabled(false);

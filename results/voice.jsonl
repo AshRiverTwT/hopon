@@ -1,0 +1,3 @@
+{"label":"local-sfu","missed":0,"mode":"loopback","secs":60,"stats":{"count":120,"max_ms":82.431,"mean_ms":67.69013333333334,"p50_ms":67.455,"p95_ms":67.647,"p99_ms":77.439},"t":1794379838104504}
+{"label":"local --queue-ms 10 --red on","missed":0,"mode":"loopback","secs":30,"stats":{"count":60,"max_ms":84.287,"mean_ms":69.68959999999998,"p50_ms":69.503,"p95_ms":69.631,"p99_ms":84.287},"t":1794379933833560}
+{"label":"local --queue-ms 10 --red off","missed":0,"mode":"loopback","secs":30,"stats":{"count":60,"max_ms":73.087,"mean_ms":70.66906666666667,"p50_ms":70.527,"p95_ms":72.831,"p99_ms":73.087},"t":1794379966988401}

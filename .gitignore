@@ -4,3 +4,4 @@ client/ui/dist/
 *.log
 .env
 results/*.tmp
+/hopon.bundle

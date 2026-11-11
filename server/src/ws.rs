@@ -355,6 +355,24 @@ impl Session {
                 if chan.kind != ChannelKind::Text {
                     return Err((ErrorCode::BadRequest, "not a text channel".into()));
                 }
+                // A resend after reconnect: already fanned out. Echo to this
+                // socket only and re-queue the (idempotent) insert so the author
+                // gets its durable ack on the new connection.
+                if nonce != 0 {
+                    if let Some(prev) = self.st.nonces.get(&(uid, nonce)).map(|e| e.0.clone()) {
+                        self.send(0, S2C::Message(prev.clone())).await;
+                        let op = PersistOp::Insert {
+                            channel_id: prev.channel_id,
+                            id: prev.id,
+                            author_id: uid,
+                            content: prev.content,
+                            t_enqueue: now_us(),
+                            ack: AckTo { conn: self.tx.clone(), req, nonce, t_server_recv: t_recv },
+                        };
+                        self.st.persist.send(op).await.map_err(internal)?;
+                        return Ok(());
+                    }
+                }
                 // Hot path: assign ID, fan out, then persist asynchronously.
                 let id = {
                     let _order = chan.order.lock();
@@ -369,8 +387,11 @@ impl Session {
                         nonce,
                         trace: Some(Trace { t_input, t_client_send, t_server_recv: t_recv, t_server_send: t_send }),
                     };
-                    guild.publish(frame(0, S2C::Message(msg)));
+                    guild.publish(frame(0, S2C::Message(msg.clone())));
                     self.st.metrics.fanout.lock().record_us(t_send - t_recv);
+                    if nonce != 0 {
+                        self.st.nonces.insert((uid, nonce), (msg, t_send));
+                    }
                     id
                 };
                 self.st.metrics.messages.fetch_add(1, Ordering::Relaxed);

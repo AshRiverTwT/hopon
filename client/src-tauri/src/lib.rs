@@ -51,16 +51,6 @@ pub fn run() {
                     }
                 });
             }
-            // Never leave the window hidden if the UI fails to report.
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                if let Some(w) = handle.get_webview_window("main") {
-                    if !w.is_visible().unwrap_or(true) {
-                        let _ = w.show();
-                    }
-                }
-            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

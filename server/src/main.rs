@@ -28,6 +28,16 @@ async fn main() -> Result<()> {
     let (ptx, prx) = mpsc::channel(persist::QUEUE);
     let st = Arc::new(state::State::new(cfg.clone(), db, ptx));
     let persister = tokio::spawn(persist::run(st.clone(), prx));
+    {
+        let st = st.clone();
+        tokio::spawn(async move {
+            let mut iv = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                iv.tick().await;
+                st.prune_nonces();
+            }
+        });
+    }
 
     let app = Router::new()
         .route("/ws", get(ws::handler))
