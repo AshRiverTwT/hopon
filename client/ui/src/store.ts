@@ -35,6 +35,7 @@ export const userName = (id: string) => {
   return "unknown";
 };
 export const currentServer = () => s.servers.find((x) => x.id === s.selServer) ?? null;
+export const isOwner = () => !!s.user && currentServer()?.ownerId === s.user.id;
 
 let toastTimer = 0;
 export function toast(m: string) {
@@ -104,6 +105,26 @@ function apply(e: UiEvent, painted: string[]) {
       const i = s.servers.findIndex((x) => x.id === e.serverId);
       if (i >= 0 && !s.servers[i].members.some((m) => m.id === e.user.id))
         set("servers", i, "members", (m) => [...m, e.user]);
+      break;
+    }
+    case "serverRemoved": {
+      const name = s.servers.find((x) => x.id === e.serverId)?.name ?? "the server";
+      set("servers", (l) => l.filter((x) => x.id !== e.serverId));
+      if (s.selServer === e.serverId) {
+        set({ selServer: null, selChannel: null, stage: null, msgs: [] });
+        if (s.servers.length) queueMicrotask(() => selectServer(s.servers[0].id));
+      }
+      if (e.reason === "kicked") toast(`You were removed from ${name}`);
+      else if (e.reason === "deleted") toast(`${name} was deleted`);
+      break;
+    }
+    case "channelDeleted": {
+      if (s.stage === e.channelId) set("stage", null);
+      if (s.selChannel === e.channelId) {
+        set({ selChannel: null, msgs: [] });
+        const next = s.servers.find((x) => x.id === e.serverId)?.channels.find((c) => !c.voice && c.id !== e.channelId);
+        if (next) queueMicrotask(() => selectChannel(next.id));
+      }
       break;
     }
     case "userUpdated": {

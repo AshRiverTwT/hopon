@@ -282,6 +282,18 @@ impl Voice {
         Ok(())
     }
 
+    /// Leave voice if the active room is one of `channels` (it was deleted or
+    /// we were removed from its server; the server already cleared presence).
+    pub fn leave_if_in(&self, core: Arc<Core>, channels: &[Id]) {
+        let channels = channels.to_vec();
+        tauri::async_runtime::spawn(async move {
+            let current = core.voice.active.lock().await.as_ref().map(|a| a.channel_id);
+            if current.map_or(false, |c| channels.contains(&c)) {
+                core.voice.leave(&core, false).await;
+            }
+        });
+    }
+
     pub async fn leave(&self, core: &Arc<Core>, notify_server: bool) {
         let a = self.active.lock().await.take();
         let was = a.is_some();

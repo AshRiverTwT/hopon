@@ -53,6 +53,7 @@ impl Voice {
         Err(OFF.into())
     }
     pub async fn leave(&self, _core: &Arc<Core>, _notify_server: bool) {}
+    pub fn leave_if_in(&self, _core: Arc<Core>, _channels: &[Id]) {}
     pub async fn set_muted(&self, _core: &Arc<Core>, _muted: bool) {}
     pub async fn set_deafened(&self, _core: &Arc<Core>, _deafened: bool) {}
     pub async fn set_ptt(&self, _core: &Arc<Core>, _enabled: bool, _vk: u32) {}

@@ -510,6 +510,66 @@ impl Core {
                 }
                 self.emit(UiEvent::MemberJoined { server_id: sid(*server_id), user: user.into() });
             }
+            S2C::ServerUpdated { server_id, name } => {
+                if let Some(sv) = self.store.lock().servers.iter_mut().find(|x| x.id == *server_id) {
+                    sv.name = name.clone();
+                }
+                self.emit_server(*server_id);
+            }
+            S2C::ChannelUpdated(c) => {
+                if let Some(sv) = self.store.lock().servers.iter_mut().find(|x| x.id == c.server_id) {
+                    if let Some(x) = sv.channels.iter_mut().find(|x| x.id == c.id) {
+                        *x = c.clone();
+                    }
+                }
+                self.emit_server(c.server_id);
+            }
+            S2C::ChannelDeleted { server_id, channel_id } => {
+                {
+                    let mut s = self.store.lock();
+                    if let Some(sv) = s.servers.iter_mut().find(|x| x.id == *server_id) {
+                        sv.channels.retain(|x| x.id != *channel_id);
+                    }
+                    s.recent.remove(channel_id);
+                    s.pending.retain(|_, p| p.channel_id != *channel_id);
+                }
+                self.cache.purge_channels(vec![*channel_id]);
+                self.voice.leave_if_in(self.clone(), &[*channel_id]);
+                self.emit_server(*server_id);
+                self.emit(UiEvent::ChannelDeleted { server_id: sid(*server_id), channel_id: sid(*channel_id) });
+            }
+            S2C::MemberLeft { server_id, user_id, .. } => {
+                {
+                    let mut s = self.store.lock();
+                    if let Some(sv) = s.servers.iter_mut().find(|x| x.id == *server_id) {
+                        sv.members.retain(|m| m.id != *user_id);
+                    }
+                    if s.voice.get(user_id).map_or(false, |(srv, _)| srv == server_id) {
+                        s.voice.remove(user_id);
+                    }
+                }
+                self.emit_server(*server_id);
+            }
+            S2C::ServerRemoved { server_id, reason } => {
+                let channels: Vec<Id> = {
+                    let mut s = self.store.lock();
+                    let chans = s.servers.iter().find(|x| x.id == *server_id).map(|sv| sv.channels.iter().map(|c| c.id).collect()).unwrap_or_default();
+                    s.servers.retain(|x| x.id != *server_id);
+                    for c in &chans {
+                        s.recent.remove(c);
+                    }
+                    s.voice.retain(|_, (srv, _)| srv != server_id);
+                    chans
+                };
+                self.voice.leave_if_in(self.clone(), &channels);
+                self.cache.purge_channels(channels);
+                let reason = match reason {
+                    RemovedReason::Deleted => "deleted",
+                    RemovedReason::Kicked => "kicked",
+                    RemovedReason::Left => "left",
+                };
+                self.emit(UiEvent::ServerRemoved { server_id: sid(*server_id), reason });
+            }
             S2C::UserUpdated(u) => {
                 {
                     let mut s = self.store.lock();
@@ -551,6 +611,14 @@ impl Core {
                 tracing::debug!("server error: {message}");
             }
             S2C::Pong { .. } | S2C::History { .. } | S2C::Invite { .. } | S2C::VoiceGrant { .. } | S2C::Avatar { .. } | S2C::Ok => {}
+        }
+    }
+
+    /// Push the full current state of one server to the UI.
+    fn emit_server(&self, server_id: Id) {
+        let ev = self.store.lock().servers.iter().find(|x| x.id == server_id).map(|sv| UiEvent::Server { server: sv.into() });
+        if let Some(ev) = ev {
+            self.emit(ev);
         }
     }
 

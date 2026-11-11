@@ -12,6 +12,7 @@ enum Op {
     Put(Vec<Message>),
     Edit(Id, Id, String, i64),
     Delete(Id, Id),
+    PurgeChannels(Vec<Id>),
     Page { channel: Id, before: Id, limit: u32, reply: oneshot::Sender<Vec<Message>> },
     KvSet(String, Option<Vec<u8>>),
     KvGet(String, oneshot::Sender<Option<Vec<u8>>>),
@@ -54,6 +55,13 @@ impl Cache {
     }
     pub fn delete(&self, ch: Id, id: Id) {
         let _ = self.tx.send(Op::Delete(ch, id));
+    }
+    /// Forget every cached message of these channels (deleted or no longer
+    /// accessible).
+    pub fn purge_channels(&self, ids: Vec<Id>) {
+        if !ids.is_empty() {
+            let _ = self.tx.send(Op::PurgeChannels(ids));
+        }
     }
     /// Newest-first page older than `before`.
     pub async fn page(&self, channel: Id, before: Id, limit: u32) -> Vec<Message> {
@@ -101,6 +109,12 @@ fn run(mut conn: Connection, rx: mpsc::Receiver<Op>) {
                     }
                     Op::Delete(ch, id) => {
                         tx.prepare_cached("DELETE FROM messages WHERE channel_id = ?1 AND id = ?2")?.execute(params![ch, id])?;
+                    }
+                    Op::PurgeChannels(ids) => {
+                        let mut st = tx.prepare_cached("DELETE FROM messages WHERE channel_id = ?1")?;
+                        for id in ids {
+                            st.execute(params![id])?;
+                        }
                     }
                     Op::Page { channel, before, limit, reply } => {
                         let mut st = tx.prepare_cached(

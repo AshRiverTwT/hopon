@@ -160,6 +160,43 @@ pub async fn join_invite(core: C<'_>, code: String) -> Res<String> {
     }
 }
 
+// ---------- server administration ----------
+
+#[tauri::command]
+pub async fn rename_server(core: C<'_>, server_id: String, name: String) -> Res<()> {
+    core.request(C2S::RenameServer { server_id: pid(&server_id)?, name }).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn delete_server(core: C<'_>, server_id: String) -> Res<()> {
+    core.request(C2S::DeleteServer { server_id: pid(&server_id)? }).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn update_channel(core: C<'_>, channel_id: String, name: Option<String>, topic: Option<String>) -> Res<()> {
+    core.request(C2S::UpdateChannel { channel_id: pid(&channel_id)?, name, topic }).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn delete_channel(core: C<'_>, channel_id: String) -> Res<()> {
+    core.request(C2S::DeleteChannel { channel_id: pid(&channel_id)? }).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn kick_member(core: C<'_>, server_id: String, user_id: String) -> Res<()> {
+    core.request(C2S::Kick { server_id: pid(&server_id)?, user_id: pid(&user_id)? }).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn leave_server(core: C<'_>, server_id: String) -> Res<()> {
+    core.request(C2S::LeaveServer { server_id: pid(&server_id)? }).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn revoke_invites(core: C<'_>, server_id: String) -> Res<()> {
+    core.request(C2S::RevokeInvites { server_id: pid(&server_id)? }).await.map(|_| ())
+}
+
 // ---------- profile ----------
 
 #[tauri::command]

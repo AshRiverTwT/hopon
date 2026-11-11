@@ -1,6 +1,6 @@
 import { Match, Show, Switch, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { call } from "./ipc";
-import { currentServer, s, toast } from "./store";
+import { currentServer, isOwner, s, toast } from "./store";
 import Login from "./components/Login";
 import MessageList from "./components/MessageList";
 import Composer from "./components/Composer";
@@ -10,9 +10,10 @@ import Settings from "./components/Settings";
 import PerfOverlay from "./components/PerfOverlay";
 import { AudioToggles, Status } from "./components/Corners";
 import GamesPanel from "./components/GamesPanel";
+import { ServerSettingsSheet } from "./components/ServerSettings";
 import { InviteSheet, MembersSheet, NewChannelSheet, ServersSheet } from "./components/Sheets";
 
-type Sheet = null | { k: "servers" } | { k: "members" } | { k: "settings" } | { k: "invite"; link: string } | { k: "new"; voice: boolean };
+type Sheet = null | { k: "servers" } | { k: "server" } | { k: "members" } | { k: "settings" } | { k: "invite"; link: string } | { k: "new"; voice: boolean };
 
 export default function App() {
   const [perf, setPerf] = createSignal(false);
@@ -47,6 +48,7 @@ export default function App() {
               <div class="topbar-right">
                 <Show when={currentServer()}>
                   <button class="pill ghost" onClick={() => setSheet({ k: "members" })}>People {currentServer()!.members.length}</button>
+                  <button class="pill ghost" onClick={() => setSheet({ k: "server" })}>{isOwner() ? "Server settings" : "Leave"}</button>
                   <button class="pill ghost" onClick={invite}>Invite</button>
                   <button class="pill ghost" classList={{ active: games() }} onClick={() => setGames((v) => !v)}>Games</button>
                 </Show>
@@ -68,6 +70,7 @@ export default function App() {
                     <header class="head">
                       <div class="eyebrow">{currentServer()?.name} · Channel</div>
                       <h1 class="display title" title={channel()?.name}>{channel()?.name}</h1>
+                      <Show when={channel()?.topic}><p class="topic">{channel()!.topic}</p></Show>
                     </header>
                     <MessageList />
                     <Composer />
@@ -84,6 +87,7 @@ export default function App() {
           <Switch>
             <Match when={sheet()?.k === "servers"}><ServersSheet close={close} /></Match>
             <Match when={sheet()?.k === "members"}><MembersSheet close={close} /></Match>
+            <Match when={sheet()?.k === "server"}><ServerSettingsSheet close={close} /></Match>
             <Match when={sheet()?.k === "settings"}><Settings close={close} /></Match>
             <Match when={sheet()?.k === "invite"}><InviteSheet link={(sheet() as { link: string }).link} close={close} /></Match>
             <Match when={sheet()?.k === "new"}><NewChannelSheet voice={(sheet() as { voice: boolean }).voice} close={close} /></Match>

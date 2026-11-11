@@ -11,12 +11,12 @@ const members = names.map((n, i) => ({ id: String(1001 + i), name: n, avatarV: i
 const server: Server = {
   id: "9001", name: "Night Shift", ownerId: "1001", members,
   channels: [
-    { id: "7001", serverId: "9001", name: "general", voice: false },
-    { id: "7002", serverId: "9001", name: "design-crit", voice: false },
-    { id: "7003", serverId: "9001", name: "music", voice: false },
-    { id: "7004", serverId: "9001", name: "build-log", voice: false },
-    { id: "7101", serverId: "9001", name: "Lounge", voice: true },
-    { id: "7102", serverId: "9001", name: "Late Room", voice: true },
+    { id: "7001", serverId: "9001", name: "general", voice: false, topic: "Anything goes. Be kind." },
+    { id: "7002", serverId: "9001", name: "design-crit", voice: false, topic: "" },
+    { id: "7003", serverId: "9001", name: "music", voice: false, topic: "" },
+    { id: "7004", serverId: "9001", name: "build-log", voice: false, topic: "" },
+    { id: "7101", serverId: "9001", name: "Lounge", voice: true, topic: "" },
+    { id: "7102", serverId: "9001", name: "Late Room", voice: true, topic: "" },
   ],
 };
 const lines = [

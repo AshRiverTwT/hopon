@@ -2,7 +2,7 @@
 // in the DOM; row heights are measured once after mount and cached by id, so
 // a 5000-message channel renders ~30 rows and scrolls at full frame rate.
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { deleteMessage, editMessage, loadOlder, s, set, userName } from "../store";
+import { deleteMessage, editMessage, isOwner, loadOlder, s, set, userName } from "../store";
 import { showsHeader } from "../merge";
 import type { Msg } from "../types";
 import { Avatar } from "./Avatar";
@@ -154,9 +154,9 @@ function Row(p: { m: Msg; header: boolean; measure: (id: string, n: HTMLElement)
       }>
         <Editor m={p.m} />
       </Show>
-      <Show when={mine() && !p.m.id.startsWith("p") && s.editing !== p.m.id}>
+      <Show when={(mine() || isOwner()) && !p.m.id.startsWith("p") && s.editing !== p.m.id}>
         <div class="actions">
-          <button class="link" onClick={() => set("editing", p.m.id)}>Edit</button>
+          <Show when={mine()}><button class="link" onClick={() => set("editing", p.m.id)}>Edit</button></Show>
           <button class="link" onClick={() => deleteMessage(p.m.id)}>Delete</button>
         </div>
       </Show>

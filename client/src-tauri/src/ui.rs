@@ -32,10 +32,11 @@ pub struct UiChannel {
     pub server_id: String,
     pub name: String,
     pub voice: bool,
+    pub topic: String,
 }
 impl From<&ChannelInfo> for UiChannel {
     fn from(c: &ChannelInfo) -> Self {
-        Self { id: sid(c.id), server_id: sid(c.server_id), name: c.name.clone(), voice: c.kind == ChannelKind::Voice }
+        Self { id: sid(c.id), server_id: sid(c.server_id), name: c.name.clone(), voice: c.kind == ChannelKind::Voice, topic: c.topic.clone() }
     }
 }
 
@@ -116,6 +117,9 @@ pub enum UiEvent {
     ChannelCreated { channel: UiChannel },
     MemberJoined { server_id: String, user: UiUser },
     UserUpdated { user: UiUser },
+    /// "deleted" | "kicked" | "left".
+    ServerRemoved { server_id: String, reason: &'static str },
+    ChannelDeleted { server_id: String, channel_id: String },
     /// New or updated messages (merge by `id`, replacing pending by `nonce`).
     Messages { channel_id: String, msgs: Vec<UiMsg> },
     MsgState { channel_id: String, nonce: String, id: String, state: u8 },
