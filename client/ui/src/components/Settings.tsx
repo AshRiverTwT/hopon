@@ -1,7 +1,7 @@
 import { For, Show, createResource, createSignal } from "solid-js";
 import { call } from "../ipc";
 import { toast } from "../store";
-import { Modal } from "./Modal";
+import { Overlay } from "./Overlay";
 
 interface Devices { processing: { aec: boolean; ns: boolean; agc: boolean }; inputs: { id: string; name: string }[]; outputs: { id: string; name: string }[]; input: string | null; output: string | null; aec: string; ns: string; agc: string }
 
@@ -34,36 +34,36 @@ export default function Settings(p: { close: () => void }) {
   };
 
   return (
-    <Modal title="Settings" close={p.close}>
-      <div onKeyDown={capture}>
-        <label>Input device</label>
+    <Overlay title="Settings" close={p.close}>
+      <div class="settings" onKeyDown={capture}>
+        <div class="eyebrow">Microphone</div>
         <Show when={devs()} fallback={<p class="muted">{devs.error ? String(devs.error) : "Loading devices…"}</p>}>
-          <select onChange={(e) => call("audio_set_device", { input: true, id: e.currentTarget.value || null }).catch(err)}>
+          <select class="line" onChange={(e) => call("audio_set_device", { input: true, id: e.currentTarget.value || null }).catch(err)}>
             <option value="">System default</option>
             <For each={devs()!.inputs}>{(d) => <option value={d.id} selected={d.id === devs()!.input}>{d.name}</option>}</For>
           </select>
-          <label>Output device</label>
-          <select onChange={(e) => call("audio_set_device", { input: false, id: e.currentTarget.value || null }).catch(err)}>
+          <div class="eyebrow">Output</div>
+          <select class="line" onChange={(e) => call("audio_set_device", { input: false, id: e.currentTarget.value || null }).catch(err)}>
             <option value="">System default</option>
             <For each={devs()!.outputs}>{(d) => <option value={d.id} selected={d.id === devs()!.output}>{d.name}</option>}</For>
           </select>
-          <label>Voice processing</label>
-          <div class="row">
+          <div class="eyebrow">Voice processing</div>
+          <div class="field-row">
             <label class="check"><input type="checkbox" checked={proc().aec} onChange={(e) => setProc("aec", e.currentTarget.checked)} /> Echo cancellation</label>
             <label class="check"><input type="checkbox" checked={proc().ns} onChange={(e) => setProc("ns", e.currentTarget.checked)} /> Noise suppression</label>
             <label class="check"><input type="checkbox" checked={proc().agc} onChange={(e) => setProc("agc", e.currentTarget.checked)} /> Auto gain</label>
           </div>
           <p class="muted small">Using a headset? Turn echo cancellation off: there is no echo to remove, and it can cut your voice while others talk. Changes apply immediately, even mid-call.</p>
         </Show>
-        <label>Push to talk</label>
-        <div class="row">
+        <div class="eyebrow">Push to talk</div>
+        <div class="field-row">
           <label class="check"><input type="checkbox" checked={ptt()} onChange={(e) => applyPtt(e.currentTarget.checked, key())} /> Enabled</label>
-          <button onClick={() => setCapturing(true)}>{capturing() ? "Press a key…" : key() ? `Key: ${keyName(key())}` : "Set key"}</button>
+          <button class="pill" onClick={() => setCapturing(true)}>{capturing() ? "Press a key…" : key() ? `Key: ${keyName(key())}` : "Set key"}</button>
         </div>
         <p class="muted small">Works while HopOn is in the background. Press Ctrl+Shift+P for the latency overlay.</p>
-        <div class="row end"><button class="danger" onClick={logout}>Log out</button></div>
+        <div class="field-row end"><button class="pill" onClick={logout}>Log out</button></div>
       </div>
-    </Modal>
+    </Overlay>
   );
 }
 

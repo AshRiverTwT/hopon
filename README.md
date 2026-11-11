@@ -6,7 +6,7 @@ server, PostgreSQL, LiveKit SFU for voice. Latency is the primary design
 constraint, and every stage is instrumented.
 
 ```
-client/      Tauri 2 app: src-tauri/ (Rust core: net, cache, voice, PTT) + ui/ (SolidJS)
+client/      Tauri 2 app: src-tauri/ (Rust core: net, cache, voice, PTT) + ui/ (SolidJS; `pnpm dev` → /preview.html for a mocked design preview)
 server/      Axum + Tokio + SQLx chat server
 shared/      wire protocol (MessagePack), snowflake IDs, clock sync, HDR histograms
 bench/       msg_rtt, voice_loopback, e2e_feed, smoke, voice_grant_check

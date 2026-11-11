@@ -14,8 +14,8 @@ export default function PerfOverlay(p: { close: () => void }) {
       <header>
         <b>Latency (ms)</b>
         <span>
-          <button class="ghost tiny" onClick={() => call("perf_reset").then(poll)}>reset</button>
-          <button class="ghost tiny" onClick={p.close}>✕</button>
+          <button class="link" onClick={() => call("perf_reset").then(poll)}>Reset</button>
+          <button class="link" onClick={p.close}>Close</button>
         </span>
       </header>
       <Show when={r()}>

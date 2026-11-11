@@ -26,7 +26,7 @@ export default function Composer() {
         ref={ta}
         rows={1}
         maxLength={4000}
-        placeholder={`Message #${name()}`}
+        placeholder={`Write in ${name()}`}
         onInput={(e) => { setText(e.currentTarget.value); e.currentTarget.style.height = "auto"; e.currentTarget.style.height = Math.min(200, e.currentTarget.scrollHeight) + "px"; }}
         onKeyDown={onKey}
         autofocus

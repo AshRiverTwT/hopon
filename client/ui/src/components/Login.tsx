@@ -9,6 +9,7 @@ export default function Login() {
   const [url, setUrl] = createSignal<string | null>(null);
   const [err, setErr] = createSignal("");
   const [busy, setBusy] = createSignal(false);
+  const [showServer, setShowServer] = createSignal(false);
 
   const submit = async (signup: boolean) => {
     setErr(""); setBusy(true);
@@ -24,21 +25,22 @@ export default function Login() {
   };
   return (
     <div class="login">
-      <form class="card" onSubmit={(e) => { e.preventDefault(); submit(false); }}>
-        <h1>HopOn</h1>
-        <label>Username</label>
-        <input autofocus autocomplete="username" value={user()} onInput={(e) => setUser(e.currentTarget.value)} />
-        <label>Password</label>
-        <input type="password" autocomplete="current-password" value={pw()} onInput={(e) => setPw(e.currentTarget.value)} />
+      <div class="login-mark display" aria-hidden="true"><span>Hop</span><span>On</span></div>
+      <form class="login-form" onSubmit={(e) => { e.preventDefault(); submit(false); }}>
+        <div class="eyebrow">Sign in</div>
+        <input class="line big" placeholder="Username" autofocus autocomplete="username" value={user()} onInput={(e) => setUser(e.currentTarget.value)} />
+        <input class="line big" placeholder="Password" type="password" autocomplete="current-password" value={pw()} onInput={(e) => setPw(e.currentTarget.value)} />
         <Show when={err()}><p class="err">{err()}</p></Show>
-        <div class="row">
-          <button class="primary" type="submit" disabled={busy() || !user() || !pw()}>Log in</button>
-          <button type="button" disabled={busy() || !user() || pw().length < 8} onClick={() => submit(true)}>Sign up</button>
+        <div class="field-row">
+          <button class="pill solid" type="submit" disabled={busy() || !user() || !pw()}>Log in</button>
+          <button class="pill" type="button" disabled={busy() || !user() || pw().length < 8} onClick={() => submit(true)}>Create account</button>
         </div>
-        <details>
-          <summary class="muted small">Server: {url() ?? cfg()?.url} · {s.conn.state}</summary>
-          <input value={url() ?? cfg()?.url ?? ""} onInput={(e) => setUrl(e.currentTarget.value)} placeholder="wss://chat.example.com/ws" />
-        </details>
+        <button type="button" class="link" onClick={() => setShowServer((v) => !v)}>
+          Server · {url() ?? cfg()?.url} · <span classList={{ warn: s.conn.state !== "online" }}>{s.conn.state}</span>
+        </button>
+        <Show when={showServer()}>
+          <input class="line" value={url() ?? cfg()?.url ?? ""} onInput={(e) => setUrl(e.currentTarget.value)} placeholder="wss://chat.example.com/ws" />
+        </Show>
       </form>
     </div>
   );

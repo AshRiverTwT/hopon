@@ -1,14 +1,21 @@
-import { Show, createSignal, onCleanup, onMount } from "solid-js";
-import { s } from "./store";
+import { Match, Show, Switch, createSignal, onCleanup, onMount } from "solid-js";
+import { call } from "./ipc";
+import { currentServer, s, toast } from "./store";
 import Login from "./components/Login";
 import MessageList from "./components/MessageList";
 import Composer from "./components/Composer";
-import VoicePanel from "./components/VoicePanel";
+import Dial from "./components/Dial";
+import Stage from "./components/Stage";
+import Settings from "./components/Settings";
 import PerfOverlay from "./components/PerfOverlay";
-import { ChannelList, MemberList, ServerRail } from "./components/Sidebar";
+import { AudioToggles, Status } from "./components/Corners";
+import { InviteSheet, MembersSheet, NewChannelSheet, ServersSheet } from "./components/Sheets";
+
+type Sheet = null | { k: "servers" } | { k: "members" } | { k: "settings" } | { k: "invite"; link: string } | { k: "new"; voice: boolean };
 
 export default function App() {
   const [perf, setPerf] = createSignal(false);
+  const [sheet, setSheet] = createSignal<Sheet>(null);
   onMount(() => {
     const k = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.code === "KeyP") { e.preventDefault(); setPerf((v) => !v); }
@@ -16,26 +23,61 @@ export default function App() {
     window.addEventListener("keydown", k);
     onCleanup(() => window.removeEventListener("keydown", k));
   });
-  const chName = () => s.servers.flatMap((x) => x.channels).find((c) => c.id === s.selChannel)?.name;
+  const channel = () => currentServer()?.channels.find((c) => c.id === s.selChannel);
+  const invite = async () => {
+    try { setSheet({ k: "invite", link: await call<string>("create_invite", { serverId: s.selServer }) }); } catch (e) { toast(String(e)); }
+  };
+  const close = () => setSheet(null);
   return (
     <>
       <Show when={s.ready} fallback={<div class="splash" />}>
         <Show when={s.user} fallback={<Login />}>
-          <div class="app">
-            <ServerRail />
-            <div class="side">
-              <ChannelList />
-              <VoicePanel />
-            </div>
-            <main class="chat">
-              <header class="chat-head"># {chName() ?? ""}</header>
-              <Show when={s.selChannel} fallback={<div class="empty">Pick a channel</div>}>
-                <MessageList />
-                <Composer />
-              </Show>
-            </main>
-            <MemberList />
+          <div class="frame">
+            <header class="topbar">
+              <span class="wordmark">HopOn</span>
+              <button class="pill ghost" onClick={() => setSheet({ k: "servers" })}>{currentServer()?.name ?? "Servers"}</button>
+              <div class="topbar-right">
+                <Show when={currentServer()}>
+                  <button class="pill ghost" onClick={() => setSheet({ k: "members" })}>People {currentServer()!.members.length}</button>
+                  <button class="pill ghost" onClick={invite}>Invite</button>
+                </Show>
+                <button class="pill" onClick={() => setSheet({ k: "settings" })}>Settings</button>
+              </div>
+            </header>
+            <Show when={currentServer()} fallback={
+              <main class="empty-state">
+                <h1 class="display title">No servers yet</h1>
+                <p class="lede">Start one, or paste an invite someone sent you.</p>
+                <button class="pill solid big" onClick={() => setSheet({ k: "servers" })}>Create or join</button>
+              </main>
+            }>
+              <Dial onNewChannel={(voice) => setSheet({ k: "new", voice })} onServers={() => setSheet({ k: "servers" })} />
+              <Switch>
+                <Match when={s.stage}><main class="main"><Stage /></main></Match>
+                <Match when={s.selChannel}>
+                  <main class="main">
+                    <header class="head">
+                      <div class="eyebrow">{currentServer()?.name} · Channel</div>
+                      <h1 class="display title" title={channel()?.name}>{channel()?.name}</h1>
+                    </header>
+                    <MessageList />
+                    <Composer />
+                  </main>
+                </Match>
+              </Switch>
+            </Show>
+            <footer class="bottombar">
+              <AudioToggles />
+              <Status />
+            </footer>
           </div>
+          <Switch>
+            <Match when={sheet()?.k === "servers"}><ServersSheet close={close} /></Match>
+            <Match when={sheet()?.k === "members"}><MembersSheet close={close} /></Match>
+            <Match when={sheet()?.k === "settings"}><Settings close={close} /></Match>
+            <Match when={sheet()?.k === "invite"}><InviteSheet link={(sheet() as { link: string }).link} close={close} /></Match>
+            <Match when={sheet()?.k === "new"}><NewChannelSheet voice={(sheet() as { voice: boolean }).voice} close={close} /></Match>
+          </Switch>
         </Show>
       </Show>
       <Show when={perf()}><PerfOverlay close={() => setPerf(false)} /></Show>

@@ -19,6 +19,8 @@ export const [s, set] = createStore({
   voice: { channelId: null, state: "idle", muted: false, deafened: false, detail: null } as VoiceState,
   selServer: null as string | null,
   selChannel: null as string | null,
+  /** Voice channel shown on the stage (null = show the text channel). */
+  stage: null as string | null,
   unread: {} as Record<string, boolean>,
   msgs: [] as Msg[],
   more: true,
@@ -80,7 +82,7 @@ function apply(e: UiEvent, painted: string[]) {
       }
       set("presence", reconcile(pres));
       if (changedUser) {
-        set({ selServer: null, selChannel: null, msgs: [], unread: {} });
+        set({ selServer: null, selChannel: null, stage: null, msgs: [], unread: {} });
       }
       if (e.user && !s.selServer && e.servers.length) selectServer(e.servers[0].id);
       break;
@@ -151,7 +153,7 @@ function apply(e: UiEvent, painted: string[]) {
 // ---------- actions ----------
 
 export function selectServer(id: string) {
-  set("selServer", id);
+  set({ selServer: id, stage: null });
   const sv = s.servers.find((x) => x.id === id);
   const first = sv?.channels.find((c) => !c.voice);
   if (first) selectChannel(first.id);
@@ -161,13 +163,18 @@ let openSeq = 0;
 export async function selectChannel(id: string) {
   const seq = ++openSeq;
   batch(() => {
-    set({ selChannel: id, msgs: [], more: true, loadingOlder: false, editing: null });
+    set({ selChannel: id, stage: null, msgs: [], more: true, loadingOlder: false, editing: null });
     set("unread", id, false);
   });
   const msgs = await call<Msg[]>("open_channel", { channelId: id });
   if (seq !== openSeq) return;
   const r = mergeMsgs([...s.msgs], msgs);
   set("msgs", reconcile(r.list, { key: "id", merge: false }));
+}
+
+export function showStage(id: string) {
+  set("stage", id);
+  call("voice_prepare", { channelId: id }).catch(() => {});
 }
 
 export async function loadOlder() {

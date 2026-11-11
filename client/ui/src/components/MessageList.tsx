@@ -7,8 +7,8 @@ import { showsHeader } from "../merge";
 import type { Msg } from "../types";
 
 const OVERSCAN = 800; // px above and below the viewport
-const EST_HEADER = 46;
-const EST_LINE = 24;
+const EST_HEADER = 66;
+const EST_LINE = 28;
 
 export default function MessageList() {
   let el!: HTMLDivElement;
@@ -58,14 +58,20 @@ export default function MessageList() {
     }
   };
 
+  // Scroll events caused by our own pinning must not clear `atBottom`: row
+  // heights can grow between setting scrollTop and the event firing.
+  let pinnedAt = -1;
+  const pin = () => { el.scrollTop = el.scrollHeight; pinnedAt = el.scrollTop; };
   const onScroll = () => {
     setScrollTop(el.scrollTop);
+    if (Math.abs(el.scrollTop - pinnedAt) < 2) return;
+    pinnedAt = -1;
     atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
     if (el.scrollTop < 1500 && s.more && !s.loadingOlder) loadOlder();
   };
 
   onMount(() => {
-    const ro = new ResizeObserver(() => { setViewH(el.clientHeight); if (atBottom) el.scrollTop = el.scrollHeight; });
+    const ro = new ResizeObserver(() => { setViewH(el.clientHeight); if (atBottom) pin(); });
     ro.observe(el);
     onCleanup(() => ro.disconnect());
   });
@@ -77,7 +83,7 @@ export default function MessageList() {
     const first = s.msgs[0]?.id ?? "";
     const total = offs[offs.length - 1];
     queueMicrotask(() => {
-      if (atBottom) el.scrollTop = el.scrollHeight;
+      if (atBottom) pin();
       else if (prevFirst && first !== prevFirst) el.scrollTop += total - prevHeight;
       prevFirst = first;
       prevHeight = total;
@@ -89,7 +95,7 @@ export default function MessageList() {
     <div class="messages" ref={el} onScroll={onScroll}>
       <div style={{ height: `${layout()[layout().length - 1]}px`, position: "relative" }}>
         <Show when={!s.more && s.msgs.length > 0}>
-          <div class="channel-start">This is the start of the channel.</div>
+          <div class="channel-start eyebrow">Beginning of the channel</div>
         </Show>
         <div style={{ transform: `translateY(${layout()[range()[0]]}px)` }}>
           <For each={visible()}>
@@ -114,7 +120,7 @@ function Row(p: { m: Msg; header: boolean; measure: (id: string, n: HTMLElement)
   onMount(() => p.measure(p.m.id, node));
   createEffect(on(() => [p.m.content, s.editing === p.m.id, p.header], () => p.measure(p.m.id, node), { defer: true }));
   return (
-    <div ref={node} class="msg" classList={{ head: p.header, pending: p.m.state === 0, failed: p.m.state === 3 }}>
+    <div ref={node} class="msg" classList={{ first: p.header, pending: p.m.state === 0, failed: p.m.state === 3 }}>
       <Show when={p.header}>
         <div class="meta">
           <span class="author">{userName(p.m.authorId)}</span>
@@ -124,16 +130,16 @@ function Row(p: { m: Msg; header: boolean; measure: (id: string, n: HTMLElement)
       <Show when={s.editing === p.m.id} fallback={
         <div class="body">
           {p.m.content}
-          <Show when={p.m.editedAt}><span class="edited"> (edited)</span></Show>
-          <Show when={p.m.state === 3}><span class="err"> not sent</span></Show>
+          <Show when={p.m.editedAt}><span class="edited"> · edited</span></Show>
+          <Show when={p.m.state === 3}><span class="err"> · Not sent</span></Show>
         </div>
       }>
         <Editor m={p.m} />
       </Show>
       <Show when={mine() && !p.m.id.startsWith("p") && s.editing !== p.m.id}>
         <div class="actions">
-          <button title="Edit" onClick={() => set("editing", p.m.id)}>Edit</button>
-          <button title="Delete" onClick={() => deleteMessage(p.m.id)}>Delete</button>
+          <button class="link" onClick={() => set("editing", p.m.id)}>Edit</button>
+          <button class="link" onClick={() => deleteMessage(p.m.id)}>Delete</button>
         </div>
       </Show>
     </div>
