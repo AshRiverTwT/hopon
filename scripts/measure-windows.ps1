@@ -5,14 +5,20 @@
 #   powershell -ExecutionPolicy Bypass -File measure-windows.ps1 `
 #       [-Exe "$env:LOCALAPPDATA\HopOn\hopon.exe"] [-Runs 5] [-Url ws://server:8080/ws] [-Bench .\msg_rtt.exe]
 param(
-  [string]$Exe = "$env:LOCALAPPDATA\HopOn\hopon.exe",
+  [string]$Exe = "",
   [int]$Runs = 5,
   [int]$IdleSeconds = 60,
   [string]$Url = "",
   [string]$Bench = ""
 )
 $ErrorActionPreference = "Stop"
-if (-not (Test-Path $Exe)) { throw "hopon.exe not found at $Exe (pass -Exe)" }
+if (-not $Exe) {
+  # The installer names the exe after the product; search the usual places.
+  $Exe = Get-ChildItem "$env:LOCALAPPDATA", "$env:ProgramFiles" -Filter "hopon*.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -notmatch "setup|uninstall" } | Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not $Exe -or -not (Test-Path $Exe)) { throw "HopOn is not installed (run HopOn_0.1.0_x64-setup.exe) or pass -Exe path\to\HopOn.exe" }
+Write-Host "app: $Exe"
 
 function Get-Tree([int]$RootId) {
   $all = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId
