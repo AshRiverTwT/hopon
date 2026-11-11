@@ -38,6 +38,17 @@ struct Prefs {
     muted: bool,
     deafened: bool,
     ptt: bool,
+    /// Echo cancellation / noise suppression / auto gain. All on by default;
+    /// echo cancellation is unnecessary (and can clip speech) on a headset.
+    aec: bool,
+    ns: bool,
+    agc: bool,
+}
+
+impl Prefs {
+    fn new() -> Self {
+        Self { aec: true, ns: true, agc: true, ..Default::default() }
+    }
 }
 
 pub struct Voice {
@@ -57,8 +68,24 @@ pub struct Device {
 }
 
 #[derive(Serialize)]
+pub struct Processing {
+    pub aec: bool,
+    pub ns: bool,
+    pub agc: bool,
+}
+
+/// Software AEC3/NS/AGC: consistent across hardware and tuned for low delay.
+/// Hardware ("communications") effects vary wildly by driver.
+fn apply_processing(audio: &PlatformAudio, p: &Prefs) {
+    let _ = audio.set_echo_cancellation(p.aec, false);
+    let _ = audio.set_noise_suppression(p.ns, false);
+    let _ = audio.set_auto_gain_control(p.agc, false);
+}
+
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Devices {
+    pub processing: Processing,
     pub inputs: Vec<Device>,
     pub outputs: Vec<Device>,
     pub input: Option<String>,
@@ -73,7 +100,7 @@ impl Voice {
         Self {
             active: tokio::sync::Mutex::new(None),
             audio: Mutex::new(None),
-            prefs: Mutex::new(Prefs::default()),
+            prefs: Mutex::new(Prefs::new()),
             grants: Mutex::new(HashMap::new()),
             ptt: Ptt::new(),
         }
@@ -85,12 +112,8 @@ impl Voice {
             return Ok(a.clone());
         }
         let audio = PlatformAudio::new().map_err(|e| format!("audio device: {e}"))?;
-        // Software AEC3/NS/AGC: consistent across hardware, and AEC3 is tuned for
-        // low delay. Hardware ("communications") effects vary wildly by driver.
-        let _ = audio.set_echo_cancellation(true, false);
-        let _ = audio.set_noise_suppression(true, false);
-        let _ = audio.set_auto_gain_control(true, false);
         let p = self.prefs.lock().clone();
+        apply_processing(&audio, &p);
         if let Some(id) = p.input {
             let _ = audio.set_recording_device(&livekit::RecordingDeviceId::from_unchecked_guid(&id));
         }
@@ -101,10 +124,26 @@ impl Voice {
         Ok(audio)
     }
 
+    /// Change echo cancellation / noise suppression / gain control; applied
+    /// live if a call is active.
+    pub fn set_processing(&self, aec: bool, ns: bool, agc: bool) {
+        let p = {
+            let mut p = self.prefs.lock();
+            p.aec = aec;
+            p.ns = ns;
+            p.agc = agc;
+            p.clone()
+        };
+        if let Some(audio) = self.audio.lock().clone() {
+            apply_processing(&audio, &p);
+        }
+    }
+
     pub fn devices(&self) -> Res<Devices> {
         let audio = self.audio()?;
         let p = self.prefs.lock().clone();
         let d = Devices {
+            processing: Processing { aec: p.aec, ns: p.ns, agc: p.agc },
             inputs: audio.recording_devices().map(|d| Device { id: d.id.as_str().to_owned(), name: d.name }).collect(),
             outputs: audio.playout_devices().map(|d| Device { id: d.id.as_str().to_owned(), name: d.name }).collect(),
             input: p.input,
@@ -187,9 +226,10 @@ impl Voice {
         let track = LocalAudioTrack::create_audio_track("mic", audio.rtc_source());
         let publish = TrackPublishOptions {
             source: TrackSource::Microphone,
-            // DTX: no packets while silent (idle bandwidth/CPU); RED: each packet
-            // also carries the previous frame, so single losses cost no latency.
-            dtx: true,
+            // No DTX: it can clip the first syllable after a pause, and a muted
+            // track sends nothing anyway. RED: each packet also carries the
+            // previous frame, so single losses cost no latency.
+            dtx: false,
             red: true,
             audio_encoding: Some(AudioEncoding { max_bitrate: 40_000 }),
             ..Default::default()

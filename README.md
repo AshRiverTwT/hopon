@@ -198,11 +198,17 @@ The exact commands are in [Measuring on Windows](#measuring-on-windows).
 3. **Speaking indicators come from the SFU's active-speaker events, every
    100 ms** (configured in `livekit.yaml`; the default is 500 ms). The platform
    ADM does not expose local PCM.
-4. **Broadcast per server rather than per channel.** See Server above.
-5. **IPC between the Rust core and the webview is JSON.** MessagePack is used
+4. **Voice processing is user-adjustable.** Echo cancellation, noise
+   suppression and auto gain are on by default, with live toggles in
+   Settings. On a headset, echo cancellation has nothing to remove and its
+   double-talk suppression can clip speech; that was the one issue found in
+   real-device testing. Opus DTX is off, so no first-syllable clipping after
+   pauses.
+5. **Broadcast per server rather than per channel.** See Server above.
+6. **IPC between the Rust core and the webview is JSON.** MessagePack is used
    on the wire; for IPC, JSON parsing in the webview is faster than a JS
    MessagePack decoder.
-6. **Not in v1:** Redis pub/sub for multiple server instances (single
+7. **Not in v1:** Redis pub/sub for multiple server instances (single
    instance only), `hopon://` deep-link registration (paste the invite link or
    code instead), code signing of the installer.
 

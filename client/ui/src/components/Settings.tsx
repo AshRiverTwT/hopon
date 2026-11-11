@@ -3,7 +3,7 @@ import { call } from "../ipc";
 import { toast } from "../store";
 import { Modal } from "./Modal";
 
-interface Devices { inputs: { id: string; name: string }[]; outputs: { id: string; name: string }[]; input: string | null; output: string | null; aec: string; ns: string; agc: string }
+interface Devices { processing: { aec: boolean; ns: boolean; agc: boolean }; inputs: { id: string; name: string }[]; outputs: { id: string; name: string }[]; input: string | null; output: string | null; aec: string; ns: string; agc: string }
 
 export default function Settings(p: { close: () => void }) {
   const [devs] = createResource(() => call<Devices>("audio_devices"));
@@ -25,6 +25,13 @@ export default function Settings(p: { close: () => void }) {
     applyPtt(true, e.keyCode);
   };
   const logout = () => { call("logout").catch(err); p.close(); };
+  const [apm, setApm] = createSignal<{ aec: boolean; ns: boolean; agc: boolean } | null>(null);
+  const proc = () => apm() ?? devs()?.processing ?? { aec: true, ns: true, agc: true };
+  const setProc = (k: "aec" | "ns" | "agc", v: boolean) => {
+    const next = { ...proc(), [k]: v };
+    setApm(next);
+    call("audio_processing", next).catch(err);
+  };
 
   return (
     <Modal title="Settings" close={p.close}>
@@ -40,7 +47,13 @@ export default function Settings(p: { close: () => void }) {
             <option value="">System default</option>
             <For each={devs()!.outputs}>{(d) => <option value={d.id} selected={d.id === devs()!.output}>{d.name}</option>}</For>
           </select>
-          <p class="muted small">Echo cancellation: {devs()!.aec} · Noise suppression: {devs()!.ns} · Gain control: {devs()!.agc}</p>
+          <label>Voice processing</label>
+          <div class="row">
+            <label class="check"><input type="checkbox" checked={proc().aec} onChange={(e) => setProc("aec", e.currentTarget.checked)} /> Echo cancellation</label>
+            <label class="check"><input type="checkbox" checked={proc().ns} onChange={(e) => setProc("ns", e.currentTarget.checked)} /> Noise suppression</label>
+            <label class="check"><input type="checkbox" checked={proc().agc} onChange={(e) => setProc("agc", e.currentTarget.checked)} /> Auto gain</label>
+          </div>
+          <p class="muted small">Using a headset? Turn echo cancellation off: there is no echo to remove, and it can cut your voice while others talk. Changes apply immediately, even mid-call.</p>
         </Show>
         <label>Push to talk</label>
         <div class="row">

@@ -76,6 +76,7 @@ pub fn run() {
             commands::voice_mute,
             commands::voice_deafen,
             commands::voice_ptt,
+            commands::audio_processing,
             commands::audio_devices,
             commands::audio_set_device,
             commands::perf_painted,
@@ -93,6 +94,12 @@ async fn load_voice_prefs(core: &Arc<core::Core>) {
     }
     if let Some(o) = s(core.cache.kv_get("dev_out").await) {
         let _ = core.voice.set_device(false, Some(o));
+    }
+    if let Some(a) = s(core.cache.kv_get("apm").await) {
+        let b: Vec<bool> = a.chars().map(|c| c == '1').collect();
+        if b.len() == 3 {
+            core.voice.set_processing(b[0], b[1], b[2]);
+        }
     }
     if let Some(p) = s(core.cache.kv_get("ptt").await) {
         if let Some((en, vk)) = p.split_once(':') {

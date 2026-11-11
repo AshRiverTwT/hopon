@@ -203,6 +203,12 @@ pub async fn voice_ptt(core: C<'_>, enabled: bool, key_code: u32) -> Res<()> {
 }
 
 #[tauri::command]
+pub fn audio_processing(core: C<'_>, aec: bool, ns: bool, agc: bool) {
+    core.voice.set_processing(aec, ns, agc);
+    core.cache.kv_set("apm", Some(format!("{}{}{}", aec as u8, ns as u8, agc as u8).into_bytes()));
+}
+
+#[tauri::command]
 pub async fn audio_devices(core: C<'_>) -> Res<crate::voice::Devices> {
     let core = core.inner().clone();
     tokio::task::spawn_blocking(move || core.voice.devices()).await.map_err(|e| e.to_string())?
