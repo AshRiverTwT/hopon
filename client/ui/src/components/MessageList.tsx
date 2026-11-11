@@ -2,7 +2,11 @@
 // in the DOM; row heights are measured once after mount and cached by id, so
 // a 5000-message channel renders ~30 rows and scrolls at full frame rate.
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { deleteMessage, editMessage, isOwner, loadOlder, maybeMarkRead, s, set, userName } from "../store";
+import { deleteMessage, editMessage, isOwner, jumpTo, loadOlder, maybeMarkRead, s, set, toggleReaction, userName } from "../store";
+import { findId } from "../merge";
+import { decodeMentions, mentionsUser, preview } from "../rich";
+import Rich from "./Rich";
+import { EmojiPicker } from "./EmojiPicker";
 import { showsHeader } from "../merge";
 import type { Msg } from "../types";
 import { Avatar } from "./Avatar";
@@ -10,6 +14,8 @@ import { cellClass, GAMES, parseGameResult } from "../games";
 
 const OVERSCAN = 800; // px above and below the viewport
 const EST_HEADER = 82;
+const EST_QUOTE = 22;
+const EST_REACTIONS = 34;
 const EST_LINE = 30;
 
 export default function MessageList() {
@@ -26,7 +32,7 @@ export default function MessageList() {
     const offs = new Float64Array(list.length + 1);
     for (let i = 0; i < list.length; i++) {
       const m = list[i];
-      offs[i + 1] = offs[i] + (h.get(m.id) ?? (showsHeader(list, i) ? EST_HEADER : EST_LINE));
+      offs[i + 1] = offs[i] + (h.get(m.id) ?? ((showsHeader(list, i) ? EST_HEADER : EST_LINE) + (m.replyTo ? EST_QUOTE : 0) + (m.reactions.length ? EST_REACTIONS : 0)));
     }
     return offs;
   });
@@ -93,6 +99,15 @@ export default function MessageList() {
     });
   }));
   createEffect(on(() => s.selChannel, () => { atBottom = true; set("atBottom", true); setHeights(new Map()); }));
+  // Jump: scroll the target row into the middle of the viewport.
+  createEffect(on(() => s.jump, (id) => {
+    if (!id) return;
+    const i = findId(s.msgs, id);
+    if (i < 0) return;
+    atBottom = false;
+    set("atBottom", false);
+    queueMicrotask(() => { el.scrollTop = Math.max(0, layout()[i] - el.clientHeight / 3); });
+  }, { defer: true }));
 
   return (
     <div class="messages" ref={el} onScroll={onScroll}>
@@ -120,21 +135,45 @@ function fmtTime(ts: number) {
 function Row(p: { m: Msg; header: boolean; measure: (id: string, n: HTMLElement) => void }) {
   let node!: HTMLDivElement;
   const mine = () => p.m.authorId === s.user?.id;
+  const [picker, setPicker] = createSignal(false);
+  // Actions are only built while hovered: most rows never need them.
+  const [hover, setHover] = createSignal(false);
+  const real = () => !p.m.id.startsWith("p");
   onMount(() => p.measure(p.m.id, node));
-  createEffect(on(() => [p.m.content, s.editing === p.m.id, p.header], () => p.measure(p.m.id, node), { defer: true }));
+  createEffect(on(
+    () => [p.m.content, s.editing === p.m.id, p.header, p.m.replyTo, p.m.reactions.length, p.m.reactions.map((r) => r.users.length).join()],
+    () => p.measure(p.m.id, node),
+    { defer: true },
+  ));
+  const quoted = () => {
+    if (!p.m.replyTo) return null;
+    const i = findId(s.msgs, p.m.replyTo);
+    return i >= 0 ? s.msgs[i] : undefined;
+  };
+  const flash = () => s.jump === p.m.id;
+  createEffect(() => { if (flash()) setTimeout(() => s.jump === p.m.id && set("jump", null), 1600); });
   return (
-    <div ref={node} class="msg" classList={{ first: p.header, pending: p.m.state === 0, failed: p.m.state === 3 }}>
+    <div ref={node} class="msg" onMouseEnter={() => setHover(true)} onMouseLeave={() => !picker() && setHover(false)}
+      classList={{ first: p.header, pending: p.m.state === 0, failed: p.m.state === 3, "mention-me": !!s.user && mentionsUser(p.m.content, s.user.id), flash: flash() }}>
+      <Show when={p.m.replyTo}>
+        <button class="quote" onClick={() => jumpTo(p.m.replyTo!)}>
+          <span class="quote-arrow">↳</span>
+          <Show when={quoted()} fallback={<span class="muted">Original message isn't loaded · jump</span>}>
+            {(q) => <><span class="quote-author">{userName(q().authorId)}</span><span class="quote-text">{preview(q().content, userName)}</span></>}
+          </Show>
+        </button>
+      </Show>
       <Show when={p.header}>
         <div class="meta">
           <Avatar id={p.m.authorId} size={32} />
           <span class="author">{userName(p.m.authorId)}</span>
-          <span class="time">{fmtTime(p.m.ts)}</span>
+          <span class="time" title={new Date(p.m.ts).toLocaleString()}>{fmtTime(p.m.ts)}</span>
         </div>
       </Show>
       <Show when={s.editing === p.m.id} fallback={
         <Show when={parseGameResult(p.m.content)} fallback={
         <div class="body">
-          {p.m.content}
+          <Rich text={p.m.content} />
           <Show when={p.m.editedAt}><span class="edited"> · edited</span></Show>
           <Show when={p.m.state === 3}><span class="err"> · Not sent</span></Show>
         </div>
@@ -155,10 +194,27 @@ function Row(p: { m: Msg; header: boolean; measure: (id: string, n: HTMLElement)
       }>
         <Editor m={p.m} />
       </Show>
-      <Show when={(mine() || isOwner()) && !p.m.id.startsWith("p") && s.editing !== p.m.id}>
-        <div class="actions">
+      <Show when={p.m.reactions.length}>
+        <div class="reactions">
+          <For each={p.m.reactions}>
+            {(r) => (
+              <button class="chip" classList={{ mine: !!s.user && r.users.includes(s.user.id) }}
+                title={r.users.map(userName).join(", ")} onClick={() => toggleReaction(p.m, r.emoji)}>
+                <span class="chip-emoji">{r.emoji}</span><span class="chip-n">{r.users.length}</span>
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
+      <Show when={(hover() || picker()) && real() && s.editing !== p.m.id}>
+        <div class="actions" classList={{ open: picker() }}>
+          <button class="link" onClick={() => set("replyTo", { ...p.m })}>Reply</button>
+          <button class="link" onClick={() => setPicker((v) => !v)}>React</button>
           <Show when={mine()}><button class="link" onClick={() => set("editing", p.m.id)}>Edit</button></Show>
-          <button class="link" onClick={() => deleteMessage(p.m.id)}>Delete</button>
+          <Show when={mine() || isOwner()}><button class="link" onClick={() => deleteMessage(p.m.id)}>Delete</button></Show>
+          <Show when={picker()}>
+            <EmojiPicker pick={(e) => { setPicker(false); setHover(node.matches(":hover")); toggleReaction(p.m, e); }} close={() => { setPicker(false); setHover(node.matches(":hover")); }} />
+          </Show>
         </div>
       </Show>
     </div>
@@ -173,8 +229,9 @@ function Editor(p: { m: Msg }) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       const v = ta.value.trim();
-      if (v && v !== p.m.content) editMessage(p.m.id, v); else set("editing", null);
+      if (v && v !== decodeMentions(p.m.content, userName)) editMessage(p.m.id, v); else set("editing", null);
     }
   };
-  return <textarea ref={ta} class="edit" value={p.m.content} onKeyDown={key} rows={Math.min(8, p.m.content.split("\n").length)} />;
+  const text = decodeMentions(p.m.content, userName);
+  return <textarea ref={ta} class="edit" value={text} onKeyDown={key} rows={Math.min(8, text.split("\n").length)} />;
 }

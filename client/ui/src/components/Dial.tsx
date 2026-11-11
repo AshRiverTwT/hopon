@@ -103,7 +103,11 @@ export default function Dial(p: { onNewChannel: (voice: boolean) => void; onServ
               <Show when={it.kind === "ch" && it.ch.voice && occupants(it.ch).length}>
                 <span class="count">{it.kind === "ch" ? occupants(it.ch).length : ""}</span>
               </Show>
-              <Show when={(it.kind === "ch" && isUnread(it.ch) && s.selChannel !== it.ch.id) || speaking()}><span class="live-dot" /></Show>
+              <Show when={it.kind === "ch" && (s.mentions[it.ch.id] ?? 0) > 0} fallback={
+                <Show when={(it.kind === "ch" && isUnread(it.ch) && s.selChannel !== it.ch.id) || speaking()}><span class="live-dot" /></Show>
+              }>
+                <span class="mention-badge">@{it.kind === "ch" ? s.mentions[it.ch.id] : ""}</span>
+              </Show>
             </button>
           );
         }}

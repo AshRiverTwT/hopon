@@ -28,6 +28,7 @@ pub fn run() {
             let cache = cache::Cache::open(&dir.join("cache.db"))?;
             let default_url = std::env::var("HOPON_URL").unwrap_or_else(|_| "ws://127.0.0.1:8080/ws".into());
             let core = core::Core::new(cache, default_url);
+            let _ = core.app.set(app.handle().clone());
             app.manage(core.clone());
             let start = core.clone();
             // Pre-connect: the socket is up (and usually authenticated) before
@@ -66,6 +67,7 @@ pub fn run() {
             commands::load_older,
             commands::send_message,
             commands::mark_read,
+            commands::react,
             commands::edit_message,
             commands::delete_message,
             commands::create_server,
@@ -96,6 +98,7 @@ pub fn run() {
             games::games_visible,
             games::games_close,
             games::games_open_external,
+            games::open_url,
             commands::perf_painted,
             commands::perf_stats,
             commands::perf_reset,

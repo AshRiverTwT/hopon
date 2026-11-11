@@ -174,8 +174,8 @@ label.check input { accent-color: var(--hot); width: 15px; height: 15px; }
 .msg.pending .body { color: var(--cream-55); }
 .msg.failed .body { color: var(--cream-55); }
 .edited { font-size: 12px; color: var(--cream-35); }
-.actions { position: absolute; right: 12px; bottom: 4px; display: none; gap: 14px; }
-.msg:hover .actions { display: flex; }
+.actions { position: absolute; right: 12px; bottom: 4px; display: none; gap: 14px; align-items: center; }
+.msg:hover .actions, .actions.open { display: flex; }
 textarea.edit { width: 100%; resize: none; background: transparent; border: 0; border-bottom: 1px solid var(--cream); outline: none; padding: 4px 0; color: var(--cream); }
 
 .composer { padding: 14px 0 0; max-width: 900px; }
@@ -371,3 +371,43 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 .presence { position: absolute; right: -3px; bottom: -3px; width: 10px; height: 10px; border-radius: 50%; background: var(--ink); border: 2px solid var(--cream-35); }
 .presence.on { background: #3ecf7a; border-color: var(--ink); }
 .index-name.offline { color: var(--cream-35); }
+
+/* ---------- rich text ---------- */
+.md-code { font: 0.92em/1.4 "Cascadia Mono", Consolas, ui-monospace, monospace; background: var(--cream-10); padding: 1px 5px; border-radius: 3px; }
+.md-pre { margin: 6px 0; padding: 10px 12px; background: #0f0f0f; border: 1px solid var(--cream-10); border-radius: 4px; overflow-x: auto; white-space: pre; }
+.md-pre code { font: 13px/1.5 "Cascadia Mono", Consolas, ui-monospace, monospace; color: var(--cream); }
+.md-link { color: #ff6f8f; text-decoration: underline; text-decoration-color: rgba(255, 111, 143, 0.4); cursor: pointer; overflow-wrap: anywhere; }
+.md-link:hover { text-decoration-color: currentColor; }
+.mention { color: var(--cream); background: var(--cream-10); border-radius: 3px; padding: 0 3px; font-weight: 500; }
+.mention.me { background: rgba(255, 27, 80, 0.22); color: #fff; }
+.msg.mention-me { box-shadow: inset 2px 0 0 var(--hot); background: rgba(255, 27, 80, 0.06); }
+.msg.flash { animation: flash 1.5s ease-out; }
+@keyframes flash { from { background: rgba(243, 241, 226, 0.16); } to { background: transparent; } }
+
+/* replies */
+.quote { display: flex; align-items: baseline; gap: 8px; max-width: 100%; padding: 2px 0 2px 2px; font-size: 13px; color: var(--cream-55); text-align: left; overflow: hidden; white-space: nowrap; }
+.msg.first .quote { margin-bottom: -2px; }
+.quote:hover { color: var(--cream); }
+.quote-arrow { color: var(--cream-35); }
+.quote-author { font-weight: 600; color: var(--cream-80); flex: none; }
+.quote-text { overflow: hidden; text-overflow: ellipsis; }
+.replying { display: flex; align-items: baseline; gap: 8px; padding: 0 12px 8px; font-size: 13px; white-space: nowrap; overflow: hidden; }
+.replying .quote-text { flex: 1; color: var(--cream-55); }
+
+/* reactions */
+.reactions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: 13px; background: var(--cream-10); border: 1px solid transparent; font-size: 13px; }
+.chip:hover { background: var(--cream-20); }
+.chip.mine { border-color: rgba(255, 27, 80, 0.7); background: rgba(255, 27, 80, 0.14); }
+.chip-emoji { font-size: 15px; line-height: 1; }
+.chip-n { font-variant-numeric: tabular-nums; color: var(--cream-80); }
+.picker { position: absolute; right: 0; bottom: 26px; z-index: 5; display: grid; grid-template-columns: repeat(8, 32px); gap: 2px; padding: 8px; background: var(--ink-2); border: 1px solid var(--cream-10); border-radius: 6px; }
+.pick { width: 32px; height: 32px; border-radius: 4px; font-size: 19px; line-height: 32px; }
+.pick:hover { background: var(--cream-10); }
+
+/* mention autocomplete + badge */
+.composer { position: relative; }
+.suggest { position: absolute; left: 0; bottom: 100%; margin: 0 0 6px; padding: 4px; list-style: none; min-width: 220px; background: var(--ink-2); border: 1px solid var(--cream-10); border-radius: 6px; z-index: 5; }
+.suggest li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; cursor: pointer; }
+.suggest li.on { background: var(--cream-10); }
+.mention-badge { font-size: 11px; font-weight: 700; color: var(--cream); background: var(--hot); border-radius: 8px; padding: 0 6px; line-height: 16px; }

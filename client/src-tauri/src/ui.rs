@@ -81,6 +81,15 @@ pub struct UiMsg {
     pub nonce: String,
     /// 0 = pending (local echo), 1 = delivered (fanned out), 2 = durable, 3 = failed.
     pub state: u8,
+    pub reply_to: Option<String>,
+    pub reactions: Vec<UiReaction>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct UiReaction {
+    pub emoji: String,
+    pub users: Vec<String>,
 }
 
 impl UiMsg {
@@ -94,6 +103,8 @@ impl UiMsg {
             ts: hopon_shared::ids::id_unix_ms(m.id),
             nonce: if m.nonce == 0 { String::new() } else { m.nonce.to_string() },
             state,
+            reply_to: m.reply_to.map(sid),
+            reactions: m.reactions.iter().map(|r| UiReaction { emoji: r.emoji.clone(), users: r.users.iter().map(|u| sid(*u)).collect() }).collect(),
         }
     }
 }
@@ -127,6 +138,9 @@ pub enum UiEvent {
     ServerRemoved { server_id: String, reason: &'static str },
     ChannelDeleted { server_id: String, channel_id: String },
     ReadUpdated { channel_id: String, last_read: String },
+    Reaction { channel_id: String, message_id: String, emoji: String, user_id: String, add: bool },
+    /// A message in this channel mentions you.
+    Mentioned { channel_id: String },
     UserPresence { user_id: String, online: bool },
     /// New or updated messages (merge by `id`, replacing pending by `nonce`).
     Messages { channel_id: String, msgs: Vec<UiMsg> },

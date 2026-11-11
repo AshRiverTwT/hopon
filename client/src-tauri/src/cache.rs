@@ -23,15 +23,35 @@ pub struct Cache {
     tx: mpsc::Sender<Op>,
 }
 
+/// Bump when the message table changes. The cache is disposable: an old
+/// version's message table is dropped and refilled from the server.
+const SCHEMA_VERSION: i64 = 2;
+
 const SCHEMA: &str = "
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 CREATE TABLE IF NOT EXISTS messages (
   channel_id INTEGER NOT NULL, id INTEGER NOT NULL, author_id INTEGER NOT NULL,
-  content TEXT NOT NULL, edited_at INTEGER,
+  content TEXT NOT NULL, edited_at INTEGER, reply_to INTEGER, reactions TEXT,
   PRIMARY KEY (channel_id, id)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v BLOB NOT NULL) WITHOUT ROWID;
 ";
+
+fn reactions_json(r: &[hopon_shared::Reaction]) -> Option<String> {
+    if r.is_empty() {
+        return None;
+    }
+    let v: Vec<(&str, &[Id])> = r.iter().map(|x| (x.emoji.as_str(), x.users.as_slice())).collect();
+    serde_json::to_string(&v).ok()
+}
+
+fn reactions_from(s: Option<String>) -> Vec<hopon_shared::Reaction> {
+    s.and_then(|s| serde_json::from_str::<Vec<(String, Vec<Id>)>>(&s).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(emoji, users)| hopon_shared::Reaction { emoji, users })
+        .collect()
+}
 
 /// Rows kept per channel; older pages come from the server.
 const KEEP_PER_CHANNEL: i64 = 5000;
@@ -39,6 +59,10 @@ const KEEP_PER_CHANNEL: i64 = 5000;
 impl Cache {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         let conn = Connection::open(path)?;
+        let v: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if v < SCHEMA_VERSION {
+            conn.execute_batch(&format!("DROP TABLE IF EXISTS messages; PRAGMA user_version = {SCHEMA_VERSION};"))?;
+        }
         conn.execute_batch(SCHEMA)?;
         let (tx, rx) = mpsc::channel::<Op>();
         std::thread::Builder::new().name("hopon-cache".into()).spawn(move || run(conn, rx))?;
@@ -95,11 +119,12 @@ fn run(mut conn: Connection, rx: mpsc::Receiver<Op>) {
                 match op {
                     Op::Put(ms) => {
                         let mut st = tx.prepare_cached(
-                            "INSERT INTO messages (channel_id, id, author_id, content, edited_at) VALUES (?1, ?2, ?3, ?4, ?5) \
-                             ON CONFLICT (channel_id, id) DO UPDATE SET content = excluded.content, edited_at = excluded.edited_at",
+                            "INSERT INTO messages (channel_id, id, author_id, content, edited_at, reply_to, reactions) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+                             ON CONFLICT (channel_id, id) DO UPDATE SET content = excluded.content, edited_at = excluded.edited_at, \
+                             reply_to = excluded.reply_to, reactions = excluded.reactions",
                         )?;
                         for m in ms {
-                            st.execute(params![m.channel_id, m.id, m.author_id, m.content, m.edited_at])?;
+                            st.execute(params![m.channel_id, m.id, m.author_id, m.content, m.edited_at, m.reply_to, reactions_json(&m.reactions)])?;
                         }
                         puts += 1;
                     }
@@ -118,11 +143,21 @@ fn run(mut conn: Connection, rx: mpsc::Receiver<Op>) {
                     }
                     Op::Page { channel, before, limit, reply } => {
                         let mut st = tx.prepare_cached(
-                            "SELECT id, author_id, content, edited_at FROM messages WHERE channel_id = ?1 AND id < ?2 ORDER BY id DESC LIMIT ?3",
+                            "SELECT id, author_id, content, edited_at, reply_to, reactions FROM messages WHERE channel_id = ?1 AND id < ?2 ORDER BY id DESC LIMIT ?3",
                         )?;
                         let rows = st
                             .query_map(params![channel, before, limit], |r| {
-                                Ok(Message { id: r.get(0)?, channel_id: channel, author_id: r.get(1)?, content: r.get(2)?, edited_at: r.get(3)?, nonce: 0, trace: None })
+                                Ok(Message {
+                                    id: r.get(0)?,
+                                    channel_id: channel,
+                                    author_id: r.get(1)?,
+                                    content: r.get(2)?,
+                                    edited_at: r.get(3)?,
+                                    nonce: 0,
+                                    trace: None,
+                                    reply_to: r.get(4)?,
+                                    reactions: reactions_from(r.get(5)?),
+                                })
                             })?
                             .filter_map(Result::ok)
                             .collect();

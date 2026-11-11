@@ -35,14 +35,16 @@ function history(n: number): Msg[] {
     if (i % 3 === 0) author = (author + 1 + (i % 5)) % names.length;
     ts += 20_000 + ((i * 7919) % 90_000);
     out.push({ id: String(10_000_000 + i), channelId: "7001", authorId: members[author].id, content: lines[(i * 31) % lines.length],
-      editedAt: i % 97 === 0 ? ts : null, ts, nonce: "", state: 2 });
+      editedAt: i % 97 === 0 ? ts : null, ts, nonce: "", state: 2, replyTo: null, reactions: [] });
   }
   return out;
 }
 const hist = history(2000);
-hist.push({ id: "10002000", channelId: "7001", authorId: "1002", content: "Wordle 1,234 3/6\n\n⬛🟨⬛⬛⬛\n🟩🟩⬛🟩⬛\n🟩🟩🟩🟩🟩", editedAt: null, ts: Date.now() - 60000, nonce: "", state: 2 });
-hist.push({ id: "p1", channelId: "7001", authorId: me.id, content: "this one is still sending", editedAt: null, ts: Date.now(), nonce: "1", state: 0 });
-hist.push({ id: "p2", channelId: "7001", authorId: me.id, content: "and this one failed", editedAt: null, ts: Date.now(), nonce: "2", state: 3 });
+hist.push({ id: "10001998", channelId: "7001", authorId: "1003", content: "new build is up: https://github.com/AshRiverTwT/hopon — try **voice** with `echo off` on headsets", editedAt: null, ts: Date.now() - 120000, nonce: "", state: 2, replyTo: null, reactions: [{ emoji: "🔥", users: ["1001", "1002", "1004"] }, { emoji: "👀", users: ["1005"] }] });
+hist.push({ id: "10001999", channelId: "7001", authorId: "1002", content: "<@1001> nice, the dial is _so_ smooth now", editedAt: null, ts: Date.now() - 90000, nonce: "", state: 2, replyTo: "10001998", reactions: [{ emoji: "👍", users: ["1003"] }] });
+hist.push({ id: "10002000", channelId: "7001", authorId: "1002", content: "Wordle 1,234 3/6\n\n⬛🟨⬛⬛⬛\n🟩🟩⬛🟩⬛\n🟩🟩🟩🟩🟩", editedAt: null, ts: Date.now() - 60000, nonce: "", state: 2, replyTo: null, reactions: [] });
+hist.push({ id: "p1", channelId: "7001", authorId: me.id, content: "this one is still sending", editedAt: null, ts: Date.now(), nonce: "1", state: 0, replyTo: null, reactions: [] });
+hist.push({ id: "p2", channelId: "7001", authorId: me.id, content: "and this one failed", editedAt: null, ts: Date.now(), nonce: "2", state: 3, replyTo: null, reactions: [] });
 
 function fakeAvatar(id: string): string {
   const c = document.createElement("canvas"); c.width = c.height = 64;

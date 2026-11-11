@@ -115,9 +115,15 @@ pub async fn load_older(core: C<'_>, channel_id: String, before: String) -> Res<
 
 /// The webview already painted its optimistic copy; this only transmits.
 #[tauri::command]
-pub fn send_message(core: C<'_>, channel_id: String, content: String, nonce: String, t_input_ms: f64) -> Res<()> {
+pub fn send_message(core: C<'_>, channel_id: String, content: String, nonce: String, t_input_ms: f64, reply_to: Option<String>) -> Res<()> {
     let nonce: u64 = nonce.parse().map_err(|_| "bad nonce")?;
-    core.send_message(pid(&channel_id)?, content, nonce, ms_to_us(t_input_ms))
+    let reply_to = reply_to.as_deref().map(pid).transpose()?;
+    core.send_message(pid(&channel_id)?, content, nonce, ms_to_us(t_input_ms), reply_to)
+}
+
+#[tauri::command]
+pub async fn react(core: C<'_>, channel_id: String, message_id: String, emoji: String, add: bool) -> Res<()> {
+    core.request(C2S::React { channel_id: pid(&channel_id)?, message_id: pid(&message_id)?, emoji, add }).await.map(|_| ())
 }
 
 #[tauri::command]

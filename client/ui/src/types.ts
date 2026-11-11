@@ -7,6 +7,8 @@ export interface Msg {
   editedAt: number | null; ts: number; nonce: string;
   /** 0 pending, 1 delivered, 2 durable, 3 failed */
   state: number;
+  replyTo: string | null;
+  reactions: { emoji: string; users: string[] }[];
 }
 export interface Presence { userId: string; channelId: string | null; muted: boolean; deafened: boolean }
 
@@ -20,6 +22,8 @@ export type UiEvent =
   | { t: "serverRemoved"; serverId: string; reason: "deleted" | "kicked" | "left" }
   | { t: "channelDeleted"; serverId: string; channelId: string }
   | { t: "readUpdated"; channelId: string; lastRead: string }
+  | { t: "reaction"; channelId: string; messageId: string; emoji: string; userId: string; add: boolean }
+  | { t: "mentioned"; channelId: string }
   | { t: "userPresence"; userId: string; online: boolean }
   | { t: "messages"; channelId: string; msgs: Msg[] }
   | { t: "msgState"; channelId: string; nonce: string; id: string; state: number }

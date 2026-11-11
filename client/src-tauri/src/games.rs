@@ -154,7 +154,7 @@ async fn post_result(core: Arc<Core>, game: &'static str, raw: String) {
         return;
     };
     let nonce = (now_us() as u64) | 1;
-    match core.send_message(ch, text, nonce, now_us()) {
+    match core.send_message(ch, text, nonce, now_us(), None) {
         Ok(()) => {
             core.cache.kv_set(&dedupe, Some(vec![1]));
             let name = GAMES.iter().find(|g| g.id == game).map(|g| g.name).unwrap_or(game);
@@ -240,16 +240,32 @@ pub async fn games_close(app: tauri::AppHandle, core: tauri::State<'_, Arc<Core>
 #[tauri::command]
 pub fn games_open_external(game: String) -> Res<()> {
     let g = GAMES.iter().find(|g| g.id == game).ok_or("unknown game")?;
+    open_in_browser(g.url)
+}
+
+/// Open an http(s) URL in the system browser. Anything else is refused, so a
+/// message link can never launch a local program or file.
+pub fn open_in_browser(url: &str) -> Res<()> {
+    let parsed: tauri::Url = url.parse().map_err(|_| "not a valid link")?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("only http and https links can be opened".into());
+    }
+    let url = parsed.as_str();
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", g.url]).creation_flags(0x0800_0000).spawn().map_err(|e| e.to_string())?;
+        std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).creation_flags(0x0800_0000).spawn().map_err(|e| e.to_string())?;
     }
     #[cfg(not(windows))]
     {
-        std::process::Command::new("xdg-open").arg(g.url).spawn().map_err(|e| e.to_string())?;
+        std::process::Command::new("xdg-open").arg(url).spawn().map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn open_url(url: String) -> Res<()> {
+    open_in_browser(&url)
 }
 
 fn urlencoding_decode(s: &str) -> String {

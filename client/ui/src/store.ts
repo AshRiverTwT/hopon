@@ -4,6 +4,7 @@ import { call, markPainted, now, randomNonce } from "./ipc";
 import { findId, mergeMsgs, trimTop } from "./merge";
 import { cmpId, type Channel, type Msg, type Presence, type Server, type UiEvent, type User } from "./types";
 import { chime, closeAudio } from "./sounds";
+import { encodeMentions } from "./rich";
 
 /** The open channel holds at most this many messages in the DOM model. */
 const OPEN_CAP = 5000;
@@ -28,6 +29,12 @@ export const [s, set] = createStore({
   online: {} as Record<string, boolean>,
   /** the open list is scrolled to the newest message */
   atBottom: true,
+  /** message being replied to in the composer */
+  replyTo: null as Msg | null,
+  /** unseen @mentions per channel (this session) */
+  mentions: {} as Record<string, number>,
+  /** message to scroll to and flash */
+  jump: null as string | null,
   msgs: [] as Msg[],
   more: true,
   loadingOlder: false,
@@ -165,6 +172,26 @@ function apply(e: UiEvent, painted: string[]) {
       set("online", e.user.id, true);
       break;
     }
+    case "reaction": {
+      if (e.channelId !== s.selChannel) break;
+      const i = findId(s.msgs, e.messageId);
+      if (i < 0) break;
+      set("msgs", i, "reactions", produce((rs: { emoji: string; users: string[] }[]) => {
+        const r = rs.find((x) => x.emoji === e.emoji);
+        if (e.add) {
+          if (!r) rs.push({ emoji: e.emoji, users: [e.userId] });
+          else if (!r.users.includes(e.userId)) r.users.push(e.userId);
+        } else if (r) {
+          r.users = r.users.filter((u) => u !== e.userId);
+          if (!r.users.length) rs.splice(rs.indexOf(r), 1);
+        }
+      }));
+      break;
+    }
+    case "mentioned":
+      if (e.channelId !== s.selChannel || !s.atBottom || !document.hasFocus())
+        set("mentions", e.channelId, (n) => (n ?? 0) + 1);
+      break;
     case "readUpdated":
       setRead(e.channelId, e.lastRead);
       break;
@@ -274,7 +301,8 @@ let openSeq = 0;
 export async function selectChannel(id: string) {
   const seq = ++openSeq;
   batch(() => {
-    set({ selChannel: id, stage: null, msgs: [], more: true, loadingOlder: false, editing: null });
+    set({ selChannel: id, stage: null, msgs: [], more: true, loadingOlder: false, editing: null, replyTo: null, jump: null });
+    set("mentions", id, 0);
   });
   const msgs = await call<Msg[]>("open_channel", { channelId: id });
   if (seq !== openSeq) return;
@@ -309,15 +337,18 @@ export async function loadOlder() {
 export function sendMessage(content: string) {
   const ch = s.selChannel;
   const me = s.user;
-  const text = content.trim();
+  const members = currentServer()?.members ?? [];
+  const text = encodeMentions(content.trim(), members);
   if (!ch || !me || !text) return;
   const tInput = now();
   const nonce = randomNonce();
-  const pending: Msg = { id: "p" + nonce, channelId: ch, authorId: me.id, content: text, editedAt: null, ts: Date.now(), nonce, state: 0 };
+  const replyTo = s.replyTo?.id ?? null;
+  set("replyTo", null);
+  const pending: Msg = { id: "p" + nonce, channelId: ch, authorId: me.id, content: text, editedAt: null, ts: Date.now(), nonce, state: 0, replyTo, reactions: [] };
   // Optimistic copy painted this frame; the core only transmits.
   set("msgs", s.msgs.length, pending);
   markPainted([pending.id]);
-  call("send_message", { channelId: ch, content: text, nonce, tInputMs: tInput }).catch((err) => {
+  call("send_message", { channelId: ch, content: text, nonce, tInputMs: tInput, replyTo }).catch((err) => {
     const i = s.msgs.findIndex((m) => m.id === pending.id);
     if (i >= 0) set("msgs", i, "state", 3);
     toast(String(err));
@@ -327,7 +358,27 @@ export function sendMessage(content: string) {
 export async function editMessage(id: string, content: string) {
   set("editing", null);
   if (!s.selChannel) return;
-  await call("edit_message", { channelId: s.selChannel, id, content }).catch((e) => toast(String(e)));
+  const text = encodeMentions(content, currentServer()?.members ?? []);
+  await call("edit_message", { channelId: s.selChannel, id, content: text }).catch((e) => toast(String(e)));
+}
+
+export function toggleReaction(m: Msg, emoji: string) {
+  if (!s.selChannel || !s.user || m.id.startsWith("p")) return;
+  const mine = m.reactions.find((r) => r.emoji === emoji)?.users.includes(s.user.id) ?? false;
+  call("react", { channelId: s.selChannel, messageId: m.id, emoji, add: !mine }).catch((e) => toast(String(e)));
+}
+
+/** Scroll to a message, paging older history (bounded) until it is loaded. */
+export async function jumpTo(id: string) {
+  const ch = s.selChannel;
+  for (let page = 0; page < 20; page++) {
+    if (ch !== s.selChannel) return;
+    if (findId(s.msgs, id) >= 0) { set("jump", id); return; }
+    if (!s.more) break;
+    while (s.loadingOlder) await new Promise((r) => setTimeout(r, 50));
+    await loadOlder();
+  }
+  toast("That message is too far back to jump to");
 }
 
 export async function deleteMessage(id: string) {

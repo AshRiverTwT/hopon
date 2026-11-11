@@ -29,6 +29,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 pub struct PendingSend {
     pub channel_id: Id,
     pub content: String,
+    pub reply_to: Option<Id>,
     pub t_input: i64,
     pub echoed: bool,
 }
@@ -85,6 +86,8 @@ pub struct Core {
     reconnect: Notify,
     pub voice: crate::voice::Voice,
     pub games: crate::games::Games,
+    /// Set once in `setup`.
+    pub app: std::sync::OnceLock<tauri::AppHandle>,
 }
 
 pub type Res<T> = Result<T, String>;
@@ -104,6 +107,7 @@ impl Core {
             reconnect: Notify::new(),
             voice: crate::voice::Voice::new(),
             games: crate::games::Games::new(),
+            app: std::sync::OnceLock::new(),
         })
     }
 
@@ -352,13 +356,13 @@ impl Core {
 
     /// After (re)authentication: resend un-echoed sends, resync the open channel.
     async fn after_auth(self: Arc<Self>) {
-        let resend: Vec<(u64, Id, String, i64)> = {
+        let resend: Vec<(u64, Id, String, i64, Option<Id>)> = {
             let s = self.store.lock();
-            s.pending.iter().filter(|(_, p)| !p.echoed).map(|(n, p)| (*n, p.channel_id, p.content.clone(), p.t_input)).collect()
+            s.pending.iter().filter(|(_, p)| !p.echoed).map(|(n, p)| (*n, p.channel_id, p.content.clone(), p.t_input, p.reply_to)).collect()
         };
         let off = self.clock.lock().offset_us;
-        for (nonce, channel_id, content, t_input) in resend {
-            self.send_frame(self.next_req(), C2S::Send { channel_id, content, nonce, t_input: t_input + off, t_client_send: now_us() + off });
+        for (nonce, channel_id, content, t_input, reply_to) in resend {
+            self.send_frame(self.next_req(), C2S::Send { channel_id, content, nonce, t_input: t_input + off, t_client_send: now_us() + off, reply_to });
         }
         let open = self.store.lock().open_channel;
         if let Some(ch) = open {
@@ -451,6 +455,14 @@ impl Core {
                 }
                 self.cache.put(vec![Message { trace: None, ..m.clone() }]);
                 self.emit(UiEvent::Messages { channel_id: sid(m.channel_id), msgs: vec![UiMsg::from_msg(m, 1)] });
+                if !own {
+                    if let Some(me) = self.store.lock().me.as_ref().map(|u| u.id) {
+                        if hopon_shared::mentions(&m.content).contains(&me) {
+                            self.emit(UiEvent::Mentioned { channel_id: sid(m.channel_id) });
+                            self.attention();
+                        }
+                    }
+                }
             }
             S2C::Ack { channel_id, nonce, id, .. } => {
                 if let Some(p) = self.store.lock().pending.remove(nonce) {
@@ -578,6 +590,21 @@ impl Core {
                 };
                 self.emit(UiEvent::ServerRemoved { server_id: sid(*server_id), reason });
             }
+            S2C::Reaction { channel_id, message_id, emoji, user_id, add } => {
+                let updated = {
+                    let mut s = self.store.lock();
+                    s.recent.get_mut(channel_id).and_then(|q| {
+                        let i = q.binary_search_by_key(message_id, |x| x.id).ok()?;
+                        let m = &mut q[i];
+                        apply_reaction(&mut m.reactions, emoji, *user_id, *add);
+                        Some(m.clone())
+                    })
+                };
+                if let Some(m) = updated {
+                    self.cache.put(vec![m]);
+                }
+                self.emit(UiEvent::Reaction { channel_id: sid(*channel_id), message_id: sid(*message_id), emoji: emoji.clone(), user_id: sid(*user_id), add: *add });
+            }
             S2C::ReadUpdated { channel_id, last_read } => {
                 {
                     let mut s = self.store.lock();
@@ -646,6 +673,18 @@ impl Core {
         }
     }
 
+    /// Flash the taskbar if the window isn't focused (no plugin needed).
+    pub fn attention(&self) {
+        use tauri::Manager;
+        if let Some(app) = self.app.get() {
+            if let Some(w) = app.get_webview_window("main") {
+                if !w.is_focused().unwrap_or(true) {
+                    let _ = w.request_user_attention(Some(tauri::UserAttentionType::Informational));
+                }
+            }
+        }
+    }
+
     /// Mark `channel` read up to `message_id` (skipped if not newer).
     pub fn mark_read(self: &Arc<Self>, channel: Id, message_id: Id) {
         let newer = {
@@ -671,16 +710,16 @@ impl Core {
 
     // ---------- outbound helpers used by commands ----------
 
-    pub fn send_message(&self, channel_id: Id, content: String, nonce: u64, t_input: i64) -> Res<()> {
+    pub fn send_message(&self, channel_id: Id, content: String, nonce: u64, t_input: i64, reply_to: Option<Id>) -> Res<()> {
         let content = content.trim().to_owned();
         if content.is_empty() || content.chars().count() > MAX_MESSAGE_CHARS {
             return Err("message must be 1-4000 characters".into());
         }
         let off = self.clock.lock().offset_us;
         self.perf.expect_local(format!("p{nonce}"), t_input, now_us());
-        self.store.lock().pending.insert(nonce, PendingSend { channel_id, content: content.clone(), t_input, echoed: false });
+        self.store.lock().pending.insert(nonce, PendingSend { channel_id, content: content.clone(), reply_to, t_input, echoed: false });
         // Offline: stays pending and is sent after reconnect.
-        self.send_frame(self.next_req(), C2S::Send { channel_id, content, nonce, t_input: t_input + off, t_client_send: now_us() + off });
+        self.send_frame(self.next_req(), C2S::Send { channel_id, content, nonce, t_input: t_input + off, t_client_send: now_us() + off, reply_to });
         Ok(())
     }
 
@@ -740,6 +779,27 @@ impl Core {
     }
 }
 
+/// Apply one reaction change to an aggregated list (idempotent).
+pub fn apply_reaction(list: &mut Vec<Reaction>, emoji: &str, user: Id, add: bool) {
+    match list.iter_mut().position(|r| r.emoji == emoji) {
+        Some(i) => {
+            let users = &mut list[i].users;
+            if add {
+                if !users.contains(&user) {
+                    users.push(user);
+                }
+            } else {
+                users.retain(|u| *u != user);
+                if users.is_empty() {
+                    list.remove(i);
+                }
+            }
+        }
+        None if add => list.push(Reaction { emoji: emoji.to_owned(), users: vec![user] }),
+        None => {}
+    }
+}
+
 async fn connect(url: &str) -> anyhow::Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>> {
     let (scheme, rest) = url.split_once("://").ok_or_else(|| anyhow::anyhow!("bad url"))?;
     let hostport = rest.split('/').next().unwrap_or("");
@@ -755,4 +815,24 @@ async fn connect(url: &str) -> anyhow::Result<tokio_tungstenite::WebSocketStream
     cfg.write_buffer_size = 0;
     let (ws, _) = tokio_tungstenite::client_async_tls_with_config(versioned_url(url), tcp, Some(cfg), None).await?;
     Ok(ws)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_reaction;
+
+    #[test]
+    fn reactions_are_idempotent_and_clean_up() {
+        let mut l = vec![];
+        apply_reaction(&mut l, "👍", 1, true);
+        apply_reaction(&mut l, "👍", 1, true);
+        apply_reaction(&mut l, "👍", 2, true);
+        apply_reaction(&mut l, "🔥", 1, true);
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[0].users, vec![1, 2]);
+        apply_reaction(&mut l, "🔥", 1, false);
+        apply_reaction(&mut l, "🔥", 1, false);
+        apply_reaction(&mut l, "🙃", 1, false);
+        assert_eq!(l.len(), 1);
+    }
 }
