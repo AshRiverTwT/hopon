@@ -16,10 +16,12 @@ pub fn pid(s: &str) -> Result<Id, String> {
 pub struct UiUser {
     pub id: String,
     pub name: String,
+    /// 0 = no avatar; otherwise fetch with `avatar(id, v)`.
+    pub avatar_v: u32,
 }
 impl From<&UserInfo> for UiUser {
     fn from(u: &UserInfo) -> Self {
-        Self { id: sid(u.id), name: u.name.clone() }
+        Self { id: sid(u.id), name: u.name.clone(), avatar_v: u.avatar_v }
     }
 }
 
@@ -113,6 +115,7 @@ pub enum UiEvent {
     Server { server: UiServer },
     ChannelCreated { channel: UiChannel },
     MemberJoined { server_id: String, user: UiUser },
+    UserUpdated { user: UiUser },
     /// New or updated messages (merge by `id`, replacing pending by `nonce`).
     Messages { channel_id: String, msgs: Vec<UiMsg> },
     MsgState { channel_id: String, nonce: String, id: String, state: u8 },

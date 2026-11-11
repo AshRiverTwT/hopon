@@ -158,6 +158,19 @@ pub async fn join_invite(core: C<'_>, code: String) -> Res<String> {
     }
 }
 
+// ---------- profile ----------
+
+#[tauri::command]
+pub async fn avatar(core: C<'_>, user_id: String, v: u32) -> Res<Option<String>> {
+    Ok(core.avatar(pid(&user_id)?, v).await)
+}
+
+/// The webview resizes to 128 px WebP before calling this.
+#[tauri::command]
+pub async fn set_avatar(core: C<'_>, data: Vec<u8>) -> Res<()> {
+    core.request(C2S::SetAvatar { data }).await.map(|_| ())
+}
+
 // ---------- voice ----------
 
 #[tauri::command]

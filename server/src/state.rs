@@ -198,8 +198,8 @@ impl State {
         .bind(&ids)
         .fetch_all(&self.db)
         .await?;
-        let mems: Vec<(i64, i64, String)> = sqlx::query_as(
-            "SELECT m.server_id, u.id, u.name FROM members m JOIN users u ON u.id = m.user_id \
+        let mems: Vec<(i64, i64, String, i32)> = sqlx::query_as(
+            "SELECT m.server_id, u.id, u.name, u.avatar_v FROM members m JOIN users u ON u.id = m.user_id \
              WHERE m.server_id = ANY($1) ORDER BY u.name_lower",
         )
         .bind(&ids)
@@ -216,8 +216,8 @@ impl State {
             self.chan_insert(&c);
             out[idx[&server_id]].channels.push(c);
         }
-        for (sid, id, name) in mems {
-            out[idx[&sid]].members.push(UserInfo { id, name });
+        for (sid, id, name, av) in mems {
+            out[idx[&sid]].members.push(UserInfo { id, name, avatar_v: av as u32 });
         }
         for s in &out {
             let g = self.guild_or_insert(s.id, s.members.iter().map(|m| m.id));

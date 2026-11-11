@@ -3,6 +3,7 @@ import { createStore, produce, reconcile } from "solid-js/store";
 import { call, markPainted, now, randomNonce } from "./ipc";
 import { findId, mergeMsgs, trimTop } from "./merge";
 import type { Msg, Presence, Server, UiEvent, User } from "./types";
+import { chime, closeAudio } from "./sounds";
 
 /** The open channel holds at most this many messages in the DOM model. */
 const OPEN_CAP = 5000;
@@ -105,6 +106,15 @@ function apply(e: UiEvent, painted: string[]) {
         set("servers", i, "members", (m) => [...m, e.user]);
       break;
     }
+    case "userUpdated": {
+      const u = e.user;
+      if (s.user?.id === u.id) set("user", "avatarV", u.avatarV);
+      s.servers.forEach((sv, i) => {
+        const j = sv.members.findIndex((m) => m.id === u.id);
+        if (j >= 0) set("servers", i, "members", j, { name: u.name, avatarV: u.avatarV });
+      });
+      break;
+    }
     case "messages":
       if (e.channelId === s.selChannel) {
         const r = mergeMsgs([...s.msgs], e.msgs);
@@ -132,11 +142,27 @@ function apply(e: UiEvent, painted: string[]) {
         if (i >= 0) set("msgs", produce((l) => void l.splice(i, 1)));
       }
       break;
-    case "presence":
+    case "presence": {
+      // Chime when someone else enters or leaves the room you are in.
+      const mine = s.voice.channelId;
+      const prev = s.presence[e.presence.userId]?.channelId ?? null;
+      const next = e.presence.channelId;
+      if (mine && e.presence.userId !== s.user?.id && prev !== next) {
+        if (next === mine) chime("join", s.voice.deafened);
+        else if (prev === mine) chime("leave", s.voice.deafened);
+      }
+    }
       if (e.presence.channelId) set("presence", e.presence.userId, { ...e.presence, serverId: e.serverId });
       else set("presence", produce((p) => void delete p[e.presence.userId]));
       break;
-    case "voice":
+    case "voice": {
+      const was = s.voice.state;
+      if (e.state === "connected" && was !== "connected" && was !== "reconnecting") chime("join", e.deafened);
+      if (e.state === "idle" && was !== "idle") {
+        if (was === "connected" || was === "reconnecting") chime("leave", e.deafened);
+        closeAudio();
+      }
+    }
       set("voice", { channelId: e.channelId, state: e.state, muted: e.muted, deafened: e.deafened, detail: e.detail });
       if (e.detail) toast(e.detail);
       if (e.state === "idle") set("speaking", []);

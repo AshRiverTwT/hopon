@@ -327,7 +327,13 @@ impl Session {
         self.user = Some((uid, name.clone()));
         self.st.register(uid, self.conn, self.tx.clone());
         let access_token = self.st.keys.access_token(uid, &name);
-        self.send(req, S2C::Authed { user: UserInfo { id: uid, name }, access_token, refresh_token, servers, voice }).await;
+        let avatar_v = servers.iter().flat_map(|s| s.members.iter()).find(|m| m.id == uid).map(|m| m.avatar_v);
+        let avatar_v = match avatar_v {
+            Some(v) => v,
+            None => sqlx::query_as::<_, (i32,)>("SELECT avatar_v FROM users WHERE id = $1")
+                .bind(uid).fetch_one(&self.st.db).await.map(|r| r.0 as u32).unwrap_or(0),
+        };
+        self.send(req, S2C::Authed { user: UserInfo { id: uid, name, avatar_v }, access_token, refresh_token, servers, voice }).await;
         Ok(())
     }
 
@@ -530,7 +536,9 @@ impl Session {
                 let g = self.st.guild(sid).await.map_err(internal)?;
                 g.members.write().insert(uid);
                 if inserted {
-                    g.publish(frame(0, S2C::MemberJoined { server_id: sid, user: UserInfo { id: uid, name: name.to_owned() } }));
+                    let (av,): (i32,) = sqlx::query_as("SELECT avatar_v FROM users WHERE id = $1")
+                        .bind(uid).fetch_one(&self.st.db).await.map_err(internal)?;
+                    g.publish(frame(0, S2C::MemberJoined { server_id: sid, user: UserInfo { id: uid, name: name.to_owned(), avatar_v: av as u32 } }));
                 }
                 self.joined_server(req, uid, sid).await
             }
@@ -564,6 +572,32 @@ impl Session {
                     }
                 }
                 self.send(req, S2C::Ok).await;
+                Ok(())
+            }
+            C2S::SetAvatar { data } => {
+                if data.len() > MAX_AVATAR_BYTES {
+                    return Err((ErrorCode::BadRequest, "image too large (max 48 KB)".into()));
+                }
+                if !data.is_empty() && image_mime(&data).is_none() {
+                    return Err((ErrorCode::BadRequest, "avatar must be PNG, JPEG or WebP".into()));
+                }
+                let blob = (!data.is_empty()).then_some(data);
+                let (v,): (i32,) = sqlx::query_as("UPDATE users SET avatar = $2, avatar_v = avatar_v + 1 WHERE id = $1 RETURNING avatar_v")
+                    .bind(uid).bind(blob).fetch_one(&self.st.db).await.map_err(internal)?;
+                let user = UserInfo { id: uid, name: name.to_owned(), avatar_v: v as u32 };
+                for gid in &self.guilds {
+                    if let Some(g) = self.st.guilds.get(gid) {
+                        g.publish(frame(0, S2C::UserUpdated(user.clone())));
+                    }
+                }
+                self.send(req, S2C::UserUpdated(user)).await;
+                Ok(())
+            }
+            C2S::GetAvatar { user_id } => {
+                let row: Option<(Option<Vec<u8>>, i32)> = sqlx::query_as("SELECT avatar, avatar_v FROM users WHERE id = $1")
+                    .bind(user_id).fetch_optional(&self.st.db).await.map_err(internal)?;
+                let (data, v) = row.ok_or((ErrorCode::NotFound, "no such user".into()))?;
+                self.send(req, S2C::Avatar { user_id, avatar_v: v as u32, data: data.unwrap_or_default() }).await;
                 Ok(())
             }
             C2S::Logout { refresh_token } => {

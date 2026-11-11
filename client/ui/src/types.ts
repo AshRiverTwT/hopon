@@ -1,5 +1,5 @@
 // Mirrors client/src-tauri/src/ui.rs. IDs are decimal strings (63-bit).
-export interface User { id: string; name: string }
+export interface User { id: string; name: string; avatarV: number }
 export interface Channel { id: string; serverId: string; name: string; voice: boolean }
 export interface Server { id: string; name: string; ownerId: string; channels: Channel[]; members: User[] }
 export interface Msg {
@@ -16,6 +16,7 @@ export type UiEvent =
   | { t: "server"; server: Server }
   | { t: "channelCreated"; channel: Channel }
   | { t: "memberJoined"; serverId: string; user: User }
+  | { t: "userUpdated"; user: User }
   | { t: "messages"; channelId: string; msgs: Msg[] }
   | { t: "msgState"; channelId: string; nonce: string; id: string; state: number }
   | { t: "edited"; channelId: string; id: string; content: string; editedAt: number }

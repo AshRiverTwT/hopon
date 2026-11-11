@@ -2,12 +2,15 @@
 import { For, Show } from "solid-js";
 import { call } from "../ipc";
 import { currentServer, s, toast, userName } from "../store";
+import { Avatar } from "./Avatar";
+import { openAudio } from "../sounds";
 
 export default function Stage() {
   const ch = () => currentServer()?.channels.find((c) => c.id === s.stage);
   const here = () => Object.values(s.presence).filter((p) => p.channelId === s.stage);
   const joined = () => s.voice.channelId === s.stage;
-  const join = () => call("voice_join", { channelId: s.stage }).catch((e) => toast(String(e)));
+  const join = () => { openAudio(); return call("voice_join", { channelId: s.stage }); };
+  const joinNow = () => join().catch((e) => toast(String(e)));
   const leave = () => call("voice_leave").catch((e) => toast(String(e)));
   return (
     <section class="stage">
@@ -20,8 +23,9 @@ export default function Stage() {
           {(p) => (
             <li class="index-row static" classList={{ speaking: s.speaking.includes(p.userId) }}>
               <span class="index-name">
-                <Show when={s.speaking.includes(p.userId)} fallback={<span class="live-dot ghost" />}><span class="live-dot" /></Show>
+                <Avatar id={p.userId} size={40} class={s.speaking.includes(p.userId) ? "speaking" : ""} />
                 {userName(p.userId)}
+                <Show when={s.speaking.includes(p.userId)}><span class="live-dot" /></Show>
               </span>
               <span class="index-meta">{[p.muted && "Mic off", p.deafened && "Sound off"].filter(Boolean).join(" · ")}</span>
             </li>
@@ -30,7 +34,7 @@ export default function Stage() {
       </ol>
       <div class="stage-actions">
         <Show when={joined()} fallback={
-          <button class="pill solid big" onClick={join} disabled={!!s.voice.channelId && s.voice.state !== "connected" && s.voice.state !== "idle"}>
+          <button class="pill solid big" onClick={joinNow} disabled={!!s.voice.channelId && s.voice.state !== "connected" && s.voice.state !== "idle"}>
             {s.voice.channelId ? "Switch to this room" : "Join"}
           </button>
         }>

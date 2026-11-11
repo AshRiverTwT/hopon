@@ -70,6 +70,8 @@ pub fn run() {
             commands::create_channel,
             commands::create_invite,
             commands::join_invite,
+            commands::avatar,
+            commands::set_avatar,
             commands::voice_prepare,
             commands::voice_join,
             commands::voice_leave,

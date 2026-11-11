@@ -2,6 +2,7 @@ import { createSignal, For, Show } from "solid-js";
 import { call } from "../ipc";
 import { currentServer, s, selectServer, toast } from "../store";
 import { Overlay } from "./Overlay";
+import { Avatar } from "./Avatar";
 
 export function ServersSheet(p: { close: () => void }) {
   const [name, setName] = createSignal("");
@@ -60,7 +61,7 @@ export function MembersSheet(p: { close: () => void }) {
           {(m, i) => (
             <li class="index-row static">
               <span class="index-no">{String(i() + 1).padStart(2, "0")}</span>
-              <span class="index-name">{m.name}<Show when={s.speaking.includes(m.id)}><span class="live-dot" /></Show></span>
+              <span class="index-name"><Avatar id={m.id} size={32} />{m.name}<Show when={s.speaking.includes(m.id)}><span class="live-dot" /></Show></span>
               <span class="index-meta">
                 {m.id === currentServer()?.ownerId ? "Owner" : ""}
                 <Show when={voiceOf(m.id)}>{(v) => <> · in {v()}</>}</Show>

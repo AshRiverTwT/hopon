@@ -494,6 +494,20 @@ impl Core {
                 }
                 self.emit(UiEvent::MemberJoined { server_id: sid(*server_id), user: user.into() });
             }
+            S2C::UserUpdated(u) => {
+                {
+                    let mut s = self.store.lock();
+                    for sv in s.servers.iter_mut() {
+                        for m in sv.members.iter_mut().filter(|m| m.id == u.id) {
+                            *m = u.clone();
+                        }
+                    }
+                    if let Some(me) = s.me.as_mut().filter(|me| me.id == u.id) {
+                        *me = u.clone();
+                    }
+                }
+                self.emit(UiEvent::UserUpdated { user: u.into() });
+            }
             S2C::VoicePresence { server_id, user_id, channel_id, muted, deafened } => {
                 {
                     let mut s = self.store.lock();
@@ -520,7 +534,7 @@ impl Core {
             S2C::Error { message, .. } => {
                 tracing::debug!("server error: {message}");
             }
-            S2C::Pong { .. } | S2C::History { .. } | S2C::Invite { .. } | S2C::VoiceGrant { .. } | S2C::Ok => {}
+            S2C::Pong { .. } | S2C::History { .. } | S2C::Invite { .. } | S2C::VoiceGrant { .. } | S2C::Avatar { .. } | S2C::Ok => {}
         }
     }
 
@@ -555,6 +569,27 @@ impl Core {
         }
         self.clone().refresh_latest(ch);
         msgs.iter().map(|m| UiMsg::from_msg(m, 2)).collect()
+    }
+
+    /// Avatar as a data URL, cached in SQLite by (user, version).
+    pub async fn avatar(&self, user: Id, v: u32) -> Option<String> {
+        if v == 0 {
+            return None;
+        }
+        let key = format!("av:{user}:{v}");
+        let bytes = match self.cache.kv_get(&key).await {
+            Some(b) => b,
+            None => match self.request(C2S::GetAvatar { user_id: user }).await {
+                Ok(S2C::Avatar { data, avatar_v, .. }) if !data.is_empty() => {
+                    self.cache.kv_set(&format!("av:{user}:{avatar_v}"), Some(data.clone()));
+                    data
+                }
+                _ => return None,
+            },
+        };
+        let mime = hopon_shared::image_mime(&bytes)?;
+        use base64::Engine;
+        Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes)))
     }
 
     /// Older page: server when online (authoritative), local cache when offline.

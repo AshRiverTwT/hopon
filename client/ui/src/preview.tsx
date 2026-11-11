@@ -5,9 +5,9 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import type { Msg, Server } from "./types";
 
 const scene = new URLSearchParams(location.search).get("s") ?? "chat";
-const me = { id: "1001", name: "ash" };
+const me = { id: "1001", name: "ash", avatarV: 1 };
 const names = ["ash", "mira", "jun", "tobias", "nell", "kaito", "rosa", "ezra"];
-const members = names.map((n, i) => ({ id: String(1001 + i), name: n }));
+const members = names.map((n, i) => ({ id: String(1001 + i), name: n, avatarV: i % 3 === 2 ? 0 : 1 }));
 const server: Server = {
   id: "9001", name: "Night Shift", ownerId: "1001", members,
   channels: [
@@ -42,7 +42,17 @@ const hist = history(2000);
 hist.push({ id: "p1", channelId: "7001", authorId: me.id, content: "this one is still sending", editedAt: null, ts: Date.now(), nonce: "1", state: 0 });
 hist.push({ id: "p2", channelId: "7001", authorId: me.id, content: "and this one failed", editedAt: null, ts: Date.now(), nonce: "2", state: 3 });
 
-mockIPC((cmd) => {
+function fakeAvatar(id: string): string {
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const g = c.getContext("2d")!; const h = (Number(id) * 47) % 360;
+  const gr = g.createLinearGradient(0, 0, 64, 64);
+  gr.addColorStop(0, `hsl(${h} 45% 55%)`); gr.addColorStop(1, `hsl(${(h + 60) % 360} 50% 25%)`);
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  g.fillStyle = "rgba(255,255,255,.85)"; g.beginPath(); g.arc(32, 26, 11, 0, 7); g.fill(); g.beginPath(); g.arc(32, 62, 22, 0, 7); g.fill();
+  return c.toDataURL();
+}
+
+mockIPC((cmd, args) => {
   switch (cmd) {
     case "open_channel": return scene === "chat" || scene === "voice" ? hist : [];
     case "load_older": return { msgs: [], more: false };
@@ -50,6 +60,7 @@ mockIPC((cmd) => {
     case "audio_devices": return { processing: { aec: false, ns: true, agc: true }, inputs: [{ id: "a", name: "Headset Microphone (Arctis 7)" }], outputs: [{ id: "b", name: "Headset Earphone (Arctis 7)" }], input: "a", output: "b", aec: "Software", ns: "Software", agc: "Software" };
     case "perf_stats": return { rows: [{ name: "text: remote input->paint (synced)", count: 600, p50_ms: 21.3, p95_ms: 28.7, p99_ms: 33.1, max_ms: 40 }], startup: { processToPaintMs: 657, mainToPaintMs: 610, mainToConnectedMs: 2.5 }, clockOffsetMs: 0.1, bestRttMs: 0.4, rssMb: 41 };
     case "create_invite": return "hopon://invite/Kq7xN2pLmA";
+    case "avatar": return fakeAvatar(String((args as { userId: string }).userId));
     default: return null;
   }
 });

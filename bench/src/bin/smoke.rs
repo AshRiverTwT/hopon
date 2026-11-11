@@ -197,6 +197,21 @@ async fn main() -> Result<()> {
         loop { if let S2C::VoicePresence { channel_id, .. } = next_msg(&mut b).await? { ensure!(channel_id.is_none()); break; } }
         Ok(())
     });
+    pass &= check!("avatar: set/get, broadcast, rejects SVG and oversized", {
+        let mut c = Client::connect(&url).await?;
+        let S2C::Authed { .. } = c.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("login") };
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        png.extend_from_slice(&[7u8; 200]);
+        let S2C::UserUpdated(u) = c.call(C2S::SetAvatar { data: png.clone() }).await? else { bail!("set") };
+        ensure!(u.avatar_v >= 1);
+        loop { if let S2C::UserUpdated(x) = next_msg(&mut b).await? { ensure!(x.avatar_v == u.avatar_v); break; } }
+        let S2C::Avatar { data, avatar_v, .. } = b.call(C2S::GetAvatar { user_id: u.id }).await? else { bail!("get") };
+        ensure!(data == png && avatar_v == u.avatar_v, "avatar round trip");
+        ensure!(c.call(C2S::SetAvatar { data: b"<svg xmlns='http://www.w3.org/2000/svg'/>".to_vec() }).await.is_err(), "svg accepted");
+        let mut big = png.clone(); big.resize(MAX_AVATAR_BYTES + 1, 0);
+        ensure!(c.call(C2S::SetAvatar { data: big }).await.is_err(), "oversized accepted");
+        Ok(())
+    });
     pass &= check!("logout revokes the refresh token", {
         let mut c = Client::connect(&url).await?;
         let S2C::Authed { refresh_token, .. } = c.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("login") };

@@ -5,9 +5,10 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Sh
 import { deleteMessage, editMessage, loadOlder, s, set, userName } from "../store";
 import { showsHeader } from "../merge";
 import type { Msg } from "../types";
+import { Avatar } from "./Avatar";
 
 const OVERSCAN = 800; // px above and below the viewport
-const EST_HEADER = 66;
+const EST_HEADER = 70;
 const EST_LINE = 28;
 
 export default function MessageList() {
@@ -123,6 +124,7 @@ function Row(p: { m: Msg; header: boolean; measure: (id: string, n: HTMLElement)
     <div ref={node} class="msg" classList={{ first: p.header, pending: p.m.state === 0, failed: p.m.state === 3 }}>
       <Show when={p.header}>
         <div class="meta">
+          <Avatar id={p.m.authorId} size={20} />
           <span class="author">{userName(p.m.authorId)}</span>
           <span class="time">{fmtTime(p.m.ts)}</span>
         </div>

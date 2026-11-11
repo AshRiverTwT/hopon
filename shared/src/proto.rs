@@ -11,6 +11,8 @@ pub type Id = i64;
 pub const MAX_MESSAGE_CHARS: usize = 4000;
 pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 pub const HISTORY_PAGE_MAX: u16 = 100;
+/// Avatars are small square images (the client uploads 128 px WebP).
+pub const MAX_AVATAR_BYTES: usize = 48 * 1024;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelKind {
@@ -22,6 +24,9 @@ pub enum ChannelKind {
 pub struct UserInfo {
     pub id: Id,
     pub name: String,
+    /// Avatar version; 0 = no avatar. Clients fetch with `GetAvatar` and
+    /// cache by (id, version).
+    pub avatar_v: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -101,6 +106,12 @@ pub enum C2S {
     /// SFU and then sends `VoiceState`.
     VoiceGrant { channel_id: Id },
     VoiceState { channel_id: Option<Id>, muted: bool, deafened: bool },
+    /// PNG, JPEG or WebP, at most `MAX_AVATAR_BYTES`. Empty removes it.
+    SetAvatar {
+        #[serde(with = "serde_bytes")]
+        data: Vec<u8>,
+    },
+    GetAvatar { user_id: Id },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -147,6 +158,27 @@ pub enum S2C {
     VoicePresence { server_id: Id, user_id: Id, channel_id: Option<Id>, muted: bool, deafened: bool },
     LoggedOut,
     Ok,
+    /// A user's profile changed (e.g. new avatar); sent to all their servers.
+    UserUpdated(UserInfo),
+    Avatar {
+        user_id: Id,
+        avatar_v: u32,
+        #[serde(with = "serde_bytes")]
+        data: Vec<u8>,
+    },
+}
+
+/// Image type by magic bytes; only these are accepted as avatars.
+pub fn image_mime(b: &[u8]) -> Option<&'static str> {
+    if b.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
+        Some("image/png")
+    } else if b.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("image/jpeg")
+    } else if b.len() > 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

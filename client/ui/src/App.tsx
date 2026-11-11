@@ -34,7 +34,7 @@ export default function App() {
         <Show when={s.user} fallback={<Login />}>
           <div class="frame">
             <header class="topbar">
-              <span class="wordmark">HopOn</span>
+              <span class="wordmark">HopOn<span class="badge">01</span></span>
               <button class="pill ghost" onClick={() => setSheet({ k: "servers" })}>{currentServer()?.name ?? "Servers"}</button>
               <div class="topbar-right">
                 <Show when={currentServer()}>
