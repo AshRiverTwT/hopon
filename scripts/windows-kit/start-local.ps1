@@ -3,7 +3,7 @@
 #
 #   1. Install PostgreSQL 16 once:  winget install PostgreSQL.PostgreSQL.16
 #      (remember the password you set for the "postgres" user)
-#   2. powershell -ExecutionPolicy Bypass -File start-local.ps1 -PgPassword YOURPASS
+#   2. powershell -ExecutionPolicy Bypass -File start-local.ps1 -PgPassword YOURPASS [-PgPort 5432]
 #   3. Install HopOn_0.1.0_x64-setup.exe, log in (server ws://127.0.0.1:8080/ws),
 #      then run measure-windows.ps1 for cold start / idle RAM / idle CPU.
 #
@@ -11,6 +11,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$PgPassword,
   [string]$PgBin = "C:\Program Files\PostgreSQL\16\bin",
+  [int]$PgPort = 5432,
   [int]$VoiceSecs = 60,
   [switch]$NoBench
 )
@@ -23,9 +24,9 @@ New-Item -ItemType Directory -Force results | Out-Null
 $psql = Join-Path $PgBin "psql.exe"
 if (-not (Test-Path $psql)) { throw "psql.exe not found in $PgBin. Install with: winget install PostgreSQL.PostgreSQL.16 (or pass -PgBin)" }
 $env:PGPASSWORD = $PgPassword
-$exists = & $psql -h 127.0.0.1 -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname='hopon'"
-if ($LASTEXITCODE -ne 0) { throw "could not connect to Postgres as 'postgres' (wrong -PgPassword, or the service is not running)" }
-if ($exists -ne "1") { & $psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE hopon" | Out-Null }
+$exists = & $psql -h 127.0.0.1 -p $PgPort -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname='hopon'"
+if ($LASTEXITCODE -ne 0) { throw "could not connect to Postgres as 'postgres' on port $PgPort (wrong -PgPassword or -PgPort, or the service is not running)" }
+if ($exists -ne "1") { & $psql -h 127.0.0.1 -p $PgPort -U postgres -c "CREATE DATABASE hopon" | Out-Null }
 Write-Host "postgres: ok"
 
 # --- LiveKit ---
@@ -41,7 +42,7 @@ $lkProc = Start-Process $lk -ArgumentList "--config", (Join-Path $here "livekit-
   -RedirectStandardError (Join-Path $here "results\livekit.log")
 
 # --- HopOn server ---
-$env:DATABASE_URL = "postgres://postgres:$([uri]::EscapeDataString($PgPassword))@127.0.0.1/hopon"
+$env:DATABASE_URL = "postgres://postgres:$([uri]::EscapeDataString($PgPassword))@127.0.0.1:$PgPort/hopon"
 $env:HOPON_JWT_SECRET = "local-test-secret-change-for-real-use"
 $env:LIVEKIT_URL = "ws://127.0.0.1:7880"
 $env:LIVEKIT_API_KEY = "devkey"
