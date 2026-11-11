@@ -167,11 +167,11 @@ label.check input { accent-color: var(--hot); width: 15px; height: 15px; }
 }
 .msg.first { padding-top: 20px; }
 .msg:hover { background: var(--cream-05); }
-.meta { display: flex; gap: 10px; align-items: center; height: 20px; margin-bottom: 4px; }
-.author { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--cream); }
-.time { font-size: 12px; color: var(--cream-35); font-variant-numeric: tabular-nums; }
-.body { font-size: 15px; line-height: 1.5; color: var(--cream-80); }
-.msg.pending .body { color: var(--cream-35); }
+.meta { display: flex; gap: 10px; align-items: center; height: 32px; margin-bottom: 2px; }
+.author { font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #fff; }
+.time { font-size: 12px; color: var(--cream-55); font-variant-numeric: tabular-nums; }
+.body { font-size: 16px; line-height: 1.5; color: var(--cream); }
+.msg.pending .body { color: var(--cream-55); }
 .msg.failed .body { color: var(--cream-55); }
 .edited { font-size: 12px; color: var(--cream-35); }
 .actions { position: absolute; right: 12px; bottom: 4px; display: none; gap: 14px; }
@@ -219,7 +219,7 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 /* ---------- sheets ---------- */
 .sheet { position: fixed; inset: 0; z-index: 10; background: var(--ink); display: flex; flex-direction: column; animation: sheet-in 0.18s ease-out; }
 @keyframes sheet-in { from { opacity: 0; transform: translateY(8px); } }
-.sheet-bar { height: 76px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--gutter); }
+.sheet-bar { position: relative; z-index: 2; height: 76px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 var(--gutter); }
 .sheet-body { flex: 1; overflow-y: auto; padding: 24px var(--gutter) 60px calc(var(--dial)); max-width: calc(var(--dial) + 860px); }
 .sheet-title { font-size: clamp(40px, 6vw, 84px); margin-bottom: 32px; }
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 48px; }
@@ -277,7 +277,9 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
   flex: 1; display: grid; grid-template-columns: auto minmax(0, 520px); gap: 56px;
   align-items: center; justify-content: center; padding: 0 var(--gutter) 60px;
   transform: rotate(-4deg); transform-origin: 50% 50%;
+  pointer-events: none; /* the rotated box overlaps the bar; only its items take clicks */
 }
+.cascade > * { pointer-events: auto; }
 .cascade ol { list-style: none; margin: 0; padding: 0; }
 .cascade-cats { text-align: right; }
 .cascade-cats button {

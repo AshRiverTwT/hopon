@@ -8,7 +8,7 @@ export function AudioToggles() {
   const err = (e: unknown) => toast(String(e));
   return (
     <div class="toggles">
-      <span class="me">{s.user && <Avatar id={s.user.id} size={24} />}{s.user?.name}</span>
+      <span class="me">{s.user && <Avatar id={s.user.id} size={30} />}{s.user?.name}</span>
       <button class="tog" classList={{ off: s.voice.muted }} aria-pressed={!s.voice.muted}
         onClick={() => call("voice_mute", { muted: !s.voice.muted }).catch(err)}>
         {s.voice.muted ? "Mic off" : "Mic on"}

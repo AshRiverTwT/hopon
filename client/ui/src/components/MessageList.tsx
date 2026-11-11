@@ -9,8 +9,8 @@ import { Avatar } from "./Avatar";
 import { cellClass, GAMES, parseGameResult } from "../games";
 
 const OVERSCAN = 800; // px above and below the viewport
-const EST_HEADER = 70;
-const EST_LINE = 28;
+const EST_HEADER = 82;
+const EST_LINE = 30;
 
 export default function MessageList() {
   let el!: HTMLDivElement;
@@ -125,7 +125,7 @@ function Row(p: { m: Msg; header: boolean; measure: (id: string, n: HTMLElement)
     <div ref={node} class="msg" classList={{ first: p.header, pending: p.m.state === 0, failed: p.m.state === 3 }}>
       <Show when={p.header}>
         <div class="meta">
-          <Avatar id={p.m.authorId} size={20} />
+          <Avatar id={p.m.authorId} size={32} />
           <span class="author">{userName(p.m.authorId)}</span>
           <span class="time">{fmtTime(p.m.ts)}</span>
         </div>

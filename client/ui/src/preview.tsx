@@ -53,7 +53,10 @@ function fakeAvatar(id: string): string {
   return c.toDataURL();
 }
 
+const calls: string[] = [];
+(window as unknown as { __calls: string[] }).__calls = calls;
 mockIPC((cmd, args) => {
+  calls.push(cmd);
   switch (cmd) {
     case "open_channel": return scene === "chat" || scene === "voice" ? hist : [];
     case "load_older": return { msgs: [], more: false };

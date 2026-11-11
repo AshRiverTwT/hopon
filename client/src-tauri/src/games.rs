@@ -164,8 +164,10 @@ async fn post_result(core: Arc<Core>, game: &'static str, raw: String) {
     }
 }
 
+// These must be async: a sync command runs on the main thread, and creating
+// or resizing a child webview from it deadlocks WebView2 on Windows.
 #[tauri::command]
-pub fn games_open(app: tauri::AppHandle, core: tauri::State<'_, Arc<Core>>, game: String, server_id: String, x: f64, y: f64, w: f64, h: f64) -> Res<()> {
+pub async fn games_open(app: tauri::AppHandle, core: tauri::State<'_, Arc<Core>>, game: String, server_id: String, x: f64, y: f64, w: f64, h: f64) -> Res<()> {
     let g = GAMES.iter().find(|g| g.id == game).ok_or("unknown game")?;
     *core.games.server.lock() = Some(pid(&server_id)?);
     let url: tauri::Url = url_for(g).parse().map_err(|e| format!("{e}"))?;
@@ -206,7 +208,7 @@ pub fn games_server(core: tauri::State<'_, Arc<Core>>, server_id: String) -> Res
 }
 
 #[tauri::command]
-pub fn games_bounds(app: tauri::AppHandle, x: f64, y: f64, w: f64, h: f64) -> Res<()> {
+pub async fn games_bounds(app: tauri::AppHandle, x: f64, y: f64, w: f64, h: f64) -> Res<()> {
     if let Some(wv) = app.get_webview(LABEL) {
         wv.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
         wv.set_size(LogicalSize::new(w, h)).map_err(|e| e.to_string())?;
@@ -217,7 +219,7 @@ pub fn games_bounds(app: tauri::AppHandle, x: f64, y: f64, w: f64, h: f64) -> Re
 /// Native webviews draw above the app's UI, so hide the game while a sheet or
 /// overlay is open.
 #[tauri::command]
-pub fn games_visible(app: tauri::AppHandle, visible: bool) -> Res<()> {
+pub async fn games_visible(app: tauri::AppHandle, visible: bool) -> Res<()> {
     if let Some(wv) = app.get_webview(LABEL) {
         if visible { wv.show() } else { wv.hide() }.map_err(|e| e.to_string())?;
     }
@@ -226,7 +228,7 @@ pub fn games_visible(app: tauri::AppHandle, visible: bool) -> Res<()> {
 
 /// Destroy the webview: its renderer process and memory go with it.
 #[tauri::command]
-pub fn games_close(app: tauri::AppHandle, core: tauri::State<'_, Arc<Core>>) -> Res<()> {
+pub async fn games_close(app: tauri::AppHandle, core: tauri::State<'_, Arc<Core>>) -> Res<()> {
     *core.games.game.lock() = None;
     if let Some(wv) = app.get_webview(LABEL) {
         wv.close().map_err(|e| e.to_string())?;
