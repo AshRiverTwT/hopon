@@ -15,6 +15,42 @@ scripts/     Windows cross-build, size report, Windows measurement (PowerShell)
 results/     raw benchmark output (JSON lines)
 ```
 
+## Features
+
+**Chat**
+- Servers with text channels (with topics) and voice rooms; invite links.
+- Messages: send, edit and delete your own; replies with jump-to-message;
+  emoji reactions; @mentions with autocomplete; typing indicator.
+- Formatting: `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, code
+  blocks, and clickable http(s) links.
+- Unread markers that survive restarts, a "new messages" divider, day
+  separators and "jump to latest".
+- Online/offline presence. The app remembers your last server and channel.
+- Mentions flash the taskbar when the window is in the background.
+
+**Voice**
+- Join and leave, mute and deafen, device selection, push-to-talk.
+- Echo cancellation, noise suppression and gain control, each toggleable.
+- Join/leave chimes and speaking indicators.
+
+**Profiles:** profile pictures.
+
+**Server settings (owner)**
+- Rename the server and channels; set channel topics.
+- Delete channels or the whole server, with a type-the-name confirmation.
+- Remove members, revoke all invites, and delete anyone's message.
+- Members can leave a server.
+
+**Extras:** a games panel (Wordle, Minute Cryptic, Krillion) that posts
+your result to general.
+
+**Not in this version:** image and file attachments, per-user voice
+volume, message search.
+
+**Protocol versions:** client and server must match. A mismatched app shows
+"Update needed" (the server answers HTTP 426), so update both from the same
+kit.
+
 ## Results
 
 Three kinds of numbers below. Only the first kind is a real measurement of
@@ -28,7 +64,7 @@ this code; please run the Windows steps in
 | process start → first paint (5 runs) | **657 ms** median, 677 ms worst | < 1 s |
 | idle CPU, app + 6 WebView2 processes, 60 s | **0.13 %** of all cores | < 1 % |
 | idle RAM, app + WebView2, private | **190 MB** (working set 366 MB, counts shared pages per process) | < 200 MB (revised from 150) |
-| functional smoke test against the Windows server | 20 / 20 pass | — |
+| functional smoke test against the Windows server (earlier build) | 20 / 20 pass | — |
 | server-issued voice grants accepted by LiveKit (Windows build) | ok | — |
 
 ### Measured (Linux cloud container, 4 vCPU, server + clients on one host)
@@ -84,7 +120,7 @@ Target: 150 ms.
 | client start → chat socket connected | 2.3–6.4 ms | pre-connect |
 | client start → first paint (WebKitGTK, software GL) | 666–696 ms | < 1 s |
 | voice join (connect + publish + subscribe), loopback | 166 ms | < 1 s |
-| functional smoke test (`smoke`) | 20 / 20 checks pass | — |
+| functional smoke test (`smoke`) | 34 / 34 checks pass | — |
 | 1-hour voice loopback | 0 / 7200 clicks missed | no dropouts |
 
 ### Not representative (measured here, but the wrong platform)
