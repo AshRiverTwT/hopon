@@ -1,0 +1,20 @@
+{
+  "name": "hopon-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "node --experimental-strip-types --test test/merge.test.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.4",
+    "solid-js": "1.9.9"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vite": "7.1.12",
+    "vite-plugin-solid": "2.11.10"
+  }
+}
