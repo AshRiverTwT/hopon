@@ -126,6 +126,7 @@ async fn detect(track: RemoteAudioTrack, sent: Arc<Vec<AtomicI64>>, secs: u64, d
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let url: String = arg("--url", "ws://127.0.0.1:7880".to_string());
     let key: String = arg("--key", "devkey".to_string());
     let secret: String = arg("--secret", "secret".to_string());

@@ -11,14 +11,14 @@ voice = ["dep:livekit", "dep:jsonwebtoken"]
 [dependencies]
 hopon-shared.workspace = true
 tokio.workspace = true
-tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 futures-util.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json = "1"
 rand = "0.8"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-livekit = { version = "0.10", optional = true }
+livekit = { version = "0.10", optional = true, features = ["rustls-tls-native-roots"] }
 jsonwebtoken = { version = "9", optional = true }
 
 [[bin]]
