@@ -19,6 +19,8 @@ use tauri::Manager;
 
 pub fn run() {
     guard::install_crash_reporter();
+    // wss:// needs a process-wide rustls crypto provider (see Cargo.toml).
+    let _ = rustls::crypto::ring::default_provider().install_default();
     // --perf-exit runs are scripted measurements; allow them alongside.
     if !std::env::args().any(|a| a == "--perf-exit") && !guard::single_instance() {
         return;

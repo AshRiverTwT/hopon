@@ -25,6 +25,9 @@ futures-util.workspace = true
 anyhow.workspace = true
 parking_lot.workspace = true
 base64 = "0.22"
+# TLS for wss:// (chat). Must name a crypto provider explicitly: the copy
+# of rustls with `ring` in the graph is a build-script dependency only.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tauri = { version = "2", default-features = false, features = ["wry", "common-controls-v6", "compression", "unstable"] }

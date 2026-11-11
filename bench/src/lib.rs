@@ -16,6 +16,8 @@ pub struct Client {
 
 impl Client {
     pub async fn connect(url: &str) -> Result<Self> {
+        // wss:// needs an explicit rustls crypto provider (idempotent).
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let u: url_lite::Url = url_lite::parse(url)?;
         let tcp = TcpStream::connect((u.host.as_str(), u.port)).await?;
         tcp.set_nodelay(true)?;
