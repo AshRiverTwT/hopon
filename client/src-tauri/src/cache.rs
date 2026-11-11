@@ -58,7 +58,18 @@ const KEEP_PER_CHANNEL: i64 = 5000;
 
 impl Cache {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
-        let conn = Connection::open(path)?;
+        Self::start(Connection::open(path)?)
+    }
+
+    /// Fallback when the cache file can't be used (locked, corrupt, read-only).
+    pub fn open_in_memory() -> anyhow::Result<Self> {
+        Self::start(Connection::open_in_memory()?)
+    }
+
+    fn start(conn: Connection) -> anyhow::Result<Self> {
+        // Wait for another holder (e.g. an old instance shutting down)
+        // instead of failing immediately with "database is locked".
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let v: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if v < SCHEMA_VERSION {
             conn.execute_batch(&format!("DROP TABLE IF EXISTS messages; PRAGMA user_version = {SCHEMA_VERSION};"))?;

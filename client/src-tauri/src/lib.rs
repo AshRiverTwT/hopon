@@ -3,6 +3,7 @@ mod cache;
 mod commands;
 mod core;
 mod games;
+mod guard;
 mod perf;
 mod secure;
 mod sys;
@@ -17,6 +18,11 @@ use std::sync::Arc;
 use tauri::Manager;
 
 pub fn run() {
+    guard::install_crash_reporter();
+    // --perf-exit runs are scripted measurements; allow them alongside.
+    if !std::env::args().any(|a| a == "--perf-exit") && !guard::single_instance() {
+        return;
+    }
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,livekit=warn,libwebrtc=warn".into()))
         .init();
@@ -25,7 +31,14 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_local_data_dir()?;
             std::fs::create_dir_all(&dir)?;
-            let cache = cache::Cache::open(&dir.join("cache.db"))?;
+            // The cache is disposable: never let it stop the app from starting.
+            let cache = match cache::Cache::open(&dir.join("cache.db")) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!("cache unavailable ({e:#}); using a temporary in-memory cache");
+                    cache::Cache::open_in_memory()?
+                }
+            };
             let default_url = std::env::var("HOPON_URL").unwrap_or_else(|_| "ws://127.0.0.1:8080/ws".into());
             let core = core::Core::new(cache, default_url);
             let _ = core.app.set(app.handle().clone());
