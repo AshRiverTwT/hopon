@@ -157,15 +157,35 @@ async fn main() -> Result<()> {
             r
         }
         "echo" => {
+            // --from measure (default, for the two-PC bench) or --from any (echo
+            // a real app user back to themselves).
+            let from: String = arg("--from", "measure".to_string());
             let (room, mut ev) = Room::connect(&url, &token(&key, &secret, &room_name, "echo"), opts()).await?;
             let source = src();
             let track = LocalAudioTrack::create_audio_track("echo", RtcAudioSource::Native(source.clone()));
             room.local_participant().publish_track(LocalTrack::Audio(track), publish_opts()).await?;
-            println!("echo ready in room {room_name}");
-            let remote = first_audio(&mut ev, Some("measure")).await?;
-            let mut stream = NativeAudioStream::new(remote.rtc_track(), SR as i32, 1);
-            while let Some(f) = stream.next().await {
-                let _ = source.capture_frame(&f).await;
+            println!("echo ready in room {room_name}; waiting for {from}");
+            // Re-attach whenever a (new) matching track appears, e.g. after the
+            // user leaves and rejoins.
+            let mut current: Option<tokio::task::JoinHandle<()>> = None;
+            while let Some(e) = ev.recv().await {
+                if let RoomEvent::TrackSubscribed { track: RemoteTrack::Audio(t), participant, .. } = e {
+                    let who = participant.identity().as_str().to_owned();
+                    if from != "any" && who != from {
+                        continue;
+                    }
+                    println!("echoing {} ({})", participant.name(), who);
+                    if let Some(h) = current.take() {
+                        h.abort();
+                    }
+                    let src2 = source.clone();
+                    current = Some(tokio::spawn(async move {
+                        let mut stream = NativeAudioStream::new(t.rtc_track(), SR as i32, 1);
+                        while let Some(f) = stream.next().await {
+                            let _ = src2.capture_frame(&f).await;
+                        }
+                    }));
+                }
             }
             return Ok(());
         }
