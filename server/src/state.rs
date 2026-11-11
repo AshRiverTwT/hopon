@@ -21,6 +21,7 @@ pub const CONN_QUEUE: usize = 1024;
 pub enum Out {
     Frame(Bytes),
     Subscribe(Id, broadcast::Receiver<Bytes>),
+    Unsubscribe(Id),
     UnsubscribeAll,
     Close,
 }
@@ -44,6 +45,9 @@ impl Guild {
 pub struct Chan {
     pub server_id: Id,
     pub kind: ChannelKind,
+    /// Set (under `order`) when the channel is deleted; sends check it under
+    /// the same lock so nothing is published into a deleted channel.
+    pub deleted: std::sync::atomic::AtomicBool,
     /// Held while assigning an ID and publishing, so fan-out order equals ID
     /// order within a channel. Never held across an await.
     pub order: Mutex<()>,
@@ -69,6 +73,7 @@ pub struct State {
     pub voice: Mutex<HashMap<Id, VoiceEntry>>,
     pub persist: mpsc::Sender<PersistOp>,
     pub metrics: Metrics,
+    pub http: reqwest::Client,
     /// (author, nonce) → (message, accepted at µs). Makes client resends after
     /// a reconnect idempotent. Entries live `NONCE_TTL_US`.
     pub nonces: DashMap<(Id, u64), (hopon_shared::Message, i64)>,
@@ -100,6 +105,7 @@ impl State {
             voice: Mutex::new(HashMap::new()),
             persist,
             metrics: Metrics::new(),
+            http: reqwest::Client::new(),
             nonces: DashMap::new(),
             next_conn: AtomicU64::new(1),
         }
@@ -126,6 +132,45 @@ impl State {
         self.conns.remove_if(&user, |_, v| v.is_empty());
     }
 
+    /// Owner of a server (DB lookup; admin actions are rare).
+    pub async fn owner_of(&self, server_id: Id) -> Option<Id> {
+        sqlx::query_as::<_, (i64,)>("SELECT owner_id FROM servers WHERE id = $1")
+            .bind(server_id)
+            .fetch_optional(&self.db)
+            .await
+            .ok()
+            .flatten()
+            .map(|r| r.0)
+    }
+
+    /// Send to every connection of a user.
+    pub fn to_user(&self, user: Id, mk: impl Fn() -> Out) {
+        if let Some(v) = self.conns.get(&user) {
+            for (_, tx) in v.iter() {
+                let _ = tx.try_send(mk());
+            }
+        }
+    }
+
+    /// Clear a user's voice presence if it is in `server` (optionally only in
+    /// `channel`), announcing the leave. Returns the channel they were in.
+    pub fn clear_voice(&self, user: Id, server: Id, channel: Option<Id>, announce: Option<&Guild>) -> Option<Id> {
+        let removed = {
+            let mut v = self.voice.lock();
+            match v.get(&user) {
+                Some(e) if e.server_id == server && channel.map_or(true, |c| c == e.channel_id) => v.remove(&user),
+                _ => None,
+            }
+        }?;
+        if let Some(g) = announce {
+            g.publish(Bytes::from(hopon_shared::encode(&hopon_shared::ServerFrame {
+                req: 0,
+                msg: hopon_shared::S2C::VoicePresence { server_id: server, user_id: user, channel_id: None, muted: false, deafened: false },
+            })));
+        }
+        Some(removed.channel_id)
+    }
+
     pub fn guild_or_insert(&self, id: Id, members: impl IntoIterator<Item = Id>) -> Arc<Guild> {
         self.guilds
             .entry(id)
@@ -142,7 +187,7 @@ impl State {
         self.chans
             .entry(c.id)
             .or_insert_with(|| {
-                Arc::new(Chan { server_id: c.server_id, kind: c.kind, order: Mutex::new(()) })
+                Arc::new(Chan { server_id: c.server_id, kind: c.kind, deleted: Default::default(), order: Mutex::new(()) })
             })
             .clone()
     }
@@ -152,16 +197,19 @@ impl State {
         let chan = match self.chans.get(&channel_id) {
             Some(c) => c.clone(),
             None => {
-                let row: Option<(i64, i64, String, i16)> =
-                    sqlx::query_as("SELECT id, server_id, name, kind FROM channels WHERE id = $1")
+                let row: Option<(i64, i64, String, i16, String)> =
+                    sqlx::query_as("SELECT id, server_id, name, kind, topic FROM channels WHERE id = $1")
                         .bind(channel_id)
                         .fetch_optional(&self.db)
                         .await
                         .ok()?;
-                let (id, server_id, name, kind) = row?;
-                self.chan_insert(&ChannelInfo { id, server_id, name, kind: kind_from_i16(kind) })
+                let (id, server_id, name, kind, topic) = row?;
+                self.chan_insert(&ChannelInfo { id, server_id, name, kind: kind_from_i16(kind), topic })
             }
         };
+        if chan.deleted.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
         let guild = self.guild(chan.server_id).await.ok()?;
         guild.is_member(user).then_some((chan, guild))
     }
@@ -192,8 +240,8 @@ impl State {
             .await?,
         };
         let ids: Vec<i64> = rows.iter().map(|r| r.0).collect();
-        let chans: Vec<(i64, i64, String, i16)> = sqlx::query_as(
-            "SELECT id, server_id, name, kind FROM channels WHERE server_id = ANY($1) ORDER BY id",
+        let chans: Vec<(i64, i64, String, i16, String)> = sqlx::query_as(
+            "SELECT id, server_id, name, kind, topic FROM channels WHERE server_id = ANY($1) ORDER BY id",
         )
         .bind(&ids)
         .fetch_all(&self.db)
@@ -211,8 +259,8 @@ impl State {
             .map(|(id, name, owner_id)| ServerInfo { id, name, owner_id, channels: vec![], members: vec![] })
             .collect();
         let idx: HashMap<i64, usize> = out.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
-        for (id, server_id, name, kind) in chans {
-            let c = ChannelInfo { id, server_id, name, kind: kind_from_i16(kind) };
+        for (id, server_id, name, kind, topic) in chans {
+            let c = ChannelInfo { id, server_id, name, kind: kind_from_i16(kind), topic };
             self.chan_insert(&c);
             out[idx[&server_id]].channels.push(c);
         }

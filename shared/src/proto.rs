@@ -46,6 +46,18 @@ pub struct ChannelInfo {
     pub server_id: Id,
     pub name: String,
     pub kind: ChannelKind,
+    /// Short description shown under the channel title (may be empty).
+    pub topic: String,
+}
+
+pub const MAX_NAME_CHARS: usize = 64;
+pub const MAX_TOPIC_CHARS: usize = 256;
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemovedReason {
+    Deleted,
+    Kicked,
+    Left,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -123,6 +135,16 @@ pub enum C2S {
         data: Vec<u8>,
     },
     GetAvatar { user_id: Id },
+    // ----- server administration (owner only unless noted) -----
+    RenameServer { server_id: Id, name: String },
+    DeleteServer { server_id: Id },
+    /// `None` leaves a field unchanged.
+    UpdateChannel { channel_id: Id, name: Option<String>, topic: Option<String> },
+    DeleteChannel { channel_id: Id },
+    Kick { server_id: Id, user_id: Id },
+    RevokeInvites { server_id: Id },
+    /// Any member except the owner.
+    LeaveServer { server_id: Id },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -171,6 +193,13 @@ pub enum S2C {
     Ok,
     /// A user's profile changed (e.g. new avatar); sent to all their servers.
     UserUpdated(UserInfo),
+    ServerUpdated { server_id: Id, name: String },
+    /// You are no longer in this server (sent to the affected user, or to
+    /// everyone when it was deleted).
+    ServerRemoved { server_id: Id, reason: RemovedReason },
+    ChannelUpdated(ChannelInfo),
+    ChannelDeleted { server_id: Id, channel_id: Id },
+    MemberLeft { server_id: Id, user_id: Id, reason: RemovedReason },
     Avatar {
         user_id: Id,
         avatar_v: u32,

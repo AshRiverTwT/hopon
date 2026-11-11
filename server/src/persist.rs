@@ -28,7 +28,11 @@ pub enum PersistOp {
     Insert { channel_id: Id, id: Id, author_id: Id, content: String, t_enqueue: i64, ack: AckTo },
     /// `reply` gets whether a row owned by `author_id` was changed.
     Edit { channel_id: Id, id: Id, author_id: Id, content: String, edited_at: i64, reply: oneshot::Sender<bool> },
-    Delete { channel_id: Id, id: Id, author_id: Id, reply: oneshot::Sender<bool> },
+    /// `author_id = None` deletes regardless of author (server owner moderation).
+    Delete { channel_id: Id, id: Id, author_id: Option<Id>, reply: oneshot::Sender<bool> },
+    /// Delete every message (and per-message data) of these channels. Runs in
+    /// queue order, after any inserts already enqueued for them.
+    PurgeChannels(Vec<Id>),
     /// Resolves once every op queued before it is durable.
     Flush(oneshot::Sender<()>),
 }
@@ -107,7 +111,7 @@ async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<bool
                     == 1
             }
             PersistOp::Delete { channel_id, id, author_id, .. } => {
-                sqlx::query("DELETE FROM messages WHERE channel_id = $1 AND id = $2 AND author_id = $3")
+                sqlx::query("DELETE FROM messages WHERE channel_id = $1 AND id = $2 AND ($3::bigint IS NULL OR author_id = $3)")
                     .bind(channel_id)
                     .bind(id)
                     .bind(author_id)
@@ -115,6 +119,10 @@ async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<bool
                     .await?
                     .rows_affected()
                     == 1
+            }
+            PersistOp::PurgeChannels(ids) => {
+                sqlx::query("DELETE FROM messages WHERE channel_id = ANY($1)").bind(ids).execute(&mut *tx).await?;
+                true
             }
             _ => true,
         };
@@ -142,6 +150,7 @@ fn finish(st: &State, ops: impl Iterator<Item = PersistOp>, results: Option<Vec<
             PersistOp::Edit { reply, .. } | PersistOp::Delete { reply, .. } => {
                 let _ = reply.send(ok.unwrap_or(false));
             }
+            PersistOp::PurgeChannels(_) => {}
             PersistOp::Flush(done) => {
                 let _ = done.send(());
             }

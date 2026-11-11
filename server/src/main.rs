@@ -1,5 +1,7 @@
+mod admin;
 mod auth;
 mod config;
+mod livekit;
 mod metrics;
 mod persist;
 mod state;

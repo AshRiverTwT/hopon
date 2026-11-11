@@ -9,7 +9,10 @@ if ! pg_isready -h 127.0.0.1 -q 2>/dev/null; then
   for _ in $(seq 1 50); do pg_isready -h 127.0.0.1 -q && break; sleep 0.2 2>/dev/null || python3 -c "import time; time.sleep(0.2)"; done
 fi
 pg_isready -h 127.0.0.1 -q || { echo "postgres failed to start"; exit 1; }
-if [ "${1:-}" = "--restart-server" ]; then pkill -x hopon-server; python3 -c "import time; time.sleep(0.4)"; fi
+if [ "${1:-}" = "--restart-server" ]; then
+  pkill -x hopon-server
+  for _ in $(seq 1 50); do pgrep -x hopon-server >/dev/null || break; python3 -c "import time; time.sleep(0.1)"; done
+fi
 if ! pgrep -x hopon-server >/dev/null; then
   export DATABASE_URL=postgres://postgres@127.0.0.1/hopon HOPON_JWT_SECRET=devsecret-change-me RUST_LOG=${RUST_LOG:-warn} \
     HOPON_SEND_RATE=100000 LIVEKIT_URL=ws://127.0.0.1:7880 LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=secret-secret-secret-secret-secret

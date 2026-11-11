@@ -15,6 +15,45 @@ async fn next_msg(c: &mut Client) -> Result<S2C> {
     }
 }
 
+
+/// Wait for an unsolicited event matching `f` (skipping others), 5 s max.
+async fn wait_for<T>(c: &mut Client, f: impl Fn(&S2C) -> Option<T>) -> Result<T> {
+    loop {
+        let m = next_msg(c).await?;
+        if let Some(t) = f(&m) {
+            return Ok(t);
+        }
+    }
+}
+
+/// True if no event matching `f` arrives within `ms`.
+async fn quiet(c: &mut Client, ms: u64, f: impl Fn(&S2C) -> bool) -> bool {
+    let end = tokio::time::Instant::now() + std::time::Duration::from_millis(ms);
+    loop {
+        match tokio::time::timeout_at(end, c.recv()).await {
+            Err(_) => return true,
+            Ok(Ok(fr)) if fr.req == 0 && f(&fr.msg) => return false,
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) => return true,
+        }
+    }
+}
+
+/// Owner + member in a fresh server: (owner, member, server, text, voice, member id).
+async fn admin_setup(url: &str) -> Result<(Client, Client, Id, Id, Id, Id)> {
+    let mut o = Client::connect(url).await?;
+    o.signup("own").await?;
+    let S2C::ServerJoined(s) = o.call(C2S::CreateServer { name: "Admin Test".into() }).await? else { bail!("create") };
+    let text = s.channels.iter().find(|c| c.kind == ChannelKind::Text).unwrap().id;
+    let voice = s.channels.iter().find(|c| c.kind == ChannelKind::Voice).unwrap().id;
+    let S2C::Invite { code, .. } = o.call(C2S::CreateInvite { server_id: s.id }).await? else { bail!("invite") };
+    let mut m = Client::connect(url).await?;
+    m.signup("mem").await?;
+    m.call(C2S::JoinInvite { code: code.clone() }).await?;
+    let mid = wait_for(&mut o, |e| if let S2C::MemberJoined { user, .. } = e { Some(user.id) } else { None }).await?;
+    Ok((o, m, s.id, text, voice, mid))
+}
+
 macro_rules! check {
     ($name:expr, $e:expr) => {{
         let r: Result<()> = async { $e }.await;
@@ -210,6 +249,96 @@ async fn main() -> Result<()> {
         ensure!(c.call(C2S::SetAvatar { data: b"<svg xmlns='http://www.w3.org/2000/svg'/>".to_vec() }).await.is_err(), "svg accepted");
         let mut big = png.clone(); big.resize(MAX_AVATAR_BYTES + 1, 0);
         ensure!(c.call(C2S::SetAvatar { data: big }).await.is_err(), "oversized accepted");
+        Ok(())
+    });
+    pass &= check!("admin: non-owners are refused everything", {
+        let (_o, mut m, sid, text, voice, _) = admin_setup(&url).await?;
+        let deny = |r: Result<S2C>| match r { Err(e) if e.to_string().contains("Forbidden") => Ok(()), other => Err(anyhow::anyhow!("not forbidden: {other:?}")) };
+        deny(m.call(C2S::RenameServer { server_id: sid, name: "x".into() }).await)?;
+        deny(m.call(C2S::UpdateChannel { channel_id: text, name: Some("x".into()), topic: None }).await)?;
+        deny(m.call(C2S::DeleteChannel { channel_id: voice }).await)?;
+        deny(m.call(C2S::DeleteServer { server_id: sid }).await)?;
+        deny(m.call(C2S::Kick { server_id: sid, user_id: 1 }).await)?;
+        deny(m.call(C2S::RevokeInvites { server_id: sid }).await)?;
+        Ok(())
+    });
+    pass &= check!("admin: rename server and channel, set topic (broadcast)", {
+        let (mut o, mut m, sid, text, _, _) = admin_setup(&url).await?;
+        o.call(C2S::RenameServer { server_id: sid, name: "  Renamed  ".into() }).await?;
+        let n = wait_for(&mut m, |e| if let S2C::ServerUpdated { name, .. } = e { Some(name.clone()) } else { None }).await?;
+        ensure!(n == "Renamed", "got {n}");
+        o.call(C2S::UpdateChannel { channel_id: text, name: Some("lobby".into()), topic: Some("say hi".into()) }).await?;
+        let c = wait_for(&mut m, |e| if let S2C::ChannelUpdated(c) = e { Some(c.clone()) } else { None }).await?;
+        ensure!(c.name == "lobby" && c.topic == "say hi");
+        ensure!(o.call(C2S::UpdateChannel { channel_id: text, name: None, topic: Some("t".repeat(MAX_TOPIC_CHARS + 1)) }).await.is_err());
+        ensure!(o.call(C2S::RenameServer { server_id: sid, name: "   ".into() }).await.is_err());
+        Ok(())
+    });
+    pass &= check!("admin: owner can delete anyone's message", {
+        let (mut o, mut m, _, text, _, _) = admin_setup(&url).await?;
+        let t = now_us();
+        m.send(C2S::Send { channel_id: text, content: "spam".into(), nonce: 9, t_input: t, t_client_send: t }).await?;
+        let id = wait_for(&mut o, |e| if let S2C::Message(x) = e { Some(x.id) } else { None }).await?;
+        ensure!(matches!(o.call(C2S::Delete { channel_id: text, message_id: id }).await?, S2C::Ok));
+        Ok(())
+    });
+    pass &= check!("admin: delete text channel (gone for sends and history)", {
+        let (mut o, mut m, _, text, _, _) = admin_setup(&url).await?;
+        let t = now_us();
+        m.send(C2S::Send { channel_id: text, content: "before".into(), nonce: 1, t_input: t, t_client_send: t }).await?;
+        wait_for(&mut o, |e| matches!(e, S2C::Message(_)).then_some(())).await?;
+        o.call(C2S::DeleteChannel { channel_id: text }).await?;
+        wait_for(&mut m, |e| matches!(e, S2C::ChannelDeleted { channel_id, .. } if *channel_id == text).then_some(())).await?;
+        ensure!(m.call(C2S::Send { channel_id: text, content: "after".into(), nonce: 2, t_input: t, t_client_send: t }).await.is_err(), "send into deleted channel");
+        ensure!(m.call(C2S::History { channel_id: text, before: None, limit: 10 }).await.is_err(), "history of deleted channel");
+        Ok(())
+    });
+    pass &= check!("admin: delete voice channel clears who's in it", {
+        let (mut o, mut m, _, _, voice, _) = admin_setup(&url).await?;
+        m.call(C2S::VoiceState { channel_id: Some(voice), muted: false, deafened: false }).await?;
+        wait_for(&mut o, |e| matches!(e, S2C::VoicePresence { channel_id: Some(_), .. }).then_some(())).await?;
+        o.call(C2S::DeleteChannel { channel_id: voice }).await?;
+        wait_for(&mut o, |e| matches!(e, S2C::VoicePresence { channel_id: None, .. }).then_some(())).await?;
+        Ok(())
+    });
+    pass &= check!("admin: kick (member removed, stops receiving, told why)", {
+        let (mut o, mut m, sid, text, voice, mid) = admin_setup(&url).await?;
+        m.call(C2S::VoiceState { channel_id: Some(voice), muted: false, deafened: false }).await?;
+        o.call(C2S::Kick { server_id: sid, user_id: mid }).await?;
+        let r = wait_for(&mut m, |e| if let S2C::ServerRemoved { reason, .. } = e { Some(*reason) } else { None }).await?;
+        ensure!(r == RemovedReason::Kicked);
+        wait_for(&mut o, |e| matches!(e, S2C::MemberLeft { user_id, .. } if *user_id == mid).then_some(())).await?;
+        let t = now_us();
+        ensure!(m.call(C2S::Send { channel_id: text, content: "still here?".into(), nonce: 3, t_input: t, t_client_send: t }).await.is_err(), "kicked user can send");
+        o.send(C2S::Send { channel_id: text, content: "secret".into(), nonce: 4, t_input: t, t_client_send: t }).await?;
+        ensure!(quiet(&mut m, 400, |e| matches!(e, S2C::Message(_))).await, "kicked user still receives messages");
+        ensure!(o.call(C2S::Kick { server_id: sid, user_id: mid }).await.is_err(), "double kick");
+        Ok(())
+    });
+    pass &= check!("admin: leave server; owner cannot leave", {
+        let (mut o, mut m, sid, _, _, mid) = admin_setup(&url).await?;
+        m.call(C2S::LeaveServer { server_id: sid }).await?;
+        let r = wait_for(&mut o, |e| if let S2C::MemberLeft { user_id, reason, .. } = e { (*user_id == mid).then_some(*reason) } else { None }).await?;
+        ensure!(r == RemovedReason::Left);
+        ensure!(o.call(C2S::LeaveServer { server_id: sid }).await.is_err(), "owner left");
+        Ok(())
+    });
+    pass &= check!("admin: revoke invites", {
+        let (mut o, _m, sid, _, _, _) = admin_setup(&url).await?;
+        let S2C::Invite { code, .. } = o.call(C2S::CreateInvite { server_id: sid }).await? else { bail!("invite") };
+        o.call(C2S::RevokeInvites { server_id: sid }).await?;
+        let mut x = Client::connect(&url).await?;
+        x.signup("late").await?;
+        ensure!(x.call(C2S::JoinInvite { code }).await.is_err(), "revoked invite still works");
+        Ok(())
+    });
+    pass &= check!("admin: delete server (everyone told, data gone)", {
+        let (mut o, mut m, sid, text, _, _) = admin_setup(&url).await?;
+        o.call(C2S::DeleteServer { server_id: sid }).await?;
+        let r = wait_for(&mut m, |e| if let S2C::ServerRemoved { reason, .. } = e { Some(*reason) } else { None }).await?;
+        ensure!(r == RemovedReason::Deleted);
+        ensure!(o.call(C2S::History { channel_id: text, before: None, limit: 5 }).await.is_err(), "history after delete");
+        ensure!(o.call(C2S::RenameServer { server_id: sid, name: "zombie".into() }).await.is_err(), "rename after delete");
         Ok(())
     });
     pass &= check!("logout revokes the refresh token", {

@@ -1856,6 +1856,7 @@ dependencies = [
  "jsonwebtoken",
  "parking_lot",
  "rand 0.8.8",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2",
@@ -1976,6 +1977,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
+ "webpki-roots 1.0.12",
 ]
 
 [[package]]
@@ -3977,6 +3979,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "webpki-roots 1.0.12",
 ]
 
 [[package]]

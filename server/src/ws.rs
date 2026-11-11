@@ -91,6 +91,9 @@ async fn writer(st: Arc<State>, mut sink: futures_util::stream::SplitSink<WebSoc
             Out::Subscribe(id, r) => {
                 subs.insert(id, BroadcastStream::new(r));
             }
+            Out::Unsubscribe(id) => {
+                subs.remove(&id);
+            }
             Out::UnsubscribeAll => subs.clear(),
             Out::Close => return false,
         }
@@ -356,9 +359,8 @@ impl Session {
 
     async fn subscribe(&mut self, server_id: Id) {
         if let Some(g) = self.st.guilds.get(&server_id) {
-            if self.guilds.insert(server_id) {
-                let _ = self.tx.send(Out::Subscribe(server_id, g.tx.subscribe())).await;
-            }
+            self.guilds.insert(server_id);
+            let _ = self.tx.send(Out::Subscribe(server_id, g.tx.subscribe())).await;
         }
     }
 
@@ -399,6 +401,9 @@ impl Session {
                 // Hot path: assign ID, fan out, then persist asynchronously.
                 let id = {
                     let _order = chan.order.lock();
+                    if chan.deleted.load(Ordering::Relaxed) {
+                        return Err((ErrorCode::NotFound, "channel was deleted".into()));
+                    }
                     let id = self.st.ids.next();
                     let t_send = now_us();
                     let msg = Message {
@@ -450,11 +455,13 @@ impl Session {
                 Ok(())
             }
             C2S::Delete { channel_id, message_id } => {
-                let (_, guild) = self.member_chan(channel_id, uid).await?;
+                let (chan, guild) = self.member_chan(channel_id, uid).await?;
+                // The server owner may delete anyone's message (moderation).
+                let is_owner = self.st.owner_of(chan.server_id).await == Some(uid);
                 let (reply, rx) = oneshot::channel();
                 self.st
                     .persist
-                    .send(PersistOp::Delete { channel_id, id: message_id, author_id: uid, reply })
+                    .send(PersistOp::Delete { channel_id, id: message_id, author_id: (!is_owner).then_some(uid), reply })
                     .await
                     .map_err(internal)?;
                 if !rx.await.unwrap_or(false) {
@@ -525,7 +532,7 @@ impl Session {
                 sqlx::query("INSERT INTO channels (id, server_id, name, kind) VALUES ($1, $2, $3, $4)")
                     .bind(id).bind(server_id).bind(&cname).bind(kind_to_i16(kind))
                     .execute(&self.st.db).await.map_err(internal)?;
-                let info = ChannelInfo { id, server_id, name: cname, kind };
+                let info = ChannelInfo { id, server_id, name: cname, kind, topic: String::new() };
                 self.st.chan_insert(&info);
                 let g = self.st.guild(server_id).await.map_err(internal)?;
                 g.publish(frame(0, S2C::ChannelCreated(info)));
@@ -602,10 +609,11 @@ impl Session {
                 let (v,): (i32,) = sqlx::query_as("UPDATE users SET avatar = $2, avatar_v = avatar_v + 1 WHERE id = $1 RETURNING avatar_v")
                     .bind(uid).bind(blob).fetch_one(&self.st.db).await.map_err(internal)?;
                 let user = UserInfo { id: uid, name: name.to_owned(), avatar_v: v as u32 };
-                for gid in &self.guilds {
-                    if let Some(g) = self.st.guilds.get(gid) {
-                        g.publish(frame(0, S2C::UserUpdated(user.clone())));
-                    }
+                // Only servers the user is still in (membership is authoritative
+                // on the guild; this session's set can be stale after a kick).
+                let frame_b = frame(0, S2C::UserUpdated(user.clone()));
+                for g in self.st.guilds.iter().filter(|g| g.is_member(uid)) {
+                    g.publish(frame_b.clone());
                 }
                 self.send(req, S2C::UserUpdated(user)).await;
                 Ok(())
@@ -624,6 +632,20 @@ impl Session {
                 let _ = self.tx.send(Out::UnsubscribeAll).await;
                 self.guilds.clear();
                 self.send(req, S2C::LoggedOut).await;
+                Ok(())
+            }
+            m @ (C2S::RenameServer { .. }
+            | C2S::DeleteServer { .. }
+            | C2S::UpdateChannel { .. }
+            | C2S::DeleteChannel { .. }
+            | C2S::Kick { .. }
+            | C2S::RevokeInvites { .. }
+            | C2S::LeaveServer { .. }) => {
+                if let C2S::LeaveServer { server_id } = &m {
+                    self.guilds.remove(server_id);
+                }
+                let reply = crate::admin::handle(&self.st, uid, m).await?;
+                self.send(req, reply).await;
                 Ok(())
             }
             C2S::Ping { .. } | C2S::Signup { .. } | C2S::Login { .. } | C2S::Resume { .. } | C2S::Refresh { .. } => unreachable!(),
