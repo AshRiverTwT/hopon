@@ -6,3 +6,4 @@
 {"label":"local-dist-1","missed":0,"mode":"loopback","secs":30,"stats":{"count":60,"max_ms":83.327,"mean_ms":68.592,"p50_ms":68.415,"p95_ms":68.543,"p99_ms":83.327},"t":1794383700342485}
 {"label":"local-dist-2","missed":0,"mode":"loopback","secs":30,"stats":{"count":60,"max_ms":77.119,"mean_ms":71.7288,"p50_ms":73.151,"p95_ms":73.343,"p99_ms":77.119},"t":1794383733481850}
 {"label":"local-dist-3","missed":0,"mode":"loopback","secs":30,"stats":{"count":60,"max_ms":77.951,"mean_ms":72.97466666666668,"p50_ms":77.631,"p95_ms":77.823,"p99_ms":77.951},"t":1794383766634686}
+{"label":"echo-any-test","missed":0,"mode":"measure","secs":20,"stats":{"count":40,"max_ms":62.079,"mean_ms":61.8904,"p50_ms":61.919,"p95_ms":61.983,"p99_ms":62.079},"t":1794397644787938}
