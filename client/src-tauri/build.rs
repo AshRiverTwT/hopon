@@ -1,4 +1,6 @@
 fn main() {
+    // The exe's embedded icon comes from icons/: rebuild resources when it changes.
+    println!("cargo:rerun-if-changed=icons");
     // libwebrtc is built with the static CRT (/MT) and we link Rust with
     // +crt-static (.cargo/config.toml). Tauri's default "static vcruntime,
     // dynamic UCRT" mix would conflict, so turn it off: the whole CRT is then

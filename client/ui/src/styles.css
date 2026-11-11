@@ -452,3 +452,5 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 .compose-row textarea { flex: 1; padding-right: 44px; }
 .emoji-btn { position: absolute; right: 8px; bottom: 7px; width: 32px; height: 32px; border-radius: 6px; display: grid; place-items: center; color: var(--cream-55); }
 .emoji-btn:hover, .emoji-btn.on { color: var(--cream); background: var(--cream-10); }
+
+.leave-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 36px; padding-top: 18px; border-top: 1px solid rgba(255, 27, 80, 0.35); }

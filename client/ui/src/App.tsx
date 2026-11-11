@@ -54,7 +54,7 @@ export default function App() {
               <div class="topbar-right">
                 <Show when={currentServer()}>
                   <button class="pill ghost" onClick={() => setSheet({ k: "members" })}>People {currentServer()!.members.filter((m) => s.online[m.id]).length}/{currentServer()!.members.length}</button>
-                  <button class="pill ghost" onClick={() => setSheet({ k: "server" })}>{isOwner() ? "Server settings" : "Leave"}</button>
+                  <Show when={isOwner()}><button class="pill ghost" onClick={() => setSheet({ k: "server" })}>Server settings</button></Show>
                   <button class="pill ghost" onClick={invite}>Invite</button>
                   <button class="pill ghost" classList={{ active: games() }} onClick={() => setGames((v) => !v)}>Games</button>
                 </Show>

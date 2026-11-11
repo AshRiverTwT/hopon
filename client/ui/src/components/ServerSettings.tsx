@@ -12,7 +12,7 @@ import { VoiceGlyph } from "./icons";
 const err = (e: unknown) => toast(String(e));
 
 /** Inline "type the name to confirm" for destructive actions. */
-function Confirm(p: { name: string; action: string; onConfirm: () => Promise<void>; children?: JSX.Element }) {
+export function Confirm(p: { name: string; action: string; onConfirm: () => Promise<void>; children?: JSX.Element }) {
   const [open, setOpen] = createSignal(false);
   const [typed, setTyped] = createSignal("");
   const [busy, setBusy] = createSignal(false);

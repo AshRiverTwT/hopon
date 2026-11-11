@@ -1,6 +1,7 @@
 import { createSignal, For, Show } from "solid-js";
 import { call } from "../ipc";
-import { currentServer, s, selectServer, toast } from "../store";
+import { currentServer, isOwner, s, selectServer, toast } from "../store";
+import { Confirm } from "./ServerSettings";
 import { Overlay } from "./Overlay";
 import { Avatar } from "./Avatar";
 
@@ -70,6 +71,14 @@ export function MembersSheet(p: { close: () => void }) {
           )}
         </For>
       </ol>
+      <Show when={!isOwner() && currentServer()}>
+        {(sv) => (
+          <div class="leave-row">
+            <span class="muted">Leave {sv().name}? You can rejoin with a new invite.</span>
+            <Confirm name={sv().name} action="Leave server" onConfirm={async () => { await call("leave_server", { serverId: sv().id }); p.close(); }} />
+          </div>
+        )}
+      </Show>
     </Overlay>
   );
 }
