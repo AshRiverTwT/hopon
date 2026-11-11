@@ -4,7 +4,8 @@
 #   1. Install PostgreSQL 16 once:  winget install PostgreSQL.PostgreSQL.16
 #      (remember the password you set for the "postgres" user)
 #   2. powershell -ExecutionPolicy Bypass -File start-local.ps1 -PgPassword YOURPASS [-PgPort 5432]
-#   3. Install HopOn_0.1.0_x64-setup.exe, log in (server ws://127.0.0.1:8080/ws),
+#   3. Install HopOn_0.1.0_x64-setup.exe; on the login screen set Server to
+#      ws://127.0.0.1:18080/ws, sign up,
 #      then run measure-windows.ps1 for cold start / idle RAM / idle CPU.
 #
 # Leave this window open: Ctrl+C stops the servers.
@@ -12,6 +13,8 @@ param(
   [Parameter(Mandatory = $true)][string]$PgPassword,
   [string]$PgBin = "C:\Program Files\PostgreSQL\16\bin",
   [int]$PgPort = 5432,
+  # 8080 is often inside a Windows-reserved port range (Hyper-V/WSL/Docker).
+  [int]$ChatPort = 18080,
   [int]$VoiceSecs = 60,
   [switch]$NoBench
 )
@@ -49,26 +52,28 @@ $env:LIVEKIT_API_KEY = "devkey"
 $env:LIVEKIT_API_SECRET = "secret-secret-secret-secret-secret"
 $env:HOPON_SEND_RATE = "100000"   # benchmarks send faster than the 10/s user limit
 $env:RUST_LOG = "warn"
+$env:HOPON_BIND = "127.0.0.1:$ChatPort"
+$chatUrl = "ws://127.0.0.1:$ChatPort/ws"
 $srv = Start-Process (Join-Path $here "hopon-server.exe") -PassThru -NoNewWindow `
-  -RedirectStandardError (Join-Path $here "results\server.log")
+  -RedirectStandardError (Join-Path $here "results\server.log") -RedirectStandardOutput (Join-Path $here "results\server.out.log")
 
 try {
   $ok = $false
-  for ($i = 0; $i -lt 50; $i++) { try { if ((Invoke-WebRequest http://127.0.0.1:8080/health -UseBasicParsing -TimeoutSec 1).Content -eq "ok") { $ok = $true; break } } catch { Start-Sleep -Milliseconds 200 } }
-  if (-not $ok) { throw "server did not start; see results\server.log" }
+  for ($i = 0; $i -lt 50; $i++) { try { if ((Invoke-WebRequest "http://127.0.0.1:$ChatPort/health" -UseBasicParsing -TimeoutSec 1).Content -eq "ok") { $ok = $true; break } } catch { Start-Sleep -Milliseconds 200 } }
+  if (-not $ok) { throw "server did not start; see results\server.log and results\server.out.log (port $ChatPort reserved? try -ChatPort 28080)" }
   for ($i = 0; $i -lt 50; $i++) { try { Invoke-WebRequest http://127.0.0.1:7880 -UseBasicParsing -TimeoutSec 1 | Out-Null; break } catch { Start-Sleep -Milliseconds 200 } }
-  Write-Host "servers: ok (chat ws://127.0.0.1:8080/ws, voice ws://127.0.0.1:7880)`n"
+  Write-Host "servers: ok (chat $chatUrl, voice ws://127.0.0.1:7880)`n"
 
   if (-not $NoBench) {
-    & .\smoke.exe
-    & .\voice_grant_check.exe
+    & .\smoke.exe --url $chatUrl
+    & .\voice_grant_check.exe --url $chatUrl
     Write-Host "`n== text round trip =="
-    & .\msg_rtt.exe --n 2000 --rate 100 --label windows-local
+    & .\msg_rtt.exe --url $chatUrl --n 2000 --rate 100 --label windows-local
     Write-Host "`n== voice network path through LiveKit ($VoiceSecs s) =="
     & .\voice_loopback.exe --url ws://127.0.0.1:7880 --key devkey --secret secret-secret-secret-secret-secret --secs $VoiceSecs --label windows-local
     Write-Host "`nraw results: $here\results"
   }
-  Write-Host "`nServers are running. Install/open HopOn now (server ws://127.0.0.1:8080/ws)."
+  Write-Host "`nServers are running. Install/open HopOn and set Server (login screen) to $chatUrl"
   Write-Host "Ctrl+Shift+P in the app shows live latency. Press Enter here to stop the servers."
   [void][Console]::ReadLine()
 } finally {

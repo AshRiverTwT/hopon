@@ -15,7 +15,7 @@ HopOn - local Windows test kit
    Allow the firewall prompts (local network only).
 
 3. Install the app: HopOn_0.1.0_x64-setup.exe (per-user, no admin).
-   Sign up. Server URL is ws://127.0.0.1:8080/ws (the default).
+   On the login screen open "Server" and set ws://127.0.0.1:18080/ws, then sign up.
    Ctrl+Shift+P shows the live latency overlay.
 
 4. With the app installed and logged in once, in a second PowerShell:
