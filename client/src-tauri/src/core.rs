@@ -1,0 +1,602 @@
+//! The client core: owns the single WebSocket, all state, the cache and voice.
+//! The webview only renders what it is sent.
+//!
+//! Connection lifecycle: connect at startup (before the user does anything),
+//! sync clocks, authenticate from the stored refresh token, then stream.
+//! On any failure: reconnect with jittered backoff, re-authenticate with the
+//! in-memory access token if still valid, resend un-echoed messages, and
+//! resync the open channel.
+
+use crate::cache::Cache;
+use crate::perf::{Perf, H};
+use crate::ui::*;
+use futures_util::{FutureExt, SinkExt, StreamExt};
+use hopon_shared::time::{now_us, ClockSync};
+use hopon_shared::*;
+use parking_lot::Mutex;
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+use tauri::ipc::Channel;
+use tokio::net::TcpStream;
+use tokio::sync::{mpsc, oneshot, Notify};
+use tokio_tungstenite::tungstenite::Message as WsMsg;
+
+const RECENT_PER_CHANNEL: usize = 300;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub struct PendingSend {
+    pub channel_id: Id,
+    pub content: String,
+    pub t_input: i64,
+    pub echoed: bool,
+}
+
+#[derive(Default)]
+pub struct Store {
+    pub me: Option<UserInfo>,
+    pub servers: Vec<ServerInfo>,
+    pub recent: HashMap<Id, VecDeque<Message>>,
+    /// user → (server, presence)
+    pub voice: HashMap<Id, (Id, VoicePresence)>,
+    pub pending: HashMap<u64, PendingSend>,
+    pub access_token: Option<(String, i64)>,
+    pub refresh_token: Option<String>,
+    pub open_channel: Option<Id>,
+}
+
+impl Store {
+    pub fn server_of(&self, channel: Id) -> Option<&ServerInfo> {
+        self.servers.iter().find(|s| s.channels.iter().any(|c| c.id == channel))
+    }
+    pub fn user_name(&self, id: Id) -> Option<String> {
+        self.servers.iter().flat_map(|s| s.members.iter()).find(|u| u.id == id).map(|u| u.name.clone())
+    }
+    fn insert_recent(&mut self, m: Message) {
+        let q = self.recent.entry(m.channel_id).or_default();
+        match q.binary_search_by_key(&m.id, |x| x.id) {
+            Ok(i) => q[i] = m,
+            Err(i) => {
+                // Older than our window and the window is full: not "recent".
+                if i == 0 && q.len() >= RECENT_PER_CHANNEL {
+                    return;
+                }
+                q.insert(i, m);
+                while q.len() > RECENT_PER_CHANNEL {
+                    q.pop_front();
+                }
+            }
+        }
+    }
+    fn session_event(&self) -> UiEvent {
+        UiEvent::Session {
+            user: self.me.as_ref().map(Into::into),
+            servers: self.servers.iter().map(Into::into).collect(),
+            voice: self.voice.values().map(|(_, p)| p.into()).collect(),
+        }
+    }
+}
+
+pub struct Core {
+    pub perf: Perf,
+    pub cache: Cache,
+    pub store: Mutex<Store>,
+    pub clock: Mutex<ClockSync>,
+    pub url: Mutex<String>,
+    ui: Mutex<(Option<Channel<UiEvent>>, Vec<UiEvent>)>,
+    out: Mutex<Option<mpsc::UnboundedSender<WsMsg>>>,
+    waiters: Mutex<HashMap<u32, oneshot::Sender<S2C>>>,
+    req: AtomicU32,
+    reconnect: Notify,
+    pub voice: crate::voice::Voice,
+}
+
+pub type Res<T> = Result<T, String>;
+
+impl Core {
+    pub fn new(cache: Cache, url: String) -> Arc<Self> {
+        Arc::new(Self {
+            perf: Perf::new(),
+            cache,
+            store: Mutex::new(Store::default()),
+            clock: Mutex::new(ClockSync::default()),
+            url: Mutex::new(url),
+            ui: Mutex::new((None, Vec::new())),
+            out: Mutex::new(None),
+            waiters: Mutex::new(HashMap::new()),
+            req: AtomicU32::new(1),
+            reconnect: Notify::new(),
+            voice: crate::voice::Voice::new(),
+        })
+    }
+
+    // ---------- UI plumbing ----------
+
+    pub fn emit(&self, ev: UiEvent) {
+        let mut ui = self.ui.lock();
+        match &ui.0 {
+            Some(ch) => {
+                if ch.send(ev.clone()).is_err() {
+                    ui.0 = None;
+                    ui.1.push(ev);
+                }
+            }
+            None => {
+                if ui.1.len() < 512 {
+                    ui.1.push(ev);
+                }
+            }
+        }
+    }
+
+    pub fn attach_ui(&self, ch: Channel<UiEvent>) {
+        let mut ui = self.ui.lock();
+        let snap = self.store.lock().session_event();
+        let _ = ch.send(snap);
+        for ev in ui.1.drain(..) {
+            let _ = ch.send(ev);
+        }
+        ui.0 = Some(ch);
+    }
+
+    pub fn session_snapshot(&self) -> UiEvent {
+        self.store.lock().session_event()
+    }
+
+    pub fn error(&self, m: impl Into<String>) {
+        self.emit(UiEvent::Error { message: m.into() });
+    }
+
+    // ---------- requests ----------
+
+    fn next_req(&self) -> u32 {
+        // Wraps far beyond any realistic session; 0 is reserved for events.
+        let r = self.req.fetch_add(1, Ordering::Relaxed);
+        if r == 0 { self.req.fetch_add(1, Ordering::Relaxed) } else { r }
+    }
+
+    pub fn send_frame(&self, req: u32, msg: C2S) -> bool {
+        let bytes = encode(&ClientFrame { req, msg });
+        match &*self.out.lock() {
+            Some(tx) => tx.send(WsMsg::Binary(bytes.into())).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Request/response with timeout. Server errors become `Err(message)`.
+    pub async fn request(&self, msg: C2S) -> Res<S2C> {
+        let req = self.next_req();
+        let (tx, rx) = oneshot::channel();
+        self.waiters.lock().insert(req, tx);
+        if !self.send_frame(req, msg) {
+            self.waiters.lock().remove(&req);
+            return Err("offline".into());
+        }
+        match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
+            Ok(Ok(S2C::Error { message, .. })) => Err(message),
+            Ok(Ok(m)) => Ok(m),
+            Ok(Err(_)) => Err("connection lost".into()),
+            Err(_) => {
+                self.waiters.lock().remove(&req);
+                Err("timed out".into())
+            }
+        }
+    }
+
+    pub fn me(&self) -> Option<Id> {
+        self.store.lock().me.as_ref().map(|u| u.id)
+    }
+
+    pub fn force_reconnect(&self) {
+        self.reconnect.notify_one();
+    }
+
+    // ---------- connection loop ----------
+
+    pub async fn run(self: Arc<Self>) {
+        let mut backoff = 100u64;
+        let mut first = true;
+        loop {
+            self.emit(UiEvent::Conn { state: "connecting", rtt_ms: None });
+            let url = self.url.lock().clone();
+            match tokio::time::timeout(Duration::from_secs(5), connect(&url)).await {
+                Ok(Ok(ws)) => {
+                    backoff = 100;
+                    self.clone().session(ws, &mut first).await;
+                }
+                Ok(Err(e)) => tracing::info!("connect {url}: {e}"),
+                Err(_) => tracing::info!("connect {url}: timeout"),
+            }
+            *self.out.lock() = None;
+            for (_, w) in self.waiters.lock().drain() {
+                drop(w);
+            }
+            self.emit(UiEvent::Conn { state: "offline", rtt_ms: None });
+            let jitter = (now_us() as u64) % (backoff / 2 + 1);
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(backoff + jitter)) => {}
+                _ = self.reconnect.notified() => {}
+            }
+            backoff = (backoff * 2).min(5_000);
+        }
+    }
+
+    async fn session(self: Arc<Self>, ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>, first: &mut bool) {
+        let (mut sink, mut stream) = ws.split();
+        let (tx, mut rx) = mpsc::unbounded_channel::<WsMsg>();
+        *self.out.lock() = Some(tx);
+
+        // Writer: feed everything ready, flush once.
+        let writer = tokio::spawn(async move {
+            while let Some(m) = rx.recv().await {
+                if sink.feed(m).await.is_err() {
+                    return;
+                }
+                while let Some(Some(m)) = rx.recv().now_or_never() {
+                    if sink.feed(m).await.is_err() {
+                        return;
+                    }
+                }
+                if sink.flush().await.is_err() {
+                    return;
+                }
+            }
+        });
+
+        // Reader runs concurrently with the handshake below.
+        let me = self.clone();
+        let reader = tokio::spawn(async move {
+            loop {
+                let next = tokio::time::timeout(Duration::from_secs(25), stream.next()).await;
+                match next {
+                    Ok(Some(Ok(WsMsg::Binary(b)))) => {
+                        let t = now_us();
+                        match decode::<ServerFrame>(&b) {
+                            Ok(f) => me.on_frame(f, t),
+                            Err(e) => tracing::warn!("bad frame: {e}"),
+                        }
+                    }
+                    Ok(Some(Ok(WsMsg::Close(_)))) | Ok(None) | Ok(Some(Err(_))) | Err(_) => return,
+                    Ok(Some(Ok(_))) => {}
+                }
+            }
+        });
+
+        // Clock sync: a burst of pings, keep the tightest.
+        let mut best = None;
+        for _ in 0..5 {
+            if let Some(rtt) = self.ping().await {
+                best = Some(best.map_or(rtt, |b: i64| b.min(rtt)));
+            }
+        }
+        self.emit(UiEvent::Conn { state: "online", rtt_ms: best.map(|r| r as f64 / 1000.0) });
+        if std::mem::take(first) {
+            let t = now_us() - self.perf.t_main;
+            if let Some(s) = self.perf.startup.lock().as_mut() {
+                s.main_to_connected_ms = Some(t as f64 / 1000.0);
+            }
+            tracing::info!("connected {:.1} ms after start", t as f64 / 1000.0);
+        }
+        self.clone().authenticate().await;
+
+        let keepalive = {
+            let me = self.clone();
+            tokio::spawn(async move {
+                let mut iv = tokio::time::interval(Duration::from_secs(10));
+                iv.tick().await;
+                loop {
+                    iv.tick().await;
+                    let rtt = me.ping().await;
+                    me.emit(UiEvent::Conn { state: "online", rtt_ms: rtt.map(|r| r as f64 / 1000.0) });
+                }
+            })
+        };
+
+        tokio::select! {
+            _ = reader => {}
+            _ = self.reconnect.notified() => {}
+        }
+        keepalive.abort();
+        writer.abort();
+    }
+
+    async fn ping(&self) -> Option<i64> {
+        let t0 = now_us();
+        match self.request(C2S::Ping { t_client: t0 }).await {
+            Ok(S2C::Pong { t_server, .. }) => {
+                let t1 = now_us();
+                let rtt = self.clock.lock().sample(t0, t_server, t1);
+                self.perf.rec(H::WsRtt, rtt);
+                Some(rtt)
+            }
+            _ => None,
+        }
+    }
+
+    async fn authenticate(self: Arc<Self>) {
+        let (access, refresh) = {
+            let s = self.store.lock();
+            (s.access_token.clone(), s.refresh_token.clone())
+        };
+        let refresh = match refresh {
+            Some(r) => Some(r),
+            None => self.cache.kv_get("refresh").await.and_then(|b| crate::secure::unprotect(&b)).and_then(|b| String::from_utf8(b).ok()),
+        };
+        let now_s = now_us() / 1_000_000;
+        if let Some((tok, exp)) = access.filter(|(_, exp)| *exp > now_s + 30) {
+            let _ = exp;
+            if self.request(C2S::Resume { access_token: tok }).await.is_ok() {
+                return self.after_auth().await;
+            }
+        }
+        if let Some(r) = refresh {
+            match self.request(C2S::Refresh { refresh_token: r }).await {
+                Ok(_) => return self.after_auth().await,
+                Err(e) if e == "offline" || e == "timed out" || e == "connection lost" => return,
+                Err(_) => {
+                    self.cache.kv_set("refresh", None);
+                    self.store.lock().refresh_token = None;
+                }
+            }
+        }
+        let ev = self.session_snapshot();
+        self.emit(ev);
+    }
+
+    /// After (re)authentication: resend un-echoed sends, resync the open channel.
+    async fn after_auth(self: Arc<Self>) {
+        let resend: Vec<(u64, Id, String, i64)> = {
+            let s = self.store.lock();
+            s.pending.iter().filter(|(_, p)| !p.echoed).map(|(n, p)| (*n, p.channel_id, p.content.clone(), p.t_input)).collect()
+        };
+        let off = self.clock.lock().offset_us;
+        for (nonce, channel_id, content, t_input) in resend {
+            self.send_frame(self.next_req(), C2S::Send { channel_id, content, nonce, t_input: t_input + off, t_client_send: now_us() + off });
+        }
+        let open = self.store.lock().open_channel;
+        if let Some(ch) = open {
+            self.clone().refresh_latest(ch);
+        }
+        self.voice.on_reconnect(self.clone());
+    }
+
+    /// Fetch the latest page from the server and merge into the UI.
+    pub fn refresh_latest(self: Arc<Self>, ch: Id) {
+        tauri::async_runtime::spawn(async move {
+            if let Ok(S2C::History { messages, .. }) = self.request(C2S::History { channel_id: ch, before: None, limit: 50 }).await {
+                let ui: Vec<UiMsg> = messages.iter().rev().map(|m| UiMsg::from_msg(m, 2)).collect();
+                {
+                    let mut s = self.store.lock();
+                    for m in &messages {
+                        s.insert_recent(m.clone());
+                    }
+                }
+                self.cache.put(messages);
+                self.emit(UiEvent::Messages { channel_id: sid(ch), msgs: ui });
+            }
+        });
+    }
+
+    // ---------- inbound ----------
+
+    fn on_frame(self: &Arc<Self>, f: ServerFrame, t_recv: i64) {
+        self.apply(&f.msg, t_recv);
+        if f.req != 0 {
+            if let Some(w) = self.waiters.lock().remove(&f.req) {
+                let _ = w.send(f.msg);
+            }
+        }
+    }
+
+    fn apply(self: &Arc<Self>, msg: &S2C, t_recv: i64) {
+        match msg {
+            S2C::Authed { user, access_token, refresh_token, servers, voice } => {
+                {
+                    let mut s = self.store.lock();
+                    if s.me.as_ref().map(|u| u.id) != Some(user.id) {
+                        s.recent.clear();
+                        s.pending.clear();
+                        s.open_channel = None;
+                    }
+                    s.me = Some(user.clone());
+                    s.servers = servers.clone();
+                    s.voice = voice
+                        .iter()
+                        .filter_map(|v| servers.iter().find(|sv| sv.channels.iter().any(|c| c.id == v.channel_id)).map(|sv| (v.user_id, (sv.id, v.clone()))))
+                        .collect();
+                    s.access_token = Some((access_token.clone(), now_us() / 1_000_000 + 14 * 60));
+                    if !refresh_token.is_empty() {
+                        s.refresh_token = Some(refresh_token.clone());
+                    }
+                }
+                if !refresh_token.is_empty() {
+                    if let Some(b) = crate::secure::protect(refresh_token.as_bytes()) {
+                        self.cache.kv_set("refresh", Some(b));
+                    }
+                }
+                let ev = self.session_snapshot();
+                self.emit(ev);
+            }
+            S2C::Message(m) => {
+                let t_emit = now_us();
+                let (own, t_input_local) = {
+                    let mut s = self.store.lock();
+                    let own = s.me.as_ref().map(|u| u.id) == Some(m.author_id);
+                    let mut t_in = None;
+                    if own {
+                        if let Some(p) = s.pending.get_mut(&m.nonce) {
+                            p.echoed = true;
+                            t_in = Some(p.t_input);
+                        }
+                    }
+                    s.insert_recent(m.clone());
+                    (own, t_in)
+                };
+                let clock = *self.clock.lock();
+                if let Some(t) = t_input_local {
+                    self.perf.rec(H::OwnEcho, t_recv - t);
+                }
+                if let Some(tr) = m.trace {
+                    self.perf.expect_server(sid(m.id), clock.to_local(tr.t_input), clock.to_local(tr.t_server_send), t_emit, own);
+                }
+                self.cache.put(vec![Message { trace: None, ..m.clone() }]);
+                self.emit(UiEvent::Messages { channel_id: sid(m.channel_id), msgs: vec![UiMsg::from_msg(m, 1)] });
+            }
+            S2C::Ack { channel_id, nonce, id, .. } => {
+                if let Some(p) = self.store.lock().pending.remove(nonce) {
+                    self.perf.rec(H::OwnAck, t_recv - p.t_input);
+                }
+                self.emit(UiEvent::MsgState { channel_id: sid(*channel_id), nonce: nonce.to_string(), id: sid(*id), state: 2 });
+            }
+            S2C::Edited { channel_id, id, content, edited_at } => {
+                {
+                    let mut s = self.store.lock();
+                    if let Some(q) = s.recent.get_mut(channel_id) {
+                        if let Ok(i) = q.binary_search_by_key(id, |x| x.id) {
+                            q[i].content = content.clone();
+                            q[i].edited_at = Some(*edited_at);
+                        }
+                    }
+                }
+                self.cache.edit(*channel_id, *id, content.clone(), *edited_at);
+                self.emit(UiEvent::Edited { channel_id: sid(*channel_id), id: sid(*id), content: content.clone(), edited_at: *edited_at });
+            }
+            S2C::Deleted { channel_id, id } => {
+                {
+                    let mut s = self.store.lock();
+                    if let Some(q) = s.recent.get_mut(channel_id) {
+                        if let Ok(i) = q.binary_search_by_key(id, |x| x.id) {
+                            q.remove(i);
+                        }
+                    }
+                }
+                self.cache.delete(*channel_id, *id);
+                self.emit(UiEvent::Deleted { channel_id: sid(*channel_id), id: sid(*id) });
+            }
+            S2C::ServerJoined(sv) => {
+                {
+                    let mut s = self.store.lock();
+                    s.servers.retain(|x| x.id != sv.id);
+                    s.servers.push(sv.clone());
+                }
+                self.emit(UiEvent::Server { server: sv.into() });
+            }
+            S2C::ChannelCreated(c) => {
+                {
+                    let mut s = self.store.lock();
+                    if let Some(sv) = s.servers.iter_mut().find(|x| x.id == c.server_id) {
+                        if !sv.channels.iter().any(|x| x.id == c.id) {
+                            sv.channels.push(c.clone());
+                        }
+                    }
+                }
+                self.emit(UiEvent::ChannelCreated { channel: c.into() });
+            }
+            S2C::MemberJoined { server_id, user } => {
+                {
+                    let mut s = self.store.lock();
+                    if let Some(sv) = s.servers.iter_mut().find(|x| x.id == *server_id) {
+                        if !sv.members.iter().any(|x| x.id == user.id) {
+                            sv.members.push(user.clone());
+                        }
+                    }
+                }
+                self.emit(UiEvent::MemberJoined { server_id: sid(*server_id), user: user.into() });
+            }
+            S2C::VoicePresence { server_id, user_id, channel_id, muted, deafened } => {
+                {
+                    let mut s = self.store.lock();
+                    match channel_id {
+                        Some(c) => {
+                            s.voice.insert(*user_id, (*server_id, VoicePresence { channel_id: *c, user_id: *user_id, muted: *muted, deafened: *deafened }));
+                        }
+                        None => {
+                            s.voice.remove(user_id);
+                        }
+                    }
+                }
+                self.emit(UiEvent::Presence {
+                    server_id: sid(*server_id),
+                    presence: UiPresence { user_id: sid(*user_id), channel_id: channel_id.map(sid), muted: *muted, deafened: *deafened },
+                });
+            }
+            S2C::LoggedOut => {
+                *self.store.lock() = Store::default();
+                self.cache.kv_set("refresh", None);
+                let ev = self.session_snapshot();
+                self.emit(ev);
+            }
+            S2C::Error { message, .. } => {
+                tracing::debug!("server error: {message}");
+            }
+            S2C::Pong { .. } | S2C::History { .. } | S2C::Invite { .. } | S2C::VoiceGrant { .. } | S2C::Ok => {}
+        }
+    }
+
+    // ---------- outbound helpers used by commands ----------
+
+    pub fn send_message(&self, channel_id: Id, content: String, nonce: u64, t_input: i64) -> Res<()> {
+        let content = content.trim().to_owned();
+        if content.is_empty() || content.chars().count() > MAX_MESSAGE_CHARS {
+            return Err("message must be 1-4000 characters".into());
+        }
+        let off = self.clock.lock().offset_us;
+        self.perf.expect_local(format!("p{nonce}"), t_input, now_us());
+        self.store.lock().pending.insert(nonce, PendingSend { channel_id, content: content.clone(), t_input, echoed: false });
+        // Offline: stays pending and is sent after reconnect.
+        self.send_frame(self.next_req(), C2S::Send { channel_id, content, nonce, t_input: t_input + off, t_client_send: now_us() + off });
+        Ok(())
+    }
+
+    /// Messages to show immediately when a channel is opened.
+    pub async fn open_channel(self: &Arc<Self>, ch: Id) -> Vec<UiMsg> {
+        let mut msgs: Vec<Message> = {
+            let mut s = self.store.lock();
+            s.open_channel = Some(ch);
+            s.recent.get(&ch).map(|q| q.iter().rev().take(80).rev().cloned().collect()).unwrap_or_default()
+        };
+        if msgs.len() < 40 {
+            let before = msgs.first().map(|m| m.id).unwrap_or(i64::MAX);
+            let mut older = self.cache.page(ch, before, 60).await;
+            older.reverse();
+            older.extend(msgs);
+            msgs = older;
+        }
+        self.clone().refresh_latest(ch);
+        msgs.iter().map(|m| UiMsg::from_msg(m, 2)).collect()
+    }
+
+    /// Older page: server when online (authoritative), local cache when offline.
+    pub async fn load_older(&self, ch: Id, before: Id) -> (Vec<UiMsg>, bool) {
+        match self.request(C2S::History { channel_id: ch, before: Some(before), limit: 50 }).await {
+            Ok(S2C::History { messages, more, .. }) => {
+                let ui = messages.iter().rev().map(|m| UiMsg::from_msg(m, 2)).collect();
+                self.cache.put(messages);
+                (ui, more)
+            }
+            _ => {
+                let msgs = self.cache.page(ch, before, 50).await;
+                let more = msgs.len() == 50;
+                (msgs.iter().rev().map(|m| UiMsg::from_msg(m, 2)).collect(), more)
+            }
+        }
+    }
+}
+
+async fn connect(url: &str) -> anyhow::Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>> {
+    let (scheme, rest) = url.split_once("://").ok_or_else(|| anyhow::anyhow!("bad url"))?;
+    let hostport = rest.split('/').next().unwrap_or("");
+    let default = if scheme == "wss" { 443 } else { 80 };
+    let (host, port) = match hostport.rsplit_once(':') {
+        Some((h, p)) => (h.trim_matches(['[', ']']).to_string(), p.parse()?),
+        None => (hostport.to_string(), default),
+    };
+    let tcp = TcpStream::connect((host.as_str(), port)).await?;
+    tcp.set_nodelay(true)?;
+    let mut cfg = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
+    cfg.max_message_size = Some(MAX_FRAME_BYTES);
+    cfg.write_buffer_size = 0;
+    let (ws, _) = tokio_tungstenite::client_async_tls_with_config(url, tcp, Some(cfg), None).await?;
+    Ok(ws)
+}
