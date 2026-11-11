@@ -19,8 +19,13 @@ Set-Location (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $psql = Join-Path $PgBin "psql.exe"
 if (-not (Test-Path $psql)) { throw "psql.exe not found in $PgBin (pass -PgBin)" }
 $env:PGPASSWORD = $PgPassword
-$rows = & $psql -h 127.0.0.1 -p $PgPort -U postgres -d hopon -tA -F "|" -c "SELECT c.id, s.name, c.name FROM channels c JOIN servers s ON s.id = c.server_id WHERE c.kind = 1 ORDER BY c.id DESC LIMIT 20"
-if ($LASTEXITCODE -ne 0 -or -not $rows) { throw "no voice channels found. Sign up in the app first (it has a server with a 'Voice' channel), or create a server." }
+$q = "SELECT c.id, s.name, c.name FROM channels c JOIN servers s ON s.id = c.server_id WHERE c.kind = 1 ORDER BY c.id DESC LIMIT 20"
+$rows = & $psql -h 127.0.0.1 -p $PgPort -U postgres -d hopon -tA -F "|" -c $q
+if ($LASTEXITCODE -ne 0) { throw "could not query Postgres on port $PgPort (check -PgPassword / -PgPort)" }
+if (-not $rows) {
+  Write-Host "No voice channels yet. In HopOn click + (left rail) and create a server; it comes with a 'Voice' channel. Waiting..."
+  while (-not $rows) { Start-Sleep 2; $rows = & $psql -h 127.0.0.1 -p $PgPort -U postgres -d hopon -tA -F "|" -c $q }
+}
 $rows = @($rows)
 for ($i = 0; $i -lt $rows.Count; $i++) { $f = $rows[$i].Split("|"); "[{0}] {1} / {2}" -f $i, $f[1], $f[2] }
 $f = $rows[$Pick].Split("|")
