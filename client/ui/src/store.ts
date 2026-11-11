@@ -1,4 +1,4 @@
-import { batch } from "solid-js";
+import { batch, createSignal } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import { call, markPainted, now, randomNonce } from "./ipc";
 import { findId, mergeMsgs, trimTop } from "./merge";
@@ -48,6 +48,57 @@ export const userName = (id: string) => {
 };
 export const currentServer = () => s.servers.find((x) => x.id === s.selServer) ?? null;
 export const isOwner = () => !!s.user && currentServer()?.ownerId === s.user.id;
+
+// ---------- typing ----------
+// Separate signal (not the store) so typing churn never touches the list.
+
+const TYPING_MS = 6000;
+const typers = new Map<string, Map<string, number>>(); // channel → user → expires
+const [typingTick, setTypingTick] = createSignal(0);
+let typingTimer = 0;
+
+function sweepTyping() {
+  typingTimer = 0;
+  const now = Date.now();
+  let next = Infinity;
+  for (const [ch, users] of typers) {
+    for (const [u, exp] of users) if (exp <= now) users.delete(u); else next = Math.min(next, exp);
+    if (!users.size) typers.delete(ch);
+  }
+  setTypingTick((n) => n + 1);
+  // Only keep a timer while someone is typing (idle CPU stays at zero).
+  if (next !== Infinity) typingTimer = window.setTimeout(sweepTyping, next - now + 20);
+}
+
+function noteTyping(ch: string, user: string, on: boolean) {
+  let users = typers.get(ch);
+  if (on) {
+    if (!users) typers.set(ch, (users = new Map()));
+    users.set(user, Date.now() + TYPING_MS);
+  } else if (!users?.delete(user)) return;
+  setTypingTick((n) => n + 1);
+  if (!typingTimer) typingTimer = window.setTimeout(sweepTyping, TYPING_MS + 20);
+}
+
+/** Names typing in a channel (re-evaluates as the set changes). */
+export function typingIn(ch: string | null): string[] {
+  typingTick();
+  if (!ch) return [];
+  return [...(typers.get(ch)?.keys() ?? [])].map(userName);
+}
+
+let lastTypingSent = 0;
+let lastTypingCh = "";
+/** Composer input: tell others, at most every 3 s per channel. */
+export function iAmTyping() {
+  const ch = s.selChannel;
+  if (!ch) return;
+  const now = Date.now();
+  if (ch === lastTypingCh && now - lastTypingSent < 3000) return;
+  lastTypingSent = now;
+  lastTypingCh = ch;
+  call("typing", { channelId: ch }).catch(() => {});
+}
 
 // ---------- read state ----------
 
@@ -188,6 +239,9 @@ function apply(e: UiEvent, painted: string[]) {
       }));
       break;
     }
+    case "typing":
+      noteTyping(e.channelId, e.userId, true);
+      break;
     case "mentioned":
       if (e.channelId !== s.selChannel || !s.atBottom || !document.hasFocus())
         set("mentions", e.channelId, (n) => (n ?? 0) + 1);
@@ -235,6 +289,7 @@ function apply(e: UiEvent, painted: string[]) {
         maybeMarkRead();
       }
       bumpLastId(e.channelId, e.msgs);
+      for (const m of e.msgs) noteTyping(e.channelId, m.authorId, false);
       break;
     case "msgState":
       if (e.channelId === s.selChannel) {
@@ -344,6 +399,7 @@ export function sendMessage(content: string) {
   const nonce = randomNonce();
   const replyTo = s.replyTo?.id ?? null;
   set("replyTo", null);
+  lastTypingSent = 0;
   const pending: Msg = { id: "p" + nonce, channelId: ch, authorId: me.id, content: text, editedAt: null, ts: Date.now(), nonce, state: 0, replyTo, reactions: [] };
   // Optimistic copy painted this frame; the core only transmits.
   set("msgs", s.msgs.length, pending);

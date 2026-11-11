@@ -155,6 +155,8 @@ struct Session {
     user: Option<(Id, String)>,
     guilds: HashSet<Id>,
     auth_attempts: u32,
+    /// Last typing broadcast per channel (server-side rate limit).
+    typing: std::collections::HashMap<Id, Instant>,
     // Token bucket for sends: `send_rate`/s, burst 3x.
     bucket: f64,
     bucket_t: Instant,
@@ -169,7 +171,7 @@ impl Session {
     fn new(st: Arc<State>, tx: ConnTx) -> Self {
         let conn = st.conn_id();
         let bucket = st.cfg.send_rate * 3.0;
-        Self { st, tx, conn, user: None, guilds: HashSet::new(), auth_attempts: 0, bucket, bucket_t: Instant::now(), closed: false }
+        Self { st, tx, conn, user: None, guilds: HashSet::new(), typing: Default::default(), auth_attempts: 0, bucket, bucket_t: Instant::now(), closed: false }
     }
 
     async fn send(&mut self, req: u32, msg: S2C) {
@@ -651,6 +653,23 @@ impl Session {
                     Err(e) => return Err((ErrorCode::BadRequest, e.into())),
                 }
                 self.send(req, S2C::Ok).await;
+                Ok(())
+            }
+            C2S::Typing { channel_id } => {
+                // Fire-and-forget: no reply, silently dropped when too frequent.
+                let now = Instant::now();
+                if self.typing.get(&channel_id).map_or(false, |t| now.duration_since(*t) < std::time::Duration::from_secs(2)) {
+                    return Ok(());
+                }
+                let (chan, guild) = self.member_chan(channel_id, uid).await?;
+                if chan.kind != ChannelKind::Text {
+                    return Ok(());
+                }
+                if self.typing.len() > 64 {
+                    self.typing.retain(|_, t| now.duration_since(*t) < std::time::Duration::from_secs(10));
+                }
+                self.typing.insert(channel_id, now);
+                guild.publish(frame(0, S2C::Typing { channel_id, user_id: uid }));
                 Ok(())
             }
             C2S::MarkRead { channel_id, message_id } => {

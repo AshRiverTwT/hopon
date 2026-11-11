@@ -139,6 +139,7 @@ pub enum UiEvent {
     ChannelDeleted { server_id: String, channel_id: String },
     ReadUpdated { channel_id: String, last_read: String },
     Reaction { channel_id: String, message_id: String, emoji: String, user_id: String, add: bool },
+    Typing { channel_id: String, user_id: String },
     /// A message in this channel mentions you.
     Mentioned { channel_id: String },
     UserPresence { user_id: String, online: bool },

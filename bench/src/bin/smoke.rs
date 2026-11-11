@@ -425,6 +425,15 @@ async fn main() -> Result<()> {
         ensure!(!n.iter().any(|x| x.id == root));
         Ok(())
     });
+    pass &= check!("typing: relayed to others, rate-limited", {
+        let (mut o, mut m, _, text, _, mid) = admin_setup(&url).await?;
+        m.send(C2S::Typing { channel_id: text }).await?;
+        let who = wait_for(&mut o, |e| if let S2C::Typing { user_id, .. } = e { Some(*user_id) } else { None }).await?;
+        ensure!(who == mid);
+        m.send(C2S::Typing { channel_id: text }).await?;
+        ensure!(quiet(&mut o, 400, |e| matches!(e, S2C::Typing { .. })).await, "not rate-limited");
+        Ok(())
+    });
     pass &= check!("logout revokes the refresh token", {
         let mut c = Client::connect(&url).await?;
         let S2C::Authed { refresh_token, .. } = c.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("login") };

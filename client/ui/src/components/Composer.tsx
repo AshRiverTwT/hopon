@@ -1,7 +1,14 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
-import { currentServer, s, sendMessage, set, userName } from "../store";
+import { currentServer, iAmTyping, s, sendMessage, set, typingIn, userName } from "../store";
 import { preview } from "../rich";
 import { Avatar } from "./Avatar";
+
+function typingLine(names: string[]): string {
+  if (!names.length) return "";
+  if (names.length === 1) return `${names[0]} is typing…`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+  return "Several people are typing…";
+}
 
 export default function Composer() {
   const [text, setText] = createSignal("");
@@ -88,12 +95,13 @@ export default function Composer() {
         rows={1}
         maxLength={4000}
         placeholder={s.replyTo ? `Reply in ${name()}` : `Write in ${name()}`}
-        onInput={(e) => { setText(e.currentTarget.value); setCaret(e.currentTarget.selectionStart); setPick(0); resize(); }}
+        onInput={(e) => { setText(e.currentTarget.value); setCaret(e.currentTarget.selectionStart); setPick(0); resize(); if (e.currentTarget.value.trim()) iAmTyping(); }}
         onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
         onClick={(e) => setCaret(e.currentTarget.selectionStart)}
         onKeyDown={onKey}
         autofocus
       />
+      <div class="typing" aria-live="polite">{typingLine(typingIn(s.selChannel))}</div>
     </div>
   );
 }

@@ -68,6 +68,7 @@ pub fn run() {
             commands::send_message,
             commands::mark_read,
             commands::react,
+            commands::typing,
             commands::edit_message,
             commands::delete_message,
             commands::create_server,

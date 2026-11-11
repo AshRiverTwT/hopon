@@ -605,6 +605,11 @@ impl Core {
                 }
                 self.emit(UiEvent::Reaction { channel_id: sid(*channel_id), message_id: sid(*message_id), emoji: emoji.clone(), user_id: sid(*user_id), add: *add });
             }
+            S2C::Typing { channel_id, user_id } => {
+                if self.store.lock().me.as_ref().map(|u| u.id) != Some(*user_id) {
+                    self.emit(UiEvent::Typing { channel_id: sid(*channel_id), user_id: sid(*user_id) });
+                }
+            }
             S2C::ReadUpdated { channel_id, last_read } => {
                 {
                     let mut s = self.store.lock();

@@ -190,6 +190,8 @@ pub enum C2S {
         data: Vec<u8>,
     },
     GetAvatar { user_id: Id },
+    /// "I'm typing in this channel" (ephemeral; send at most every 3 s).
+    Typing { channel_id: Id },
     /// Everything up to and including `message_id` has been seen. Markers
     /// only move forward.
     MarkRead { channel_id: Id, message_id: Id },
@@ -252,6 +254,8 @@ pub enum S2C {
     /// A user's profile changed (e.g. new avatar); sent to all their servers.
     UserUpdated(UserInfo),
     Reaction { channel_id: Id, message_id: Id, emoji: String, user_id: Id, add: bool },
+    /// Someone is typing (show for ~6 s unless refreshed).
+    Typing { channel_id: Id, user_id: Id },
     /// Your read marker moved (from another of your devices).
     ReadUpdated { channel_id: Id, last_read: Id },
     UserPresence { user_id: Id, online: bool },
