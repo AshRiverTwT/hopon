@@ -41,7 +41,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--
 .stat .n small { font-size: 56px; font-stretch: 100%; margin-left: 10px; color: var(--hot); letter-spacing: 0; }
 .stat .l { font-size: 30px; color: var(--ink); margin-top: 18px; font-weight: 500; }
 .stat .d { font-size: 22px; color: var(--mute); margin-top: 6px; }
-.foot { position: absolute; left: 96px; right: 96px; bottom: 52px; font-size: 19px; color: #6f6c64; }
+.foot { position: absolute; left: 96px; right: 96px; bottom: 44px; font-size: 24px; line-height: 1.35; color: #8a867c; }
 
 /* S4 compare */
 #s4 .head { position: absolute; left: 96px; top: 96px; font-size: 220px; }
@@ -67,7 +67,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--
 .tile.x { background: #3a3838; border-color: #3a3838; }
 .sharebtn { font-size: 40px; font-weight: 600; padding: 22px 64px; border-radius: 10px; background: #3a3837; color: var(--ink); }
 .sharebtn.on { background: var(--hot); }
-#s5 .patch { position: absolute; left: 600px; top: 886px; width: 1360px; height: 540px; background: var(--bg); overflow: hidden; }
+#s5 .patch { position: absolute; left: 600px; top: 412px; width: 1360px; height: 1014px; background: var(--bg); overflow: hidden; }
 #s5 .flow { position: absolute; left: 23px; right: 0; bottom: 0; }
 .msg { padding: 26px 0 30px; }
 .msg .hd { display: flex; align-items: center; gap: 20px; margin-bottom: 18px; }
@@ -76,6 +76,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--
 .av::after { content: ""; position: absolute; left: 4px; top: 25px; width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,.85); }
 .msg .nm { font-size: 25px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
 .msg .tm { font-size: 24px; color: var(--mute); }
+.msg .tx { font-size: 29px; line-height: 40px; color: var(--ink); }
 .card { display: inline-block; background: #222121; border-left: 5px solid var(--hot); padding: 26px 30px 24px; border-radius: 0 6px 6px 0; }
 .card .eb { font-size: 21px; letter-spacing: .1em; color: var(--mute); }
 .card .tt { font-family: "Archivo"; font-weight: 800; font-stretch: 68%; font-size: 46px; margin: 10px 0 14px; }
@@ -84,8 +85,8 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--
 .mini i.g { background: #4f8a4a; } .mini i.y { background: #b39a3a; }
 .toast { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); background: var(--ink); color: var(--bg); font-size: 34px; font-weight: 600; padding: 22px 40px; border-radius: 10px; white-space: nowrap; }
 .toast b { color: var(--hot); }
-.cursor { position: absolute; width: 54px; height: 54px; }
-.ring { position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 4px solid var(--hot); }
+.cursor { position: absolute; left: 0; top: 0; width: 54px; height: 54px; z-index: 5; }
+.ring { position: absolute; left: 0; top: 0; z-index: 5; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 4px solid var(--hot); }
 
 /* S6 end */
 #s6 .tag { position: absolute; left: 50%; top: 300px; width: 150px; height: 150px; margin-left: -75px; font-size: 108px; border-radius: 14px; }
@@ -103,7 +104,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--
   <section class="scene" id="s1">
     <div class="tag">H</div>
     <div class="word display">HopOn</div>
-    <div class="sub">Chat &amp; voice for Windows. <b>Native Rust.</b> No browser bloat.</div>
+    <div class="sub">Chat &amp; voice for Windows. <b>Native Rust core.</b> No bundled Chromium.</div>
   </section>
 
   <section class="scene" id="s2a">
@@ -121,11 +122,11 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--
   <section class="scene" id="s3">
     <div class="head display">Fast<span class="dot">.</span></div>
     <div class="stats">
-      <div class="stat"><div class="n"><span data-count="0.43" data-dec="2">0.43</span><small>ms</small></div><div class="l">Message delivery</div><div class="d">p95, server fan-out*</div></div>
-      <div class="stat"><div class="n"><span data-count="657" data-dec="0">657</span><small>ms</small></div><div class="l">Cold start to first paint</div><div class="d">Windows 11, measured</div></div>
-      <div class="stat"><div class="n"><span data-count="0.13" data-dec="2">0.13</span><small>%</small></div><div class="l">CPU while idle</div><div class="d">Windows 11, measured</div></div>
+      <div class="stat"><div class="n"><span data-count="0.43" data-dec="2">0.43</span><small>ms</small></div><div class="l">Message delivery</div><div class="d">p95 round trip, loopback*</div></div>
+      <div class="stat"><div class="n"><span data-count="657" data-dec="0">657</span><small>ms</small></div><div class="l">Cold start to first paint</div><div class="d">Windows, measured</div></div>
+      <div class="stat"><div class="n"><span data-count="0.13" data-dec="2">0.13</span><small>%</small></div><div class="l">CPU while idle</div><div class="d">Windows, measured</div></div>
     </div>
-    <div class="foot">* p95 over loopback, 200 receivers: 1.44 ms. Measured with HopOn's bench suite. Your network adds its own round trip.</div>
+    <div class="foot">* Client → server → client on one machine, measured with HopOn's bench suite. Fan-out to 200 receivers: 1.44 ms p95. Real networks add their own latency.</div>
   </section>
 
   <section class="scene" id="s4">
@@ -142,7 +143,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--
         <div class="bar them"><div class="who">Discord</div><div class="track"><div class="fill" data-w="0.75"></div><div class="val" data-x="0.75">~132 MB†</div></div></div>
       </div>
     </div>
-    <div class="foot">HopOn: measured on Windows 11 (private working set, installer file). † Discord: public reports, not our measurements — TechRadar and Windows Latest (2025–26) for idle RAM; download listings for the x64 installer. Varies by build and setup.</div>
+    <div class="foot">HopOn: measured on Windows (private working set, installer file). † Discord: public reports, not our measurements — TechRadar and Windows Latest (2025–26) for idle RAM; download listings for the x64 installer. Varies by build and setup.</div>
   </section>
 
   <section class="scene" id="s5">
@@ -153,6 +154,18 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--
         <div class="sharebtn" id="share">Share</div>
       </div>
       <div class="patch"><div class="flow" id="flow">
+        <div class="msg">
+          <div class="hd"><div class="av" style="background:linear-gradient(135deg,#c08a4f,#4a2f1a)"></div><span class="nm">jun</span><span class="tm">12:58 AM</span></div>
+          <div class="tx">voice is so clean tonight</div><div class="tx">the dial thing is growing on me</div>
+        </div>
+        <div class="msg">
+          <div class="hd"><div class="av" style="background:linear-gradient(135deg,#5aa06a,#1f4a2a)"></div><span class="nm">nell</span><span class="tm">01:07 AM</span></div>
+          <div class="tx">latency overlay says under 1 ms on my end</div><div class="tx">pushed the new build, installer is 9.9 MB</div><div class="tx">shipping it</div>
+        </div>
+        <div class="msg">
+          <div class="hd"><div class="av" style="background:linear-gradient(135deg,#6b4fc0,#2b1a52)"></div><span class="nm">ash</span><span class="tm">01:11 AM</span></div>
+          <div class="tx">ok who's up for wordle</div>
+        </div>
         <div class="msg">
           <div class="hd"><div class="av" style="background:linear-gradient(135deg,#b05a9d,#4a1d3e)"></div><span class="nm">mira</span><span class="tm">02:07 PM</span></div>
           <div class="card"><div class="eb">WORDLE</div><div class="tt">Wordle 1,234 4/6</div><div class="mini" data-rows="xyxxx,xxgxy,gygxx,ggggg"></div></div>

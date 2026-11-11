@@ -190,7 +190,7 @@ add(tone(midi(81), 2.5, .01, .9, harm=((2, .2),)), 27.1, .08)
 mix = np.stack([L, R], axis=1)
 # Gentle saturation, normalise, 0.6 s fade-out.
 mix = np.tanh(mix * 1.1)
-mix /= np.abs(mix).max() / .89
+mix /= np.abs(mix).max() / .75
 fade = int(.6 * SR)
 mix[-fade:] *= np.linspace(1, 0, fade)[:, None]
 
