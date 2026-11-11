@@ -221,7 +221,7 @@ The **Games** pill opens Wordle, Minute Cryptic or Krillion in a side panel.
   no memory while closed.
 - **Score posting.** When you press the game's own **Share** button, the
   result is posted to the server's `general` channel (or its first text
-  channel) and shown as a score card.
+  channel) and shown as a score card.  
 - **Security.**
   - Game pages get no access to the app's commands.
   - An injected script reports shared text through the page title, and the
