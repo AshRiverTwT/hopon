@@ -2,6 +2,7 @@ import { createMemo, createSignal, For, Show } from "solid-js";
 import { currentServer, iAmTyping, s, sendMessage, set, typingIn, userName } from "../store";
 import { preview } from "../rich";
 import { Avatar } from "./Avatar";
+import { EmojiPicker } from "./EmojiPicker";
 
 function typingLine(names: string[]): string {
   if (!names.length) return "";
@@ -14,6 +15,7 @@ export default function Composer() {
   const [text, setText] = createSignal("");
   const [caret, setCaret] = createSignal(0);
   const [pick, setPick] = createSignal(0);
+  const [emoji, setEmoji] = createSignal(false);
   let ta!: HTMLTextAreaElement;
   const name = () => currentServer()?.channels.find((c) => c.id === s.selChannel)?.name ?? "";
 
@@ -43,6 +45,20 @@ export default function Composer() {
     setCaret(c);
     setPick(0);
     ta.focus();
+  };
+
+  /** Insert text at the caret (used by the emoji picker). */
+  const insertAtCaret = (t: string) => {
+    const start = ta.selectionStart ?? text().length;
+    const end = ta.selectionEnd ?? start;
+    const next = text().slice(0, start) + t + text().slice(end);
+    setText(next);
+    ta.value = next;
+    const c = start + t.length;
+    ta.focus();
+    ta.setSelectionRange(c, c);
+    setCaret(c);
+    resize();
   };
 
   const onKey = (e: KeyboardEvent) => {
@@ -90,6 +106,7 @@ export default function Composer() {
           </For>
         </ul>
       </Show>
+      <div class="compose-row">
       <textarea
         ref={ta}
         rows={1}
@@ -101,6 +118,13 @@ export default function Composer() {
         onKeyDown={onKey}
         autofocus
       />
+      <button class="emoji-btn" classList={{ on: emoji() }} title="Emoji" aria-label="Insert emoji" onClick={() => setEmoji((v) => !v)}>
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.2" fill="none" stroke="currentColor" stroke-width="1.6" /><circle cx="7.2" cy="8" r="1.2" fill="currentColor" /><circle cx="12.8" cy="8" r="1.2" fill="currentColor" /><path d="M6.4 11.6c.9 1.6 2.1 2.4 3.6 2.4s2.7-.8 3.6-2.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+      </button>
+      <Show when={emoji()}>
+        <EmojiPicker class="for-composer" pick={(e, keep) => { insertAtCaret(e); if (!keep) setEmoji(false); }} close={() => setEmoji(false)} />
+      </Show>
+      </div>
       <div class="typing" aria-live="polite">{typingLine(typingIn(s.selChannel))}</div>
     </div>
   );

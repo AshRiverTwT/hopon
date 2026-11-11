@@ -62,11 +62,11 @@ export default function MessageList() {
     return [start, end] as const;
   });
 
+  // The store's message objects themselves (stable identities), so <For>
+  // keeps a row alive while it stays in range instead of rebuilding it.
   const visible = createMemo(() => {
     const [a, b] = range();
-    const out: { m: Msg; i: number }[] = [];
-    for (let i = a; i < b; i++) out.push({ m: s.msgs[i], i });
-    return out;
+    return s.msgs.slice(a, b);
   });
 
   const measure = (id: string, node: HTMLElement) => {
@@ -133,7 +133,10 @@ export default function MessageList() {
         </Show>
         <div style={{ transform: `translateY(${layout()[range()[0]]}px)` }}>
           <For each={visible()}>
-            {(row) => <Row m={row.m} header={startsGroup(s.msgs, row.i)} day={dayBreak(s.msgs, row.i) ? dayLabel(row.m.ts) : null} newHere={row.m.id === firstNew()} measure={measure} />}
+            {(m, k) => {
+              const i = () => range()[0] + k();
+              return <Row m={m} header={startsGroup(s.msgs, i())} day={dayBreak(s.msgs, i()) ? dayLabel(m.ts) : null} newHere={m.id === firstNew()} measure={measure} />;
+            }}
           </For>
         </div>
       </div>
@@ -247,7 +250,7 @@ function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean;
           <Show when={mine()}><button class="link" onClick={() => set("editing", p.m.id)}>Edit</button></Show>
           <Show when={mine() || isOwner()}><button class="link" onClick={() => deleteMessage(p.m.id)}>Delete</button></Show>
           <Show when={picker()}>
-            <EmojiPicker pick={(e) => { setPicker(false); setHover(node.matches(":hover")); toggleReaction(p.m, e); }} close={() => { setPicker(false); setHover(node.matches(":hover")); }} />
+            <EmojiPicker class="for-react" pick={(e) => { setPicker(false); setHover(node.matches(":hover")); toggleReaction(p.m, e); }} close={() => { setPicker(false); setHover(node.matches(":hover")); }} />
           </Show>
         </div>
       </Show>

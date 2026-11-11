@@ -56,3 +56,14 @@ test("reply preview strips formatting markers", () => {
   assert.equal(preview("try **voice** with `echo off`, it's _so_ ~~bad~~ good", () => ""), "try voice with echo off, it's so bad good");
   assert.equal(preview("snake_case_name stays", () => ""), "snake_case_name stays");
 });
+
+test("emoji search", async () => {
+  const { searchEmoji, CATEGORIES } = await import("../src/emoji.ts");
+  assert.equal(searchEmoji("fire")[0].e, "🔥");
+  assert.ok(searchEmoji("thumbs up").some((x) => x.e === "👍"));
+  assert.ok(searchEmoji("lol").some((x) => x.e === "😂"));
+  assert.equal(searchEmoji("zzqx").length, 0);
+  const all = CATEGORIES.flatMap((c) => c.list.map((x) => x.e));
+  assert.equal(new Set(all).size, all.length - (all.length - new Set(all).size), "parsed");
+  assert.ok(all.length > 300, `only ${all.length}`);
+});

@@ -402,7 +402,6 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 .chip.mine { border-color: rgba(255, 27, 80, 0.7); background: rgba(255, 27, 80, 0.14); }
 .chip-emoji { font-size: 15px; line-height: 1; }
 .chip-n { font-variant-numeric: tabular-nums; color: var(--cream-80); }
-.picker { position: absolute; right: 0; bottom: 26px; z-index: 5; display: grid; grid-template-columns: repeat(8, 32px); gap: 2px; padding: 8px; background: var(--ink-2); border: 1px solid var(--cream-10); border-radius: 6px; }
 .pick { width: 32px; height: 32px; border-radius: 4px; font-size: 19px; line-height: 32px; }
 .pick:hover { background: var(--cream-10); }
 
@@ -422,3 +421,34 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 .new-sep span { order: 2; }
 .main { position: relative; }
 .to-latest { position: absolute; right: calc(var(--gutter) + 12px); bottom: 110px; z-index: 3; }
+
+/* ---------- app mark (matches the Windows icon) ---------- */
+.wordmark { display: inline-flex; align-items: center; gap: 10px; }
+.mark {
+  position: relative; display: inline-grid; place-items: center; flex: none;
+  width: 28px; height: 28px; border-radius: 6px; background: #0e0d0d; box-shadow: inset 0 0 0 1px var(--cream-10);
+  font-family: "Archivo", sans-serif; font-stretch: 125%; font-weight: 900; font-size: 15px; line-height: 1; color: var(--cream);
+  padding-top: 2px;
+}
+.mark::after { content: ""; position: absolute; top: 3px; right: 3px; width: 8px; height: 4px; background: var(--hot); }
+
+/* ---------- emoji picker ---------- */
+.emoji-picker {
+  position: absolute; z-index: 6; width: 340px; height: 380px; display: flex; flex-direction: column;
+  background: var(--ink-2); border: 1px solid var(--cream-10); border-radius: 8px; padding: 10px; gap: 8px;
+}
+.emoji-picker.for-composer { right: 0; bottom: calc(100% + 8px); }
+.emoji-picker.for-react { right: 0; bottom: 26px; }
+.emoji-search { background: var(--ink); border: 1px solid var(--cream-10); border-radius: 4px; padding: 7px 10px; outline: none; }
+.emoji-search:focus { border-color: var(--cream-35); }
+.emoji-tabs { display: flex; gap: 2px; }
+.emoji-tabs button { flex: 1; height: 28px; border-radius: 4px; font-size: 16px; }
+.emoji-tabs button:hover { background: var(--cream-10); }
+.emoji-grid { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--cream-20) transparent; }
+.emoji-cat { position: sticky; top: 0; background: var(--ink-2); padding: 6px 2px 4px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--cream-55); }
+.emoji-cells { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+.emoji-none { padding: 20px 4px; color: var(--cream-55); font-size: 13px; }
+.compose-row { position: relative; display: flex; align-items: flex-end; }
+.compose-row textarea { flex: 1; padding-right: 44px; }
+.emoji-btn { position: absolute; right: 8px; bottom: 7px; width: 32px; height: 32px; border-radius: 6px; display: grid; place-items: center; color: var(--cream-55); }
+.emoji-btn:hover, .emoji-btn.on { color: var(--cream); background: var(--cream-10); }

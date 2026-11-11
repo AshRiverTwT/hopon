@@ -49,7 +49,7 @@ export default function App() {
         <Show when={s.user} fallback={<Login />}>
           <div class="frame" classList={{ "with-games": games() && !!currentServer() }}>
             <header class="topbar">
-              <span class="wordmark">HopOn<span class="badge">01</span></span>
+              <span class="wordmark"><span class="mark" aria-hidden="true">H</span>HopOn</span>
               <button class="pill ghost" onClick={() => setSheet({ k: "servers" })}>{currentServer()?.name ?? "Servers"}</button>
               <div class="topbar-right">
                 <Show when={currentServer()}>

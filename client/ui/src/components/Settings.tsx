@@ -127,7 +127,7 @@ export default function Settings(p: { close: () => void }) {
   return (
     <div class="sheet menu-sheet" role="dialog" aria-label="Settings">
       <div class="sheet-bar">
-        <span class="wordmark">HopOn<span class="badge">01</span></span>
+        <span class="wordmark"><span class="mark" aria-hidden="true">H</span>HopOn</span>
         <button class="pill" onClick={p.close}>Close</button>
       </div>
       <div class="cascade">
