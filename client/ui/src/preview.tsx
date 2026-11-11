@@ -10,7 +10,7 @@ const names = ["ash", "mira", "jun", "tobias", "nell", "kaito", "rosa", "ezra"];
 const members = names.map((n, i) => ({ id: String(1001 + i), name: n, avatarV: i % 3 === 2 ? 0 : 1 }));
 const server: Server = {
   id: "9001", name: "Night Shift", ownerId: "1001", members,
-  reads: { "7003": "1" }, online: ["1001", "1002", "1003", "1005"],
+  reads: { "7003": "1", "7001": "10001997" }, online: ["1001", "1002", "1003", "1005"],
   channels: [
     { id: "7001", serverId: "9001", name: "general", voice: false, topic: "Anything goes. Be kind.", lastId: "0" },
     { id: "7002", serverId: "9001", name: "design-crit", voice: false, topic: "", lastId: "0" },

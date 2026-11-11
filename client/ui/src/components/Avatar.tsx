@@ -26,7 +26,11 @@ export function Avatar(p: { id: string; size: number; class?: string }) {
     const k = key();
     if (v === 0 || urls.has(k)) return;
     urls.set(k, null);
-    call<string | null>("avatar", { userId: p.id, v }).then((u) => { urls.set(k, u); setLoaded((n) => n + 1); }).catch(() => {});
+    // On failure, forget the key after a while so a later render retries.
+    const retry = () => setTimeout(() => { if (urls.get(k) === null) urls.delete(k); }, 30_000);
+    call<string | null>("avatar", { userId: p.id, v })
+      .then((u) => { if (u) { urls.set(k, u); setLoaded((n) => n + 1); } else retry(); })
+      .catch(retry);
   });
   const url = () => { loaded(); return urls.get(key()) ?? null; };
   const box = () => ({ width: `${p.size}px`, height: `${p.size}px`, "font-size": `${Math.round(p.size * 0.46)}px` });

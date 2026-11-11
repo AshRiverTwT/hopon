@@ -35,6 +35,8 @@ export const [s, set] = createStore({
   mentions: {} as Record<string, number>,
   /** message to scroll to and flash */
   jump: null as string | null,
+  /** read marker when the open channel was opened ("new messages" divider) */
+  dividerAfter: null as string | null,
   msgs: [] as Msg[],
   more: true,
   loadingOlder: false,
@@ -200,7 +202,10 @@ function apply(e: UiEvent, painted: string[]) {
       if (changedUser) {
         set({ selServer: null, selChannel: null, stage: null, msgs: [] });
       }
-      if (e.user && !s.selServer && e.servers.length) selectServer(e.servers[0].id);
+      if (e.user && !s.selServer && e.servers.length) {
+        const last = remembered("lastServer");
+        selectServer(e.servers.some((x) => x.id === last) ? last! : e.servers[0].id);
+      }
       break;
     }
     case "server": {
@@ -345,19 +350,30 @@ function apply(e: UiEvent, painted: string[]) {
 
 // ---------- actions ----------
 
+function remembered(k: string): string | null {
+  try { return localStorage.getItem(k); } catch { return null; }
+}
+function remember(k: string, v: string) {
+  try { localStorage.setItem(k, v); } catch {}
+}
+
 export function selectServer(id: string) {
   set({ selServer: id, stage: null });
+  remember("lastServer", id);
   const sv = s.servers.find((x) => x.id === id);
-  const first = sv?.channels.find((c) => !c.voice);
-  if (first) selectChannel(first.id);
+  const last = remembered(`lastChannel:${id}`);
+  const ch = sv?.channels.find((c) => c.id === last && !c.voice) ?? sv?.channels.find((c) => !c.voice);
+  if (ch) selectChannel(ch.id);
 }
 
 let openSeq = 0;
 export async function selectChannel(id: string) {
   const seq = ++openSeq;
   batch(() => {
-    set({ selChannel: id, stage: null, msgs: [], more: true, loadingOlder: false, editing: null, replyTo: null, jump: null });
+    set({ selChannel: id, stage: null, msgs: [], more: true, loadingOlder: false, editing: null, replyTo: null, jump: null, dividerAfter: s.reads[id] ?? null });
     set("mentions", id, 0);
+    const sv = s.servers.find((x) => x.channels.some((c) => c.id === id));
+    if (sv) remember(`lastChannel:${sv.id}`, id);
   });
   const msgs = await call<Msg[]>("open_channel", { channelId: id });
   if (seq !== openSeq) return;

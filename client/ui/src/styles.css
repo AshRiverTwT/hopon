@@ -412,3 +412,13 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 .suggest li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; cursor: pointer; }
 .suggest li.on { background: var(--cream-10); }
 .mention-badge { font-size: 11px; font-weight: 700; color: var(--cream); background: var(--hot); border-radius: 8px; padding: 0 6px; line-height: 16px; }
+
+/* ---------- separators, jump ---------- */
+.day-sep, .new-sep { display: flex; align-items: center; gap: 12px; margin: 14px 0 4px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.day-sep { color: var(--cream-55); }
+.day-sep::before, .day-sep::after { content: ""; flex: 1; height: 1px; background: var(--cream-10); }
+.new-sep { color: var(--hot); margin: 6px 0 0; }
+.new-sep::after { content: ""; flex: 1; height: 1px; background: rgba(255, 27, 80, 0.5); }
+.new-sep span { order: 2; }
+.main { position: relative; }
+.to-latest { position: absolute; right: calc(var(--gutter) + 12px); bottom: 110px; z-index: 3; }

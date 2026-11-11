@@ -8,13 +8,15 @@ import { decodeMentions, mentionsUser, preview } from "../rich";
 import Rich from "./Rich";
 import { EmojiPicker } from "./EmojiPicker";
 import { showsHeader } from "../merge";
-import type { Msg } from "../types";
+import { cmpId, type Msg } from "../types";
 import { Avatar } from "./Avatar";
 import { cellClass, GAMES, parseGameResult } from "../games";
 
 const OVERSCAN = 800; // px above and below the viewport
 const EST_HEADER = 82;
 const EST_QUOTE = 22;
+const EST_DAY = 44;
+const EST_DIVIDER = 28;
 const EST_REACTIONS = 34;
 const EST_LINE = 30;
 
@@ -25,6 +27,15 @@ export default function MessageList() {
   const [heights, setHeights] = createSignal(new Map<string, number>(), { equals: false });
   let atBottom = true;
 
+  // First message after your read marker (not yours) gets the divider.
+  const firstNew = createMemo(() => {
+    const after = s.dividerAfter;
+    if (!after) return null;
+    const me = s.user?.id;
+    for (const m of s.msgs) if (!m.id.startsWith("p") && cmpId(m.id, after) > 0 && m.authorId !== me) return m.id;
+    return null;
+  });
+
   // Prefix offsets, O(n) per change; n ≤ 5000 so this is well under a millisecond.
   const layout = createMemo(() => {
     const h = heights();
@@ -32,7 +43,8 @@ export default function MessageList() {
     const offs = new Float64Array(list.length + 1);
     for (let i = 0; i < list.length; i++) {
       const m = list[i];
-      offs[i + 1] = offs[i] + (h.get(m.id) ?? ((showsHeader(list, i) ? EST_HEADER : EST_LINE) + (m.replyTo ? EST_QUOTE : 0) + (m.reactions.length ? EST_REACTIONS : 0)));
+      offs[i + 1] = offs[i] + (h.get(m.id) ?? ((startsGroup(list, i) ? EST_HEADER : EST_LINE) + (m.replyTo ? EST_QUOTE : 0) + (m.reactions.length ? EST_REACTIONS : 0)
+        + (dayBreak(list, i) ? EST_DAY : 0) + (m.id === firstNew() ? EST_DIVIDER : 0)));
     }
     return offs;
   });
@@ -110,6 +122,10 @@ export default function MessageList() {
   }, { defer: true }));
 
   return (
+    <>
+    <Show when={!s.atBottom && s.msgs.length > 0}>
+      <button class="to-latest pill" onClick={() => { atBottom = true; set("atBottom", true); pin(); maybeMarkRead(); }}>Jump to latest ↓</button>
+    </Show>
     <div class="messages" ref={el} onScroll={onScroll}>
       <div style={{ height: `${layout()[layout().length - 1]}px`, position: "relative" }}>
         <Show when={!s.more && s.msgs.length > 0}>
@@ -117,22 +133,38 @@ export default function MessageList() {
         </Show>
         <div style={{ transform: `translateY(${layout()[range()[0]]}px)` }}>
           <For each={visible()}>
-            {(row) => <Row m={row.m} header={showsHeader(s.msgs, row.i)} measure={measure} />}
+            {(row) => <Row m={row.m} header={startsGroup(s.msgs, row.i)} day={dayBreak(s.msgs, row.i) ? dayLabel(row.m.ts) : null} newHere={row.m.id === firstNew()} measure={measure} />}
           </For>
         </div>
       </div>
     </div>
+    </>
   );
 }
 
-function fmtTime(ts: number) {
+const dayKey = (ts: number) => new Date(ts).toDateString();
+/** A new author group: author/time gap (showsHeader) or a new day. */
+function startsGroup(list: readonly Msg[], i: number) {
+  return showsHeader(list, i) || dayBreak(list, i);
+}
+function dayBreak(list: readonly Msg[], i: number) {
+  return i === 0 ? !!list.length : dayKey(list[i - 1].ts) !== dayKey(list[i].ts);
+}
+function dayLabel(ts: number) {
   const d = new Date(ts);
   const today = new Date();
-  const t = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return d.toDateString() === today.toDateString() ? t : `${d.toLocaleDateString()} ${t}`;
+  const y = new Date(); y.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === y.toDateString()) return "Yesterday";
+  return d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
 }
 
-function Row(p: { m: Msg; header: boolean; measure: (id: string, n: HTMLElement) => void }) {
+/** Time of day; the date is shown by the day separator. */
+function fmtTime(ts: number) {
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean; measure: (id: string, n: HTMLElement) => void }) {
   let node!: HTMLDivElement;
   const mine = () => p.m.authorId === s.user?.id;
   const [picker, setPicker] = createSignal(false);
@@ -141,7 +173,7 @@ function Row(p: { m: Msg; header: boolean; measure: (id: string, n: HTMLElement)
   const real = () => !p.m.id.startsWith("p");
   onMount(() => p.measure(p.m.id, node));
   createEffect(on(
-    () => [p.m.content, s.editing === p.m.id, p.header, p.m.replyTo, p.m.reactions.length, p.m.reactions.map((r) => r.users.length).join()],
+    () => [p.m.content, s.editing === p.m.id, p.header, p.day, p.newHere, p.m.replyTo, p.m.reactions.length, p.m.reactions.map((r) => r.users.length).join()],
     () => p.measure(p.m.id, node),
     { defer: true },
   ));
@@ -155,6 +187,8 @@ function Row(p: { m: Msg; header: boolean; measure: (id: string, n: HTMLElement)
   return (
     <div ref={node} class="msg" onMouseEnter={() => setHover(true)} onMouseLeave={() => !picker() && setHover(false)}
       classList={{ first: p.header, pending: p.m.state === 0, failed: p.m.state === 3, "mention-me": !!s.user && mentionsUser(p.m.content, s.user.id), flash: flash() }}>
+      <Show when={p.day}><div class="day-sep"><span>{p.day}</span></div></Show>
+      <Show when={p.newHere}><div class="new-sep"><span>New</span></div></Show>
       <Show when={p.m.replyTo}>
         <button class="quote" onClick={() => jumpTo(p.m.replyTo!)}>
           <span class="quote-arrow">↳</span>
