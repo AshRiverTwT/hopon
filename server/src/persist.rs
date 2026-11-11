@@ -25,7 +25,10 @@ pub struct AckTo {
 }
 
 pub enum PersistOp {
-    Insert { channel_id: Id, id: Id, author_id: Id, content: String, t_enqueue: i64, ack: AckTo },
+    Insert { channel_id: Id, id: Id, author_id: Id, content: String, reply_to: Option<Id>, t_enqueue: i64, ack: AckTo },
+    /// Add/remove a reaction. `reply` gets whether anything changed
+    /// (Err = message missing or reaction limit reached).
+    React { channel_id: Id, message_id: Id, user_id: Id, emoji: String, add: bool, reply: oneshot::Sender<Result<bool, &'static str>> },
     /// `reply` gets whether a row owned by `author_id` was changed.
     Edit { channel_id: Id, id: Id, author_id: Id, content: String, edited_at: i64, reply: oneshot::Sender<bool> },
     /// `author_id = None` deletes regardless of author (server owner moderation).
@@ -68,27 +71,32 @@ pub async fn run(st: Arc<State>, mut rx: mpsc::Receiver<PersistOp>) {
 }
 
 /// Per-op success for edits/deletes (inserts are all-or-nothing).
-async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<bool>> {
-    let (mut ch, mut ids, mut au, mut ct) = (vec![], vec![], vec![], vec![]);
+/// Per-op outcome. `Err` is a rejected op (not a database failure).
+type Outcome = Result<bool, &'static str>;
+
+async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<Outcome>> {
+    let (mut ch, mut ids, mut au, mut ct, mut rt) = (vec![], vec![], vec![], vec![], vec![]);
     for op in batch {
-        if let PersistOp::Insert { channel_id, id, author_id, content, .. } = op {
+        if let PersistOp::Insert { channel_id, id, author_id, content, reply_to, .. } = op {
             ch.push(*channel_id);
             ids.push(*id);
             au.push(*author_id);
             ct.push(content.as_str());
+            rt.push(*reply_to);
         }
     }
     let mut tx = st.db.begin().await?;
     if !ids.is_empty() {
         sqlx::query(
-            "INSERT INTO messages (channel_id, id, author_id, content) \
-             SELECT * FROM UNNEST($1::bigint[], $2::bigint[], $3::bigint[], $4::text[]) \
+            "INSERT INTO messages (channel_id, id, author_id, content, reply_to) \
+             SELECT * FROM UNNEST($1::bigint[], $2::bigint[], $3::bigint[], $4::text[], $5::bigint[]) \
              ON CONFLICT DO NOTHING",
         )
         .bind(&ch)
         .bind(&ids)
         .bind(&au)
         .bind(&ct)
+        .bind(&rt)
         .execute(&mut *tx)
         .await?;
     }
@@ -118,9 +126,51 @@ async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<bool
     }
     let mut results = Vec::with_capacity(batch.len());
     for op in batch {
-        let ok = match op {
+        let ok: Outcome = match op {
+            PersistOp::React { channel_id, message_id, user_id, emoji, add, .. } => {
+                let exists: Option<(i64,)> = sqlx::query_as("SELECT id FROM messages WHERE channel_id = $1 AND id = $2")
+                    .bind(channel_id)
+                    .bind(message_id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                if exists.is_none() {
+                    Err("no such message")
+                } else if *add {
+                    let (distinct, have): (i64, bool) = sqlx::query_as(
+                        "SELECT count(DISTINCT emoji), bool_or(emoji = $3) IS TRUE FROM reactions WHERE channel_id = $1 AND message_id = $2",
+                    )
+                    .bind(channel_id)
+                    .bind(message_id)
+                    .bind(emoji)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    if !have && distinct as usize >= hopon_shared::MAX_REACTIONS_PER_MESSAGE {
+                        Err("too many different reactions on this message")
+                    } else {
+                        Ok(sqlx::query("INSERT INTO reactions (channel_id, message_id, emoji, user_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING")
+                            .bind(channel_id)
+                            .bind(message_id)
+                            .bind(emoji)
+                            .bind(user_id)
+                            .execute(&mut *tx)
+                            .await?
+                            .rows_affected()
+                            == 1)
+                    }
+                } else {
+                    Ok(sqlx::query("DELETE FROM reactions WHERE channel_id = $1 AND message_id = $2 AND emoji = $3 AND user_id = $4")
+                        .bind(channel_id)
+                        .bind(message_id)
+                        .bind(emoji)
+                        .bind(user_id)
+                        .execute(&mut *tx)
+                        .await?
+                        .rows_affected()
+                        == 1)
+                }
+            }
             PersistOp::Edit { channel_id, id, author_id, content, edited_at, .. } => {
-                sqlx::query(
+                Ok(sqlx::query(
                     "UPDATE messages SET content = $4, edited_at = $5 \
                      WHERE channel_id = $1 AND id = $2 AND author_id = $3",
                 )
@@ -132,24 +182,29 @@ async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<bool
                 .execute(&mut *tx)
                 .await?
                 .rows_affected()
-                    == 1
+                    == 1)
             }
             PersistOp::Delete { channel_id, id, author_id, .. } => {
-                sqlx::query("DELETE FROM messages WHERE channel_id = $1 AND id = $2 AND ($3::bigint IS NULL OR author_id = $3)")
+                let gone = sqlx::query("DELETE FROM messages WHERE channel_id = $1 AND id = $2 AND ($3::bigint IS NULL OR author_id = $3)")
                     .bind(channel_id)
                     .bind(id)
                     .bind(author_id)
                     .execute(&mut *tx)
                     .await?
                     .rows_affected()
-                    == 1
+                    == 1;
+                if gone {
+                    sqlx::query("DELETE FROM reactions WHERE channel_id = $1 AND message_id = $2").bind(channel_id).bind(id).execute(&mut *tx).await?;
+                }
+                Ok(gone)
             }
             PersistOp::PurgeChannels(ids) => {
                 sqlx::query("DELETE FROM messages WHERE channel_id = ANY($1)").bind(ids).execute(&mut *tx).await?;
+                sqlx::query("DELETE FROM reactions WHERE channel_id = ANY($1)").bind(ids).execute(&mut *tx).await?;
                 sqlx::query("DELETE FROM channel_reads WHERE channel_id = ANY($1)").bind(ids).execute(&mut *tx).await?;
-                true
+                Ok(true)
             }
-            _ => true,
+            _ => Ok(true),
         };
         results.push(ok);
     }
@@ -158,7 +213,7 @@ async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<bool
     Ok(results)
 }
 
-fn finish(st: &State, ops: impl Iterator<Item = PersistOp>, results: Option<Vec<bool>>) {
+fn finish(st: &State, ops: impl Iterator<Item = PersistOp>, results: Option<Vec<Outcome>>) {
     let t = now_us();
     let mut hist = st.metrics.persist.lock();
     for (i, op) in ops.enumerate() {
@@ -173,7 +228,10 @@ fn finish(st: &State, ops: impl Iterator<Item = PersistOp>, results: Option<Vec<
                 let _ = ack.conn.try_send(Out::Frame(Bytes::from(encode(&ServerFrame { req: ack.req, msg }))));
             }
             PersistOp::Edit { reply, .. } | PersistOp::Delete { reply, .. } => {
-                let _ = reply.send(ok.unwrap_or(false));
+                let _ = reply.send(matches!(ok, Some(Ok(true))));
+            }
+            PersistOp::React { reply, .. } => {
+                let _ = reply.send(ok.unwrap_or(Err("could not be saved")));
             }
             PersistOp::PurgeChannels(_) => {}
             PersistOp::Flush(done) => {

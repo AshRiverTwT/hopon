@@ -379,7 +379,8 @@ impl Session {
 
     async fn authed(&mut self, req: u32, uid: Id, name: &str, msg: C2S, t_recv: i64) -> R {
         match msg {
-            C2S::Send { channel_id, content, nonce, t_input, t_client_send } => {
+            C2S::Send { channel_id, content, nonce, t_input, t_client_send, reply_to } => {
+                let reply_to = reply_to.filter(|r| *r > 0);
                 if !self.take_token() {
                     return Err((ErrorCode::RateLimited, "slow down".into()));
                 }
@@ -402,6 +403,7 @@ impl Session {
                             id: prev.id,
                             author_id: uid,
                             content: prev.content,
+                            reply_to: prev.reply_to,
                             t_enqueue: now_us(),
                             ack: AckTo { conn: self.tx.clone(), req, nonce, t_server_recv: t_recv },
                         };
@@ -426,6 +428,8 @@ impl Session {
                         edited_at: None,
                         nonce,
                         trace: Some(Trace { t_input, t_client_send, t_server_recv: t_recv, t_server_send: t_send }),
+                        reply_to,
+                        reactions: vec![],
                     };
                     guild.publish(frame(0, S2C::Message(msg.clone())));
                     self.st.metrics.fanout.lock().record_us(t_send - t_recv);
@@ -440,6 +444,7 @@ impl Session {
                     id,
                     author_id: uid,
                     content,
+                    reply_to,
                     t_enqueue: now_us(),
                     ack: AckTo { conn: self.tx.clone(), req, nonce, t_server_recv: t_recv },
                 };
@@ -489,25 +494,8 @@ impl Session {
                 // Off the reader loop so a slow query never delays live sends.
                 let (st, tx) = (self.st.clone(), self.tx.clone());
                 tokio::spawn(async move {
-                    let rows: Result<Vec<(i64, i64, String, Option<i64>)>, _> = sqlx::query_as(
-                        "SELECT id, author_id, content, edited_at FROM messages \
-                         WHERE channel_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3",
-                    )
-                    .bind(channel_id)
-                    .bind(before.unwrap_or(i64::MAX))
-                    .bind(limit + 1)
-                    .fetch_all(&st.db)
-                    .await;
-                    let msg = match rows {
-                        Ok(mut rows) => {
-                            let more = rows.len() as i64 > limit;
-                            rows.truncate(limit as usize);
-                            let messages = rows
-                                .into_iter()
-                                .map(|(id, author_id, content, edited_at)| Message { id, channel_id, author_id, content, edited_at, nonce: 0, trace: None })
-                                .collect();
-                            S2C::History { channel_id, messages, more }
-                        }
+                    let msg = match history_page(&st, channel_id, before, limit).await {
+                        Ok((messages, more)) => S2C::History { channel_id, messages, more },
                         Err(e) => S2C::Error { code: ErrorCode::Internal, message: e.to_string() },
                     };
                     let _ = tx.send(Out::Frame(frame(req, msg))).await;
@@ -646,6 +634,25 @@ impl Session {
                 self.send(req, S2C::LoggedOut).await;
                 Ok(())
             }
+            C2S::React { channel_id, message_id, emoji, add } => {
+                if !valid_emoji(&emoji) {
+                    return Err((ErrorCode::BadRequest, "not a valid reaction".into()));
+                }
+                let (_, guild) = self.member_chan(channel_id, uid).await?;
+                let (reply, rx) = oneshot::channel();
+                self.st
+                    .persist
+                    .send(PersistOp::React { channel_id, message_id, user_id: uid, emoji: emoji.clone(), add, reply })
+                    .await
+                    .map_err(internal)?;
+                match rx.await.unwrap_or(Err("could not be saved")) {
+                    Ok(true) => guild.publish(frame(0, S2C::Reaction { channel_id, message_id, emoji, user_id: uid, add })),
+                    Ok(false) => {} // already in that state
+                    Err(e) => return Err((ErrorCode::BadRequest, e.into())),
+                }
+                self.send(req, S2C::Ok).await;
+                Ok(())
+            }
             C2S::MarkRead { channel_id, message_id } => {
                 self.member_chan(channel_id, uid).await?;
                 let (last,): (i64,) = sqlx::query_as(
@@ -705,6 +712,49 @@ impl Session {
 }
 
 type R = Result<(), (ErrorCode, String)>;
+
+/// Newest-first page plus its reactions (two queries for the whole page).
+async fn history_page(st: &State, channel_id: Id, before: Option<Id>, limit: i64) -> anyhow::Result<(Vec<Message>, bool)> {
+    let mut rows: Vec<(i64, i64, String, Option<i64>, Option<i64>)> = sqlx::query_as(
+        "SELECT id, author_id, content, edited_at, reply_to FROM messages \
+         WHERE channel_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3",
+    )
+    .bind(channel_id)
+    .bind(before.unwrap_or(i64::MAX))
+    .bind(limit + 1)
+    .fetch_all(&st.db)
+    .await?;
+    let more = rows.len() as i64 > limit;
+    rows.truncate(limit as usize);
+    let ids: Vec<i64> = rows.iter().map(|r| r.0).collect();
+    let reacts: Vec<(i64, String, Vec<i64>)> = sqlx::query_as(
+        "SELECT message_id, emoji, array_agg(user_id ORDER BY user_id) FROM reactions \
+         WHERE channel_id = $1 AND message_id = ANY($2) GROUP BY message_id, emoji ORDER BY message_id, emoji",
+    )
+    .bind(channel_id)
+    .bind(&ids)
+    .fetch_all(&st.db)
+    .await?;
+    let mut by_msg: std::collections::HashMap<i64, Vec<Reaction>> = std::collections::HashMap::new();
+    for (mid, emoji, users) in reacts {
+        by_msg.entry(mid).or_default().push(Reaction { emoji, users });
+    }
+    let messages = rows
+        .into_iter()
+        .map(|(id, author_id, content, edited_at, reply_to)| Message {
+            id,
+            channel_id,
+            author_id,
+            content,
+            edited_at,
+            nonce: 0,
+            trace: None,
+            reply_to,
+            reactions: by_msg.remove(&id).unwrap_or_default(),
+        })
+        .collect();
+    Ok((messages, more))
+}
 
 fn internal<E: std::fmt::Display>(e: E) -> (ErrorCode, String) {
     tracing::error!("internal: {e}");

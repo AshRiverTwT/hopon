@@ -101,6 +101,53 @@ pub struct Message {
     /// reconcile its optimistic copy the moment the fan-out arrives.
     pub nonce: u64,
     pub trace: Option<Trace>,
+    /// The message this one replies to.
+    pub reply_to: Option<Id>,
+    /// Aggregated reactions (history pages; live messages start empty).
+    pub reactions: Vec<Reaction>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Reaction {
+    pub emoji: String,
+    pub users: Vec<Id>,
+}
+
+/// Distinct reactions per message.
+pub const MAX_REACTIONS_PER_MESSAGE: usize = 20;
+pub const MAX_EMOJI_BYTES: usize = 32;
+
+/// A reaction must be a short symbol: no whitespace, no control characters,
+/// no ASCII letters or digits (so it can't be used as a text channel).
+pub fn valid_emoji(e: &str) -> bool {
+    !e.is_empty()
+        && e.len() <= MAX_EMOJI_BYTES
+        && e.chars().all(|c| !c.is_whitespace() && !c.is_control() && !c.is_ascii_alphanumeric())
+}
+
+/// Mention token for a user inside message content.
+pub fn mention_token(user: Id) -> String {
+    format!("<@{user}>")
+}
+
+/// User ids mentioned in `content` (`<@id>` tokens).
+pub fn mentions(content: &str) -> Vec<Id> {
+    let mut out = vec![];
+    let mut rest = content;
+    while let Some(i) = rest.find("<@") {
+        rest = &rest[i + 2..];
+        if let Some(j) = rest.find('>') {
+            if let Ok(id) = rest[..j].parse::<Id>() {
+                if !out.contains(&id) {
+                    out.push(id);
+                }
+            }
+            rest = &rest[j + 1..];
+        } else {
+            break;
+        }
+    }
+    out
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -122,7 +169,9 @@ pub enum C2S {
     /// Revokes this device's refresh token.
     Logout { refresh_token: String },
     Ping { t_client: i64 },
-    Send { channel_id: Id, content: String, nonce: u64, t_input: i64, t_client_send: i64 },
+    Send { channel_id: Id, content: String, nonce: u64, t_input: i64, t_client_send: i64, reply_to: Option<Id> },
+    /// Add (`add = true`) or remove your reaction. Idempotent.
+    React { channel_id: Id, message_id: Id, emoji: String, add: bool },
     Edit { channel_id: Id, message_id: Id, content: String },
     Delete { channel_id: Id, message_id: Id },
     /// Newest-first page of messages older than `before` (or the latest).
@@ -202,6 +251,7 @@ pub enum S2C {
     Ok,
     /// A user's profile changed (e.g. new avatar); sent to all their servers.
     UserUpdated(UserInfo),
+    Reaction { channel_id: Id, message_id: Id, emoji: String, user_id: Id, add: bool },
     /// Your read marker moved (from another of your devices).
     ReadUpdated { channel_id: Id, last_read: Id },
     UserPresence { user_id: Id, online: bool },
@@ -274,6 +324,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn emoji_and_mentions() {
+        assert!(valid_emoji("🏳️‍🌈"), "zwj sequence");
+        assert!(valid_emoji("👍"));
+        assert!(!valid_emoji("ab") && !valid_emoji("") && !valid_emoji("👍 👍") && !valid_emoji(&"🔥".repeat(20)));
+        assert_eq!(mentions("hi <@12> and <@34> and <@12> <@x> <@5"), vec![12, 34]);
+        assert_eq!(mention_token(7), "<@7>");
+    }
+
+    #[test]
     fn roundtrip_and_size() {
         let f = ServerFrame {
             req: 0,
@@ -285,6 +344,8 @@ mod tests {
                 edited_at: None,
                 nonce: 7,
                 trace: Some(Trace { t_input: 1, t_client_send: 2, t_server_recv: 3, t_server_send: 4 }),
+                reply_to: None,
+                reactions: vec![],
             }),
         };
         let b = encode(&f);

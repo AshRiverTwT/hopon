@@ -92,7 +92,7 @@ async fn main() -> Result<()> {
     });
     pass &= check!("unauthenticated send rejected", {
         let mut c = Client::connect(&url).await?;
-        ensure!(c.call(C2S::Send { channel_id: 1, content: "x".into(), nonce: 1, t_input: 0, t_client_send: 0 }).await.is_err());
+        ensure!(c.call(C2S::Send { channel_id: 1, content: "x".into(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None }).await.is_err());
         Ok(())
     });
     pass &= check!("resume with access token", {
@@ -125,7 +125,7 @@ async fn main() -> Result<()> {
     b.signup("smokeb").await?;
     pass &= check!("non-member cannot read or send", {
         ensure!(b.call(C2S::History { channel_id: text, before: None, limit: 10 }).await.is_err());
-        ensure!(b.call(C2S::Send { channel_id: text, content: "x".into(), nonce: 1, t_input: 0, t_client_send: 0 }).await.is_err());
+        ensure!(b.call(C2S::Send { channel_id: text, content: "x".into(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None }).await.is_err());
         Ok(())
     });
     pass &= check!("invite link join + member event", {
@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
     pass &= check!("send: realtime delivery, echo, durable ack, ordering", {
         for i in 0..20u64 {
             let t = now_us();
-            a.send(C2S::Send { channel_id: text, content: format!("m{i}"), nonce: 100 + i, t_input: t, t_client_send: t }).await?;
+            a.send(C2S::Send { channel_id: text, content: format!("m{i}"), nonce: 100 + i, t_input: t, t_client_send: t, reply_to: None }).await?;
         }
         let mut last = 0;
         for i in 0..20u64 {
@@ -164,7 +164,7 @@ async fn main() -> Result<()> {
         let t = now_us();
         let mut a2 = Client::connect(&url).await?;
         a2.call(C2S::Refresh { refresh_token: refresh.clone() }).await.map(|r| if let S2C::Authed { refresh_token, .. } = r { refresh = refresh_token; }).ok();
-        let send = C2S::Send { channel_id: text, content: "once".into(), nonce: 4242, t_input: t, t_client_send: t };
+        let send = C2S::Send { channel_id: text, content: "once".into(), nonce: 4242, t_input: t, t_client_send: t, reply_to: None };
         a.send(send.clone()).await?;
         let S2C::Message(first) = next_msg(&mut b).await? else { bail!("expected message") };
         // Same nonce from another socket of the same user (as after a reconnect).
@@ -188,8 +188,8 @@ async fn main() -> Result<()> {
         Ok(())
     });
     pass &= check!("empty and oversized messages rejected", {
-        ensure!(a.call(C2S::Send { channel_id: text, content: "   ".into(), nonce: 1, t_input: 0, t_client_send: 0 }).await.is_err());
-        ensure!(a.call(C2S::Send { channel_id: text, content: "x".repeat(4001), nonce: 1, t_input: 0, t_client_send: 0 }).await.is_err());
+        ensure!(a.call(C2S::Send { channel_id: text, content: "   ".into(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None }).await.is_err());
+        ensure!(a.call(C2S::Send { channel_id: text, content: "x".repeat(4001), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None }).await.is_err());
         Ok(())
     });
     pass &= check!("edit own message (broadcast)", {
@@ -277,7 +277,7 @@ async fn main() -> Result<()> {
     pass &= check!("admin: owner can delete anyone's message", {
         let (mut o, mut m, _, text, _, _) = admin_setup(&url).await?;
         let t = now_us();
-        m.send(C2S::Send { channel_id: text, content: "spam".into(), nonce: 9, t_input: t, t_client_send: t }).await?;
+        m.send(C2S::Send { channel_id: text, content: "spam".into(), nonce: 9, t_input: t, t_client_send: t, reply_to: None }).await?;
         let id = wait_for(&mut o, |e| if let S2C::Message(x) = e { Some(x.id) } else { None }).await?;
         ensure!(matches!(o.call(C2S::Delete { channel_id: text, message_id: id }).await?, S2C::Ok));
         Ok(())
@@ -285,11 +285,11 @@ async fn main() -> Result<()> {
     pass &= check!("admin: delete text channel (gone for sends and history)", {
         let (mut o, mut m, _, text, _, _) = admin_setup(&url).await?;
         let t = now_us();
-        m.send(C2S::Send { channel_id: text, content: "before".into(), nonce: 1, t_input: t, t_client_send: t }).await?;
+        m.send(C2S::Send { channel_id: text, content: "before".into(), nonce: 1, t_input: t, t_client_send: t, reply_to: None }).await?;
         wait_for(&mut o, |e| matches!(e, S2C::Message(_)).then_some(())).await?;
         o.call(C2S::DeleteChannel { channel_id: text }).await?;
         wait_for(&mut m, |e| matches!(e, S2C::ChannelDeleted { channel_id, .. } if *channel_id == text).then_some(())).await?;
-        ensure!(m.call(C2S::Send { channel_id: text, content: "after".into(), nonce: 2, t_input: t, t_client_send: t }).await.is_err(), "send into deleted channel");
+        ensure!(m.call(C2S::Send { channel_id: text, content: "after".into(), nonce: 2, t_input: t, t_client_send: t, reply_to: None }).await.is_err(), "send into deleted channel");
         ensure!(m.call(C2S::History { channel_id: text, before: None, limit: 10 }).await.is_err(), "history of deleted channel");
         Ok(())
     });
@@ -309,8 +309,8 @@ async fn main() -> Result<()> {
         ensure!(r == RemovedReason::Kicked);
         wait_for(&mut o, |e| matches!(e, S2C::MemberLeft { user_id, .. } if *user_id == mid).then_some(())).await?;
         let t = now_us();
-        ensure!(m.call(C2S::Send { channel_id: text, content: "still here?".into(), nonce: 3, t_input: t, t_client_send: t }).await.is_err(), "kicked user can send");
-        o.send(C2S::Send { channel_id: text, content: "secret".into(), nonce: 4, t_input: t, t_client_send: t }).await?;
+        ensure!(m.call(C2S::Send { channel_id: text, content: "still here?".into(), nonce: 3, t_input: t, t_client_send: t, reply_to: None }).await.is_err(), "kicked user can send");
+        o.send(C2S::Send { channel_id: text, content: "secret".into(), nonce: 4, t_input: t, t_client_send: t, reply_to: None }).await?;
         ensure!(quiet(&mut m, 400, |e| matches!(e, S2C::Message(_))).await, "kicked user still receives messages");
         ensure!(o.call(C2S::Kick { server_id: sid, user_id: mid }).await.is_err(), "double kick");
         Ok(())
@@ -353,7 +353,7 @@ async fn main() -> Result<()> {
         let mut newest = 0;
         for i in 0..3u64 {
             let t = now_us();
-            o.send(C2S::Send { channel_id: text, content: format!("r{i}"), nonce: 50 + i, t_input: t, t_client_send: t }).await?;
+            o.send(C2S::Send { channel_id: text, content: format!("r{i}"), nonce: 50 + i, t_input: t, t_client_send: t, reply_to: None }).await?;
             newest = wait_for(&mut m, |e| if let S2C::Message(x) = e { Some(x.id) } else { None }).await?;
         }
         // Second device of the member sees the marker move.
@@ -386,6 +386,43 @@ async fn main() -> Result<()> {
         drop(m);
         let off = wait_for(&mut o, |e| if let S2C::UserPresence { user_id, online } = e { (*user_id == mid).then_some(*online) } else { None }).await?;
         ensure!(!off, "expected offline");
+        Ok(())
+    });
+    pass &= check!("replies + reactions (broadcast, idempotent, in history, limits, ordering)", {
+        let (mut o, mut m, _, text, _, _) = admin_setup(&url).await?;
+        let t = now_us();
+        o.send(C2S::Send { channel_id: text, content: "root".into(), nonce: 70, t_input: t, t_client_send: t, reply_to: None }).await?;
+        let root = wait_for(&mut m, |e| if let S2C::Message(x) = e { (x.content == "root").then_some(x.id) } else { None }).await?;
+        m.send(C2S::Send { channel_id: text, content: "re".into(), nonce: 71, t_input: t, t_client_send: t, reply_to: Some(root) }).await?;
+        let rep = wait_for(&mut o, |e| if let S2C::Message(x) = e { (x.content == "re").then(|| x.clone()) } else { None }).await?;
+        ensure!(rep.reply_to == Some(root), "reply_to not delivered");
+        // React immediately after sending: the reaction must wait for the insert.
+        o.send(C2S::Send { channel_id: text, content: "fresh".into(), nonce: 72, t_input: t, t_client_send: t, reply_to: None }).await?;
+        let fresh = wait_for(&mut m, |e| if let S2C::Message(x) = e { (x.content == "fresh").then_some(x.id) } else { None }).await?;
+        ensure!(matches!(m.call(C2S::React { channel_id: text, message_id: fresh, emoji: "🔥".into(), add: true }).await?, S2C::Ok), "react on fresh message");
+        m.call(C2S::React { channel_id: text, message_id: root, emoji: "👍".into(), add: true }).await?;
+        let (e1, add) = wait_for(&mut o, |e| if let S2C::Reaction { emoji, add, message_id, .. } = e { (*message_id == root).then(|| (emoji.clone(), *add)) } else { None }).await?;
+        ensure!(e1 == "👍" && add);
+        // Idempotent: second add changes nothing and broadcasts nothing.
+        m.call(C2S::React { channel_id: text, message_id: root, emoji: "👍".into(), add: true }).await?;
+        ensure!(quiet(&mut o, 300, |e| matches!(e, S2C::Reaction { .. })).await, "duplicate reaction broadcast");
+        o.call(C2S::React { channel_id: text, message_id: root, emoji: "👍".into(), add: true }).await?;
+        let S2C::History { messages, .. } = o.call(C2S::History { channel_id: text, before: None, limit: 10 }).await? else { bail!("h") };
+        let r = messages.iter().find(|x| x.id == root).unwrap();
+        ensure!(r.reactions.len() == 1 && r.reactions[0].users.len() == 2, "aggregate {:?}", r.reactions);
+        ensure!(messages.iter().find(|x| x.id == rep.id).unwrap().reply_to == Some(root), "reply_to not persisted");
+        m.call(C2S::React { channel_id: text, message_id: root, emoji: "👍".into(), add: false }).await?;
+        let S2C::History { messages, .. } = o.call(C2S::History { channel_id: text, before: None, limit: 10 }).await? else { bail!("h") };
+        ensure!(messages.iter().find(|x| x.id == root).unwrap().reactions[0].users.len() == 1, "remove");
+        ensure!(m.call(C2S::React { channel_id: text, message_id: root, emoji: "lol".into(), add: true }).await.is_err(), "text reaction accepted");
+        ensure!(m.call(C2S::React { channel_id: text, message_id: 12345, emoji: "👍".into(), add: true }).await.is_err(), "reaction on missing message");
+        let emojis = ["😀","😁","😂","🤣","😃","😄","😅","😆","😉","😊","😋","😎","😍","😘","🥰","😗","😙","😚","🙂","🤗"];
+        for e in emojis.iter().skip(1) { o.call(C2S::React { channel_id: text, message_id: root, emoji: (*e).into(), add: true }).await?; }
+        ensure!(o.call(C2S::React { channel_id: text, message_id: root, emoji: "🦀".into(), add: true }).await.is_err(), "21st distinct reaction accepted");
+        // Deleting the message drops its reactions.
+        o.call(C2S::Delete { channel_id: text, message_id: root }).await?;
+        let n: Vec<_> = { let S2C::History { messages, .. } = o.call(C2S::History { channel_id: text, before: None, limit: 10 }).await? else { bail!("h") }; messages };
+        ensure!(!n.iter().any(|x| x.id == root));
         Ok(())
     });
     pass &= check!("logout revokes the refresh token", {
