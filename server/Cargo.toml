@@ -1,0 +1,29 @@
+[package]
+name = "hopon-server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "hopon-server"
+path = "src/main.rs"
+
+[dependencies]
+hopon-shared.workspace = true
+serde.workspace = true
+tokio.workspace = true
+futures-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+bytes.workspace = true
+parking_lot.workspace = true
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros"] }
+argon2 = "0.5"
+jsonwebtoken = "9"
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+dashmap = "6"
+serde_json = "1"

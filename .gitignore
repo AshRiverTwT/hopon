@@ -1,0 +1,6 @@
+/target
+node_modules/
+client/ui/dist/
+*.log
+.env
+results/*.tmp
