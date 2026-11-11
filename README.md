@@ -263,7 +263,8 @@ The **Games** pill opens Wordle, Minute Cryptic or Krillion in a side panel.
   - An injected script reports shared text through the page title, and the
     core validates it per game: Wordle's exact `Wordle N X/6` format; for
     Minute Cryptic and Krillion, the game's name must appear.
-  - Each result posts at most once.
+  - You can share a result as often as you like; duplicate events from a
+    single click are collapsed.
   - Ad popups are blocked.
 - **Limits.**
   - Posting is triggered by Share rather than by detecting the end of a game,

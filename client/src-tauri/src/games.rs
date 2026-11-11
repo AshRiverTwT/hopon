@@ -7,9 +7,10 @@
 //! writeText/write, execCommand('copy')) and reports the shared text by
 //! briefly setting `document.title` to `HOPON_RESULT:<urlencoded text>`. Rust
 //! sees the title change, validates the text against the game's pattern,
-//! dedupes, and posts it to the server's `general` channel. Page scripts (ads
+//! collapses duplicate events from one click, and posts it to the server's `general` channel. Page scripts (ads
 //! included) can fake this channel, so validation is strict and the worst case
-//! is a plausible-looking score message in your own name, rate-limited by dedupe.
+//! is a plausible-looking score message in your own name (and the server's
+//! per-connection send rate limit still applies).
 
 use crate::core::{Core, Res};
 use crate::ui::{pid, UiEvent};
@@ -42,12 +43,15 @@ const HOOK: &str = r#"
       if (typeof t !== 'string') return;
       t = t.trim(); if (!t || t.length > 2000) return;
       if (window.top !== window) { try { window.top.postMessage({ __hopon: t }, '*'); } catch (e) {} return; }
-      const prev = document.title;
+      // Remember the page's real title (never one of our markers), so a
+      // later restore can't re-announce an earlier result.
+      if (!document.title.startsWith('HOPON_RESULT:')) window.__hoponTitle = document.title;
+      const real = window.__hoponTitle || '';
       const sentinel = 'HOPON_RESULT:' + encodeURIComponent(t);
       document.title = sentinel;
       // WebView2 raises the title event asynchronously and reads the title
       // when it runs: restore late, and only if nothing else changed it.
-      setTimeout(() => { if (document.title === sentinel) document.title = prev; }, 1500);
+      setTimeout(() => { if (document.title === sentinel) document.title = real; }, 1500);
     } catch (e) {}
   };
   if (window.top === window) {
@@ -99,6 +103,9 @@ pub struct Games {
     /// Server whose `general` channel receives results.
     server: Mutex<Option<Id>>,
     game: Mutex<Option<&'static str>>,
+    /// (text, when) of the last post: one Share click can fire more
+    /// than one copy/share hook, so identical text within 3 s posts once.
+    last_post: Mutex<Option<(String, i64)>>,
 }
 
 impl Games {
@@ -139,14 +146,19 @@ fn general_channel(core: &Core, server: Id) -> Option<Id> {
 }
 
 async fn post_result(core: Arc<Core>, game: &'static str, raw: String) {
-    let Some((text, key)) = validate(game, &raw) else {
+    let Some((text, _key)) = validate(game, &raw) else {
         tracing::info!("games: ignored share text from {game}");
         return;
     };
-    let dedupe = format!("posted:{key}");
-    if core.cache.kv_get(&dedupe).await.is_some() {
-        core.emit(UiEvent::Error { message: "Already posted that result".into() });
-        return;
+    // Re-sharing is allowed any number of times; only collapse the duplicate
+    // events a single click produces.
+    {
+        let now = now_us();
+        let mut last = core.games.last_post.lock();
+        if last.as_ref().map_or(false, |(t, at)| *t == text && now - at < 3_000_000) {
+            return;
+        }
+        *last = Some((text.clone(), now));
     }
     let server = *core.games.server.lock();
     let Some(ch) = server.and_then(|s| general_channel(&core, s)) else {
@@ -156,7 +168,6 @@ async fn post_result(core: Arc<Core>, game: &'static str, raw: String) {
     let nonce = (now_us() as u64) | 1;
     match core.send_message(ch, text, nonce, now_us(), None) {
         Ok(()) => {
-            core.cache.kv_set(&dedupe, Some(vec![1]));
             let name = GAMES.iter().find(|g| g.id == game).map(|g| g.name).unwrap_or(game);
             core.emit(UiEvent::Error { message: format!("{name} result posted to general") });
         }
