@@ -83,6 +83,7 @@ pub fn run() {
             commands::audio_devices,
             commands::audio_set_device,
             games::games_open,
+            games::games_server,
             games::games_bounds,
             games::games_visible,
             games::games_close,

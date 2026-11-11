@@ -1,7 +1,7 @@
 // Right-hand games panel. The game itself is a native child webview that
 // the core positions over `.game-host`; it is created on open and destroyed
 // on close so it costs nothing while closed.
-import { createSignal, For, onCleanup, onMount } from "solid-js";
+import { createEffect, createSignal, For, on, onCleanup, onMount } from "solid-js";
 import { call } from "../ipc";
 import { s, toast } from "../store";
 import { GAMES, type GameId } from "../games";
@@ -18,6 +18,8 @@ export default function GamesPanel(p: { close: () => void }) {
     try { localStorage.setItem("game", g); } catch {}
     call("games_open", { game: g, serverId: s.selServer ?? "0", ...rect() }).catch((e) => toast(String(e)));
   };
+  // Results go to the server you are looking at.
+  createEffect(on(() => s.selServer, (id) => { if (id) call("games_server", { serverId: id }).catch(() => {}); }, { defer: true }));
   onMount(() => {
     requestAnimationFrame(() => open(game()));
     let raf = 0;

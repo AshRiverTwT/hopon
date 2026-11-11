@@ -43,18 +43,19 @@ const HOOK: &str = r#"
       t = t.trim(); if (!t || t.length > 2000) return;
       if (window.top !== window) { try { window.top.postMessage({ __hopon: t }, '*'); } catch (e) {} return; }
       const prev = document.title;
-      document.title = 'HOPON_RESULT:' + encodeURIComponent(t);
-      setTimeout(() => { document.title = prev; }, 60);
+      const sentinel = 'HOPON_RESULT:' + encodeURIComponent(t);
+      document.title = sentinel;
+      // WebView2 raises the title event asynchronously and reads the title
+      // when it runs: restore late, and only if nothing else changed it.
+      setTimeout(() => { if (document.title === sentinel) document.title = prev; }, 1500);
     } catch (e) {}
   };
   if (window.top === window) {
     window.addEventListener('message', (e) => { if (e.data && typeof e.data.__hopon === 'string') report(e.data.__hopon); });
   }
   try {
-    if (navigator.share) {
-      navigator.share = async (d) => { report([d && d.text, d && d.url].filter(Boolean).join('\n')); };
-    }
-    navigator.canShare = navigator.canShare || (() => true);
+    // Always present, so sites that feature-detect share use it.
+    navigator.share = async (d) => { report([d && d.text, d && d.url].filter(Boolean).join('\n')); };
   } catch (e) {}
   try {
     const cb = navigator.clipboard;
@@ -194,6 +195,13 @@ pub fn games_open(app: tauri::AppHandle, core: tauri::State<'_, Arc<Core>>, game
             }
         });
     window.add_child(builder, LogicalPosition::new(x, y), LogicalSize::new(w, h)).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// The server whose `general` receives results follows the UI selection.
+#[tauri::command]
+pub fn games_server(core: tauri::State<'_, Arc<Core>>, server_id: String) -> Res<()> {
+    *core.games.server.lock() = Some(pid(&server_id)?);
     Ok(())
 }
 
