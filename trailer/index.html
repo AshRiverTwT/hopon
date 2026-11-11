@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HopOn Trailer</title>
+<style>
+@font-face { font-family: "Archivo"; src: url("assets/archivo-wdth.woff2") format("woff2-variations"); font-weight: 100 900; font-stretch: 62% 125%; font-display: block; }
+@font-face { font-family: "Inter Tight"; src: url("assets/inter-tight.woff2") format("woff2-variations"); font-weight: 100 900; font-display: block; }
+:root { --bg: #161515; --ink: #F3F1E2; --hot: #FF1B50; --mute: #8d8a80; --line: #2b2929; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); color: var(--ink); font-family: "Inter Tight", sans-serif; }
+#stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); }
+.scene { position: absolute; inset: 0; opacity: 0; will-change: opacity, transform; }
+.display { font-family: "Archivo"; font-weight: 900; font-stretch: 125%; letter-spacing: -0.02em; line-height: .86; text-transform: uppercase; }
+.cond { font-family: "Archivo"; font-weight: 800; font-stretch: 68%; text-transform: uppercase; letter-spacing: .01em; }
+.eyebrow { font-size: 22px; letter-spacing: .22em; text-transform: uppercase; color: var(--mute); font-weight: 500; }
+.tag { display: inline-grid; place-items: center; background: var(--hot); color: var(--ink); font-family: "Archivo"; font-weight: 900; font-stretch: 125%; }
+.grain { position: absolute; inset: 0; pointer-events: none; opacity: .06; background-image: radial-gradient(rgba(255,255,255,.6) 1px, transparent 1px); background-size: 3px 3px; mix-blend-mode: overlay; }
+.rule { position: absolute; height: 2px; background: var(--hot); transform-origin: left center; }
+
+/* S1 intro */
+#s1 .tag { position: absolute; left: 50%; top: 50%; width: 210px; height: 210px; font-size: 150px; margin: -105px 0 0 -105px; border-radius: 18px; }
+#s1 .word { position: absolute; left: 0; right: 0; top: 50%; text-align: center; font-size: 300px; margin-top: -130px; }
+#s1 .sub { position: absolute; left: 0; right: 0; top: 50%; margin-top: 200px; text-align: center; font-size: 38px; color: var(--mute); }
+#s1 .sub b { color: var(--ink); font-weight: 600; }
+
+/* app shots */
+.shot { position: absolute; left: 0; top: 0; transform-origin: 0 0; border-radius: 22px; overflow: hidden; box-shadow: 0 40px 120px rgba(0,0,0,.65), 0 0 0 2px #2a2828; }
+.shot img { display: block; }
+.cap { position: absolute; left: 96px; bottom: 84px; }
+.cap .display { font-size: 108px; }
+.cap .eyebrow { margin-bottom: 18px; color: var(--hot); }
+.scrim { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(22,21,21,0) 40%, rgba(22,21,21,.92) 82%); }
+
+/* S3 speed */
+#s3 .head { position: absolute; left: 96px; top: 96px; font-size: 220px; }
+#s3 .head .dot { color: var(--hot); }
+#s3 .stats { position: absolute; left: 96px; right: 96px; bottom: 150px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 56px; }
+.stat { border-top: 2px solid var(--line); padding-top: 26px; }
+.stat .n { font-family: "Archivo"; font-weight: 900; font-stretch: 100%; font-size: 150px; line-height: 1; letter-spacing: -0.03em; }
+.stat .n small { font-size: 56px; font-stretch: 100%; margin-left: 10px; color: var(--hot); letter-spacing: 0; }
+.stat .l { font-size: 30px; color: var(--ink); margin-top: 18px; font-weight: 500; }
+.stat .d { font-size: 22px; color: var(--mute); margin-top: 6px; }
+.foot { position: absolute; left: 96px; right: 96px; bottom: 52px; font-size: 19px; color: #6f6c64; }
+
+/* S4 compare */
+#s4 .head { position: absolute; left: 96px; top: 96px; font-size: 220px; }
+#s4 .head .dot { color: var(--hot); }
+#s4 .rows { position: absolute; left: 96px; right: 96px; top: 400px; display: grid; gap: 64px; }
+.cmp .title { font-size: 26px; letter-spacing: .2em; text-transform: uppercase; color: var(--mute); margin-bottom: 18px; }
+.bar { position: relative; height: 92px; display: flex; align-items: center; margin-bottom: 14px; }
+.bar .who { width: 230px; font-size: 34px; font-weight: 600; }
+.bar .track { position: relative; flex: 1; height: 100%; }
+.bar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; transform-origin: left center; }
+.bar .val { position: absolute; top: 50%; transform: translateY(-50%); font-family: "Archivo"; font-weight: 900; font-size: 54px; white-space: nowrap; }
+.bar.us .fill { background: var(--hot); }
+.bar.them .fill { background: #3a3837; }
+.bar.them .who { color: var(--mute); }
+.bar.them .fade { position: absolute; top: 0; bottom: 0; border-radius: 0 6px 6px 0; background: linear-gradient(90deg, #3a3837, rgba(58,56,55,0)); transform-origin: left center; }
+
+/* S5 games */
+#s5 .panel { position: absolute; left: 2015px; top: 330px; width: 807px; height: 1237px; background: #1d1c1c; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 70px; }
+.board { display: grid; grid-template-columns: repeat(5, 112px); gap: 12px; }
+.tile { width: 112px; height: 112px; border: 3px solid #3a3838; display: grid; place-items: center; font-family: "Archivo"; font-weight: 800; font-size: 60px; color: var(--ink); transform-style: preserve-3d; }
+.tile.g { background: #4f8a4a; border-color: #4f8a4a; }
+.tile.y { background: #b39a3a; border-color: #b39a3a; }
+.tile.x { background: #3a3838; border-color: #3a3838; }
+.sharebtn { font-size: 40px; font-weight: 600; padding: 22px 64px; border-radius: 10px; background: #3a3837; color: var(--ink); }
+.sharebtn.on { background: var(--hot); }
+#s5 .patch { position: absolute; left: 600px; top: 886px; width: 1360px; height: 540px; background: var(--bg); overflow: hidden; }
+#s5 .flow { position: absolute; left: 23px; right: 0; bottom: 0; }
+.msg { padding: 26px 0 30px; }
+.msg .hd { display: flex; align-items: center; gap: 20px; margin-bottom: 18px; }
+.av { width: 40px; height: 40px; border-radius: 4px; position: relative; overflow: hidden; }
+.av::before { content: ""; position: absolute; left: 13px; top: 7px; width: 14px; height: 14px; border-radius: 50%; background: rgba(255,255,255,.85); }
+.av::after { content: ""; position: absolute; left: 4px; top: 25px; width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,.85); }
+.msg .nm { font-size: 25px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+.msg .tm { font-size: 24px; color: var(--mute); }
+.card { display: inline-block; background: #222121; border-left: 5px solid var(--hot); padding: 26px 30px 24px; border-radius: 0 6px 6px 0; }
+.card .eb { font-size: 21px; letter-spacing: .1em; color: var(--mute); }
+.card .tt { font-family: "Archivo"; font-weight: 800; font-stretch: 68%; font-size: 46px; margin: 10px 0 14px; }
+.mini { display: grid; grid-template-columns: repeat(5, 31px); gap: 7px; }
+.mini i { width: 31px; height: 31px; border-radius: 3px; background: #3a3838; }
+.mini i.g { background: #4f8a4a; } .mini i.y { background: #b39a3a; }
+.toast { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); background: var(--ink); color: var(--bg); font-size: 34px; font-weight: 600; padding: 22px 40px; border-radius: 10px; white-space: nowrap; }
+.toast b { color: var(--hot); }
+.cursor { position: absolute; width: 54px; height: 54px; }
+.ring { position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 4px solid var(--hot); }
+
+/* S6 end */
+#s6 .tag { position: absolute; left: 50%; top: 300px; width: 150px; height: 150px; margin-left: -75px; font-size: 108px; border-radius: 14px; }
+#s6 .word { position: absolute; left: 0; right: 0; top: 500px; text-align: center; font-size: 200px; }
+#s6 .line { position: absolute; left: 0; right: 0; top: 720px; text-align: center; font-size: 44px; color: var(--ink); }
+#s6 .line .dot { color: var(--hot); }
+#s6 .dl { position: absolute; left: 50%; top: 820px; transform: translateX(-50%); font-size: 30px; padding: 20px 46px; border: 2px solid var(--ink); border-radius: 999px; white-space: nowrap; }
+#s6 .dl b { color: var(--hot); }
+#fade { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <section class="scene" id="s1">
+    <div class="tag">H</div>
+    <div class="word display">HopOn</div>
+    <div class="sub">Chat &amp; voice for Windows. <b>Native Rust.</b> No browser bloat.</div>
+  </section>
+
+  <section class="scene" id="s2a">
+    <div class="shot" id="shotChat"><img src="assets/40-chat-qol.jpg" width="2560" height="1720" alt=""></div>
+    <div class="scrim"></div>
+    <div class="cap"><div class="eyebrow">Text</div><div class="display">Talk at the<br>speed of thought.</div></div>
+  </section>
+
+  <section class="scene" id="s2b">
+    <div class="shot" id="shotVoice"><img src="assets/5-voice.jpg" width="2560" height="1600" alt=""></div>
+    <div class="scrim"></div>
+    <div class="cap"><div class="eyebrow">Voice</div><div class="display">Hop in.<br>You're live.</div></div>
+  </section>
+
+  <section class="scene" id="s3">
+    <div class="head display">Fast<span class="dot">.</span></div>
+    <div class="stats">
+      <div class="stat"><div class="n"><span data-count="0.43" data-dec="2">0.43</span><small>ms</small></div><div class="l">Message delivery</div><div class="d">p95, server fan-out*</div></div>
+      <div class="stat"><div class="n"><span data-count="657" data-dec="0">657</span><small>ms</small></div><div class="l">Cold start to first paint</div><div class="d">Windows 11, measured</div></div>
+      <div class="stat"><div class="n"><span data-count="0.13" data-dec="2">0.13</span><small>%</small></div><div class="l">CPU while idle</div><div class="d">Windows 11, measured</div></div>
+    </div>
+    <div class="foot">* p95 over loopback, 200 receivers: 1.44 ms. Measured with HopOn's bench suite. Your network adds its own round trip.</div>
+  </section>
+
+  <section class="scene" id="s4">
+    <div class="head display">Light<span class="dot">.</span></div>
+    <div class="rows">
+      <div class="cmp">
+        <div class="title">Memory at idle</div>
+        <div class="bar us"><div class="who">HopOn</div><div class="track"><div class="fill" data-w="0.2375"></div><div class="val" data-x="0.2375">190 MB</div></div></div>
+        <div class="bar them"><div class="who">Discord</div><div class="track"><div class="fill" data-w="0.5"></div><div class="fade" data-x="0.5" data-w="0.3"></div><div class="val" data-x="0.5">400 MB – 2 GB†</div></div></div>
+      </div>
+      <div class="cmp">
+        <div class="title">Installer download</div>
+        <div class="bar us"><div class="who">HopOn</div><div class="track"><div class="fill" data-w="0.0563"></div><div class="val" data-x="0.0563">9.9 MB</div></div></div>
+        <div class="bar them"><div class="who">Discord</div><div class="track"><div class="fill" data-w="0.75"></div><div class="val" data-x="0.75">~132 MB†</div></div></div>
+      </div>
+    </div>
+    <div class="foot">HopOn: measured on Windows 11 (private working set, installer file). † Discord: public reports, not our measurements — TechRadar and Windows Latest (2025–26) for idle RAM; download listings for the x64 installer. Varies by build and setup.</div>
+  </section>
+
+  <section class="scene" id="s5">
+    <div class="shot" id="shotGames">
+      <img src="assets/12-games.jpg" width="2880" height="1720" alt="">
+      <div class="panel">
+        <div class="board" id="board"></div>
+        <div class="sharebtn" id="share">Share</div>
+      </div>
+      <div class="patch"><div class="flow" id="flow">
+        <div class="msg">
+          <div class="hd"><div class="av" style="background:linear-gradient(135deg,#b05a9d,#4a1d3e)"></div><span class="nm">mira</span><span class="tm">02:07 PM</span></div>
+          <div class="card"><div class="eb">WORDLE</div><div class="tt">Wordle 1,234 4/6</div><div class="mini" data-rows="xyxxx,xxgxy,gygxx,ggggg"></div></div>
+        </div>
+        <div class="msg" id="mine">
+          <div class="hd"><div class="av" style="background:linear-gradient(135deg,#6b4fc0,#2b1a52)"></div><span class="nm">ash</span><span class="tm">just now</span></div>
+          <div class="card"><div class="eb">WORDLE</div><div class="tt">Wordle 1,234 3/6</div><div class="mini" data-rows="xyxxx,ggxgx,ggggg"></div></div>
+        </div>
+      </div></div>
+      <svg class="cursor" id="cursor" viewBox="0 0 24 24"><path d="M3 2l17 10-7.5 1.6L9 21z" fill="#F3F1E2" stroke="#161515" stroke-width="1.4" stroke-linejoin="round"/></svg>
+      <div class="ring" id="ring"></div>
+    </div>
+    <div class="scrim" id="scrim5" style="background:linear-gradient(180deg,rgba(22,21,21,0) 50%,rgba(22,21,21,.94) 86%)"></div>
+    <div class="toast" id="toast">Score posted to <b>#general</b></div>
+    <div class="cap" id="cap5a"><div class="eyebrow">Games tab</div><div class="display" style="font-size:96px">Play right<br>beside the chat.</div></div>
+    <div class="cap" id="cap5b"><div class="eyebrow">Share in chat</div><div class="display" style="font-size:96px">Finish. Share.<br>Again &amp; again.</div></div>
+  </section>
+
+  <section class="scene" id="s6">
+    <div class="tag">H</div>
+    <div class="word display">HopOn</div>
+    <div class="line">Fast<span class="dot">.</span> Light<span class="dot">.</span> Yours<span class="dot">.</span></div>
+    <div class="dl">Free for Windows · <b>9.9 MB</b></div>
+  </section>
+
+  <div class="grain"></div>
+  <div id="fade"></div>
+</div>
+
+<script>
+// ---------- deterministic timeline: render(t) draws the frame at t seconds ----------
+const $ = (q) => document.querySelector(q);
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+const outCubic = (x) => 1 - Math.pow(1 - x, 3);
+const outExpo = (x) => (x >= 1 ? 1 : 1 - Math.pow(2, -10 * x));
+const inOut = (x) => (x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const outBack = (x) => { const c = 1.70158, d = c + 1; return 1 + d * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const lerp = (a, b, x) => a + (b - a) * x;
+/** Visibility envelope: fade in over [a, a+fi], out over [b-fo, b]. */
+const env = (t, a, b, fi = .35, fo = .35) => Math.min(seg(t, a, a + fi), 1 - seg(t, b - fo, b));
+const set = (el, o, tf) => { el.style.opacity = o; if (tf !== undefined) el.style.transform = tf; };
+
+// Games board: guesses and colours (g=green, y=present, x=absent).
+const GUESSES = [["MOULD", "xyxxx"], ["SHINY", "ggxgx"], ["SHONE", "ggggg"]];
+const board = $("#board");
+const tiles = [];
+for (let r = 0; r < 6; r++) for (let c = 0; c < 5; c++) { const d = document.createElement("div"); d.className = "tile"; board.appendChild(d); tiles.push(d); }
+document.querySelectorAll(".mini").forEach((m) => m.dataset.rows.split(",").forEach((row) => [...row].forEach((k) => { const i = document.createElement("i"); if (k !== "x") i.className = k; m.appendChild(i); })));
+
+function render(t) {
+  // S1 — intro: tag pops, morphs into wordmark.
+  const s1 = env(t, 0, 3.3, .01, .4);
+  set($("#s1"), s1);
+  const tagIn = outBack(seg(t, .15, .7));
+  const tagOut = inOut(seg(t, 1.05, 1.45));
+  $("#s1 .tag").style.transform = `scale(${tagIn * (1 - tagOut * .9)}) rotate(${lerp(-20, 0, tagIn) + tagOut * 90}deg)`;
+  $("#s1 .tag").style.opacity = 1 - tagOut;
+  const w = outExpo(seg(t, 1.25, 1.85));
+  $("#s1 .word").style.cssText = `opacity:${w};transform:scale(${lerp(1.6, 1, w)});letter-spacing:${lerp(.3, -.02, w)}em;filter:blur(${(1 - w) * 14}px)`;
+  const sub = outCubic(seg(t, 1.9, 2.5));
+  set($("#s1 .sub"), sub, `translateY(${(1 - sub) * 30}px)`);
+
+  // S2a — chat shot, slow push in.
+  const a = env(t, 3.2, 5.9, .35, .3);
+  set($("#s2a"), a);
+  const pa = seg(t, 3.2, 5.9);
+  placeShot($("#shotChat"), 2560, 1720, lerp(.62, .70, pa), lerp(1180, 1020, pa), lerp(470, 430, pa), lerp(6, 0, outCubic(pa)));
+  const ca = outCubic(seg(t, 3.5, 4.1));
+  set($("#s2a .cap"), ca, `translateY(${(1 - ca) * 40}px)`);
+
+  // S2b — voice shot.
+  const b = env(t, 5.8, 8.3, .3, .35);
+  set($("#s2b"), b);
+  const pb = seg(t, 5.8, 8.3);
+  placeShot($("#shotVoice"), 2560, 1600, lerp(.66, .72, pb), lerp(1100, 1180, pb), lerp(420, 400, pb), lerp(-5, 0, outCubic(pb)));
+  const cb = outCubic(seg(t, 6.05, 6.6));
+  set($("#s2b .cap"), cb, `translateY(${(1 - cb) * 40}px)`);
+
+  // S3 — speed counters.
+  const s3 = env(t, 8.2, 12.8, .3, .35);
+  set($("#s3"), s3);
+  const h3 = outExpo(seg(t, 8.3, 8.9));
+  set($("#s3 .head"), h3, `translateX(${(1 - h3) * -120}px)`);
+  document.querySelectorAll("#s3 .stat").forEach((el, i) => {
+    const x = outCubic(seg(t, 8.7 + i * .25, 9.3 + i * .25));
+    set(el, x, `translateY(${(1 - x) * 60}px)`);
+    const n = el.querySelector("[data-count]");
+    const v = Number(n.dataset.count) * outExpo(seg(t, 8.8 + i * .25, 10.2 + i * .25));
+    n.textContent = v.toFixed(Number(n.dataset.dec));
+  });
+  set($("#s3 .foot"), outCubic(seg(t, 9.6, 10.2)));
+
+  // S4 — comparison bars.
+  const s4 = env(t, 12.7, 18.1, .3, .35);
+  set($("#s4"), s4);
+  const h4 = outExpo(seg(t, 12.8, 13.4));
+  set($("#s4 .head"), h4, `translateX(${(1 - h4) * -120}px)`);
+  document.querySelectorAll("#s4 .cmp").forEach((cmp, ci) => {
+    set(cmp, outCubic(seg(t, 13.2 + ci * .5, 13.6 + ci * .5)));
+    cmp.querySelectorAll(".bar").forEach((bar, bi) => {
+      const start = 13.4 + ci * .5 + (bi ? .15 : .55);
+      const g = outExpo(seg(t, start, start + 1.1));
+      const fill = bar.querySelector(".fill"), val = bar.querySelector(".val"), fade = bar.querySelector(".fade");
+      fill.style.width = `${Number(fill.dataset.w) * 100}%`;
+      fill.style.transform = `scaleX(${g})`;
+      if (fade) { fade.style.left = `${Number(fade.dataset.x) * 100}%`; fade.style.width = `${Number(fade.dataset.w) * 100}%`; fade.style.transform = `scaleX(${outCubic(seg(t, start + .6, start + 1.3))})`; }
+      val.style.left = `calc(${Number(val.dataset.x) * g * 100}% + 24px)`;
+      val.style.opacity = seg(t, start + .3, start + .7);
+    });
+  });
+  set($("#s4 .foot"), outCubic(seg(t, 14.8, 15.4)));
+
+  // S5 — games tab + share to chat.
+  const s5 = env(t, 18.0, 26.3, .35, .35);
+  set($("#s5"), s5);
+  renderGames(t);
+
+  // S6 — end card.
+  const s6 = env(t, 26.2, 30.01, .3, .01);
+  set($("#s6"), s6);
+  const tg = outBack(seg(t, 26.3, 26.8));
+  $("#s6 .tag").style.transform = `scale(${tg}) rotate(${lerp(-25, 0, tg)}deg)`;
+  const wd = outExpo(seg(t, 26.5, 27.1));
+  $("#s6 .word").style.cssText = `opacity:${wd};transform:translateY(${(1 - wd) * 50}px)`;
+  const ln = outCubic(seg(t, 27.1, 27.6));
+  set($("#s6 .line"), ln, `translateY(${(1 - ln) * 24}px)`);
+  const dl = outCubic(seg(t, 27.5, 28));
+  set($("#s6 .dl"), dl, `translateX(-50%) translateY(${(1 - dl) * 24}px)`);
+  $("#fade").style.opacity = seg(t, 29.3, 30);
+}
+
+/** Put an app screenshot (w×h px) on stage at scale s, centred on (cx, cy), with a slight tilt. */
+function placeShot(el, w, h, s, cx, cy, rot = 0) {
+  el.style.width = `${w}px`; el.style.height = `${h}px`;
+  el.style.transform = `translate(${cx - (w * s) / 2}px, ${cy - (h * s) / 2}px) scale(${s}) perspective(4000px) rotateY(${rot}deg)`;
+}
+
+function renderGames(t) {
+  // Camera: start wide, push toward the games panel, then glide over to the chat.
+  const k1 = inOut(seg(t, 18.0, 20.6)), k2 = inOut(seg(t, 21.9, 23.0));
+  const s = lerp(lerp(.55, .74, k1), .66, k2);
+  // Focus point in screenshot pixels.
+  const fx = lerp(lerp(1440, 2420, k1), 1200, k2), fy = lerp(lerp(860, 900, k1), 1080, k2);
+  const el = $("#shotGames");
+  el.style.width = "2880px"; el.style.height = "1720px";
+  el.style.transform = `translate(${960 - fx * s}px, ${560 - fy * s}px) scale(${s})`;
+
+  // Board: each row flips in (letters then colour).
+  GUESSES.forEach(([word, cols], r) => {
+    for (let c = 0; c < 5; c++) {
+      const tile = tiles[r * 5 + c];
+      const t0 = 19.0 + r * .62 + c * .07;
+      const typed = t >= t0;
+      const f = seg(t, t0 + .25, t0 + .5);
+      tile.textContent = typed ? word[c] : "";
+      tile.className = "tile" + (f >= .5 ? " " + cols[c] : "");
+      tile.style.transform = `rotateX(${f < 1 && f > 0 ? Math.sin(f * Math.PI) * 90 : 0}deg) scale(${typed && t < t0 + .1 ? 1.08 : 1})`;
+      if (typed && f < .5) tile.style.borderColor = "#5a5757";
+      else tile.style.borderColor = "";
+    }
+  });
+  // Win bounce on last row.
+  const win = seg(t, 20.75, 21.15);
+  for (let c = 0; c < 5; c++) if (win > 0 && win < 1) tiles[10 + c].style.transform = `translateY(${-Math.sin(clamp(win * 1.6 - c * .12) * Math.PI) * 26}px)`;
+
+  // Cursor travels to Share and clicks.
+  const share = $("#share");
+  const cur = $("#cursor"), ring = $("#ring");
+  const panelX = 2015, panelY = 330;
+  const target = { x: panelX + share.offsetLeft + share.offsetWidth / 2 + 8, y: panelY + share.offsetTop + share.offsetHeight / 2 + 6 };
+  const mv = inOut(seg(t, 20.9, 21.55));
+  const cx = lerp(2700, target.x, mv), cy = lerp(1500, target.y, mv);
+  const click = 21.6;
+  const press = t >= click && t < click + .14;
+  cur.style.opacity = env(t, 20.85, 22.7, .15, .25);
+  cur.style.transform = `translate(${cx}px, ${cy}px) scale(${press ? .85 : 1})`;
+  const rg = seg(t, click, click + .45);
+  ring.style.opacity = rg > 0 && rg < 1 ? 1 - rg : 0;
+  ring.style.transform = `translate(${target.x}px, ${target.y}px) scale(${.3 + rg})`;
+  share.classList.toggle("on", t >= click);
+  share.style.transform = `scale(${press ? .94 : 1})`;
+
+  // New message slides into chat.
+  const m = outCubic(seg(t, 22.3, 22.8));
+  const mine = $("#mine");
+  mine.style.display = t >= 22.3 ? "block" : "none";
+  mine.style.opacity = m;
+  mine.style.transform = `translateY(${(1 - m) * 60}px)`;
+  const hl = seg(t, 22.8, 24.4);
+  mine.querySelector(".card").style.boxShadow = `0 0 0 ${4 * (1 - hl)}px rgba(255,27,80,${.6 * (1 - hl)})`;
+
+  $("#scrim5").style.opacity = Math.max(env(t, 18.3, 21.4, .45, .3), env(t, 23.3, 26.3, .45, .35));
+  // Toast + captions.
+  const tst = env(t, 21.75, 23.6, .2, .3);
+  $("#toast").style.opacity = tst;
+  $("#toast").style.transform = `translateX(-50%) translateY(${(1 - outCubic(seg(t, 21.75, 22.0))) * 30}px)`;
+  const c1 = env(t, 18.3, 21.4, .45, .3);
+  set($("#cap5a"), c1, `translateY(${(1 - outCubic(seg(t, 18.3, 18.8))) * 40}px)`);
+  const c2 = env(t, 23.3, 26.3, .45, .35);
+  set($("#cap5b"), c2, `translateY(${(1 - outCubic(seg(t, 23.3, 23.8))) * 40}px)`);
+}
+
+window.render = render;
+window.DURATION = 30;
+// Live preview when opened directly: loop in real time.
+if (!new URLSearchParams(location.search).has("capture")) {
+  const start = performance.now();
+  const loop = () => { render(((performance.now() - start) / 1000) % 30); requestAnimationFrame(loop); };
+  document.fonts.ready.then(() => requestAnimationFrame(loop));
+}
+</script>
+</body>
+</html>
