@@ -1,3 +1,8 @@
 {"label":"local-sfu","missed":0,"mode":"loopback","secs":60,"stats":{"count":120,"max_ms":82.431,"mean_ms":67.69013333333334,"p50_ms":67.455,"p95_ms":67.647,"p99_ms":77.439},"t":1794379838104504}
 {"label":"local --queue-ms 10 --red on","missed":0,"mode":"loopback","secs":30,"stats":{"count":60,"max_ms":84.287,"mean_ms":69.68959999999998,"p50_ms":69.503,"p95_ms":69.631,"p99_ms":84.287},"t":1794379933833560}
 {"label":"local --queue-ms 10 --red off","missed":0,"mode":"loopback","secs":30,"stats":{"count":60,"max_ms":73.087,"mean_ms":70.66906666666667,"p50_ms":70.527,"p95_ms":72.831,"p99_ms":73.087},"t":1794379966988401}
+{"label":"local-1h","missed":0,"mode":"loopback","secs":3600,"stats":{"count":7200,"max_ms":99.327,"mean_ms":83.00903111111113,"p50_ms":85.503,"p95_ms":85.695,"p99_ms":90.495},"t":1794383579441250}
+{"label":"local-idle-recheck","missed":0,"mode":"loopback","secs":60,"stats":{"count":120,"max_ms":88.127,"mean_ms":85.07999999999998,"p50_ms":85.183,"p95_ms":87.679,"p99_ms":87.871},"t":1794383658838339}
+{"label":"local-dist-1","missed":0,"mode":"loopback","secs":30,"stats":{"count":60,"max_ms":83.327,"mean_ms":68.592,"p50_ms":68.415,"p95_ms":68.543,"p99_ms":83.327},"t":1794383700342485}
+{"label":"local-dist-2","missed":0,"mode":"loopback","secs":30,"stats":{"count":60,"max_ms":77.119,"mean_ms":71.7288,"p50_ms":73.151,"p95_ms":73.343,"p99_ms":77.119},"t":1794383733481850}
+{"label":"local-dist-3","missed":0,"mode":"loopback","secs":30,"stats":{"count":60,"max_ms":77.951,"mean_ms":72.97466666666668,"p50_ms":77.631,"p95_ms":77.823,"p99_ms":77.951},"t":1794383766634686}

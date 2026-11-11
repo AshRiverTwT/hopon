@@ -1,0 +1,14 @@
+# LiveKit for a single Windows PC / LAN test. Not for production.
+port: 7880
+rtc:
+  port_range_start: 50000
+  port_range_end: 50200
+  tcp_port: 7881
+  use_external_ip: false
+keys:
+  devkey: secret-secret-secret-secret-secret
+audio:
+  update_interval: 100
+  smooth_intervals: 1
+room:
+  empty_timeout: 30

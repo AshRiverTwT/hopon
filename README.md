@@ -47,13 +47,20 @@ frame plus CPU rasterization; WebView2 with a GPU should be lower.
 **Voice, network path** (`voice_loopback`, two participants through a local
 LiveKit v1.13.11, 20 ms Opus, RED on, no packet loss):
 
-| stage | p50 | p95 | p99 | clicks missed |
+| run | p50 | p95 | p99 | clicks missed |
 |---|---|---|---|---|
-| encode → RTP/UDP → SFU → jitter buffer → decode | 67.5 ms | 67.6 ms | 77.4 ms | 0 / 120 |
+| 1 hour continuous | 85.5 ms | 85.7 ms | 90.5 ms | **0 / 7200** |
+| 7 separate runs, 30–60 s each | 67.5–85.2 ms | 67.6–87.7 ms | 77–88 ms | 0 |
 
-This excludes the audio devices but includes the SDK's synthetic 10 ms
-capture and playout timers, which the app replaces with the real WASAPI
-callbacks. **Mouth-to-ear estimate: ~98 ms** (= 68 + ~30 ms for the WASAPI
+This covers encode → RTP/UDP → SFU → jitter buffer → decode.
+- Within a session the latency is flat (p50 ≈ p95). Between sessions it
+  settles 68–86 ms, depending on how libwebrtc's 10 ms timers and the
+  jitter-buffer target align when the call starts.
+- It excludes the audio devices but includes the SDK's synthetic 10 ms
+  capture and playout timers, which the app replaces with the real WASAPI
+  callbacks.
+
+**Mouth-to-ear estimate: 98–118 ms** (68–88 ms plus ~30 ms for the WASAPI
 capture and render buffers). The +30 ms is an estimate, not a measurement.
 Target: 150 ms.
 
@@ -68,7 +75,7 @@ Target: 150 ms.
 | client start → first paint (WebKitGTK, software GL) | 666–696 ms | < 1 s |
 | voice join (connect + publish + subscribe), loopback | 166 ms | < 1 s |
 | functional smoke test (`smoke`) | 20 / 20 checks pass | — |
-| 1-hour voice loopback, missed clicks | see `results/voice.jsonl` (`local-1h`) | 0 dropouts |
+| 1-hour voice loopback | 0 / 7200 clicks missed | no dropouts |
 
 ### Not representative (measured here, but the wrong platform)
 
@@ -82,7 +89,7 @@ polling otherwise.
 
 - Voice mouth-to-ear with real devices (WASAPI path, MMCSS, echo cancellation).
 - Two-PC voice test and between-region voice.
-- 1-hour two-user call on real devices.
+- 1-hour two-user call on real devices (the network path passed 1 hour with 0 missed clicks).
 - Windows cold start, idle RAM and idle CPU (WebView2).
 - Text round trip over a real LAN and over the internet.
 
@@ -280,6 +287,18 @@ enqueue → commit, rows per transaction, lagged disconnects and persistence
 failures. `GET /metrics/reset` clears them.
 
 ### Measuring on Windows
+
+**Quickest: the local kit.** `scripts/windows-kit/` has `start-local.ps1`,
+which runs Postgres, LiveKit (Windows build) and the HopOn server on one PC,
+then the smoke test and the text and voice benchmarks. Steps are in
+`README-WINDOWS.txt`. Package it with the binaries:
+
+```bash
+scripts/build-windows.sh
+```
+
+Then copy the installer, `hopon-server.exe`, the bench `.exe` files,
+`scripts/measure-windows.ps1` and `scripts/windows-kit/*` into one folder.
 
 These cover the numbers still listed as unmeasured.
 
