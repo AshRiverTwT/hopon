@@ -45,3 +45,16 @@ test("merging into 5000 messages is fast", () => {
   assert.ok(per < 2, `${per.toFixed(3)} ms per merge`);
   console.log(`merge into 5000: ${per.toFixed(3)} ms`);
 });
+
+test("game results are recognised and parsed", async () => {
+  const { parseGameResult } = await import("../src/games.ts");
+  const w = parseGameResult("Wordle 1,234 3/6\n\n⬛🟨⬛⬛⬛\n🟩🟩⬛🟩⬛\n🟩🟩🟩🟩🟩");
+  assert.equal(w.game, "wordle");
+  assert.equal(w.grid.length, 3);
+  assert.deepEqual(w.grid[2], ["🟩", "🟩", "🟩", "🟩", "🟩"]);
+  assert.equal(parseGameResult("Wordle is fun"), null);
+  assert.equal(parseGameResult("Wordle 1,234 7/6"), null);
+  assert.equal(parseGameResult("hello there"), null);
+  assert.equal(parseGameResult("Minute Cryptic #88 solved, 1 hint\nminutecryptic.com").game, "cryptic");
+  assert.equal(parseGameResult("Krillion 12 — 3 tries").game, "krillion");
+});

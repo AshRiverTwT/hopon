@@ -84,6 +84,7 @@ pub struct Core {
     req: AtomicU32,
     reconnect: Notify,
     pub voice: crate::voice::Voice,
+    pub games: crate::games::Games,
 }
 
 pub type Res<T> = Result<T, String>;
@@ -102,6 +103,7 @@ impl Core {
             req: AtomicU32::new(1),
             reconnect: Notify::new(),
             voice: crate::voice::Voice::new(),
+            games: crate::games::Games::new(),
         })
     }
 

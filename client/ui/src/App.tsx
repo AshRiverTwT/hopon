@@ -1,4 +1,4 @@
-import { Match, Show, Switch, createSignal, onCleanup, onMount } from "solid-js";
+import { Match, Show, Switch, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { call } from "./ipc";
 import { currentServer, s, toast } from "./store";
 import Login from "./components/Login";
@@ -9,6 +9,7 @@ import Stage from "./components/Stage";
 import Settings from "./components/Settings";
 import PerfOverlay from "./components/PerfOverlay";
 import { AudioToggles, Status } from "./components/Corners";
+import GamesPanel from "./components/GamesPanel";
 import { InviteSheet, MembersSheet, NewChannelSheet, ServersSheet } from "./components/Sheets";
 
 type Sheet = null | { k: "servers" } | { k: "members" } | { k: "settings" } | { k: "invite"; link: string } | { k: "new"; voice: boolean };
@@ -16,7 +17,14 @@ type Sheet = null | { k: "servers" } | { k: "members" } | { k: "settings" } | { 
 export default function App() {
   const [perf, setPerf] = createSignal(false);
   const [sheet, setSheet] = createSignal<Sheet>(null);
+  const [games, setGames] = createSignal(false);
+  // The game is a native view drawn above the page: hide it under sheets/overlays.
+  createEffect(() => {
+    if (!games()) return;
+    call("games_visible", { visible: !sheet() && !perf() }).catch(() => {});
+  });
   onMount(() => {
+    call<{ testOpenGames?: boolean }>("get_config").then((c) => c?.testOpenGames && setGames(true)).catch(() => {});
     const k = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.code === "KeyP") { e.preventDefault(); setPerf((v) => !v); }
     };
@@ -32,7 +40,7 @@ export default function App() {
     <>
       <Show when={s.ready} fallback={<div class="splash" />}>
         <Show when={s.user} fallback={<Login />}>
-          <div class="frame">
+          <div class="frame" classList={{ "with-games": games() && !!currentServer() }}>
             <header class="topbar">
               <span class="wordmark">HopOn<span class="badge">01</span></span>
               <button class="pill ghost" onClick={() => setSheet({ k: "servers" })}>{currentServer()?.name ?? "Servers"}</button>
@@ -40,6 +48,7 @@ export default function App() {
                 <Show when={currentServer()}>
                   <button class="pill ghost" onClick={() => setSheet({ k: "members" })}>People {currentServer()!.members.length}</button>
                   <button class="pill ghost" onClick={invite}>Invite</button>
+                  <button class="pill ghost" classList={{ active: games() }} onClick={() => setGames((v) => !v)}>Games</button>
                 </Show>
                 <button class="pill" onClick={() => setSheet({ k: "settings" })}>Settings</button>
               </div>
@@ -65,6 +74,7 @@ export default function App() {
                   </main>
                 </Match>
               </Switch>
+              <Show when={games()}><GamesPanel close={() => setGames(false)} /></Show>
             </Show>
             <footer class="bottombar">
               <AudioToggles />

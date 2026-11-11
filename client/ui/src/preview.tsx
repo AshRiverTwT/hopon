@@ -39,6 +39,7 @@ function history(n: number): Msg[] {
   return out;
 }
 const hist = history(2000);
+hist.push({ id: "10002000", channelId: "7001", authorId: "1002", content: "Wordle 1,234 3/6\n\n⬛🟨⬛⬛⬛\n🟩🟩⬛🟩⬛\n🟩🟩🟩🟩🟩", editedAt: null, ts: Date.now() - 60000, nonce: "", state: 2 });
 hist.push({ id: "p1", channelId: "7001", authorId: me.id, content: "this one is still sending", editedAt: null, ts: Date.now(), nonce: "1", state: 0 });
 hist.push({ id: "p2", channelId: "7001", authorId: me.id, content: "and this one failed", editedAt: null, ts: Date.now(), nonce: "2", state: 3 });
 

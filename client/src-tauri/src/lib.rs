@@ -2,6 +2,7 @@
 mod cache;
 mod commands;
 mod core;
+mod games;
 mod perf;
 mod secure;
 mod sys;
@@ -81,6 +82,11 @@ pub fn run() {
             commands::audio_processing,
             commands::audio_devices,
             commands::audio_set_device,
+            games::games_open,
+            games::games_bounds,
+            games::games_visible,
+            games::games_close,
+            games::games_open_external,
             commands::perf_painted,
             commands::perf_stats,
             commands::perf_reset,

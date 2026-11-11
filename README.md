@@ -212,6 +212,29 @@ The exact commands are in [Measuring on Windows](#measuring-on-windows).
    instance only), `hopon://` deep-link registration (paste the invite link or
    code instead), code signing of the installer.
 
+## Games panel
+
+The **Games** pill opens Wordle, Minute Cryptic or Krillion in a side panel.
+
+- **How it runs.** Each game is the real website in a native child webview
+  (not an iframe). It is created on open and destroyed on close, so it uses
+  no memory while closed.
+- **Score posting.** When you press the game's own **Share** button, the
+  result is posted to the server's `general` channel (or its first text
+  channel) and shown as a score card.
+- **Security.**
+  - Game pages get no access to the app's commands.
+  - An injected script reports shared text through the page title, and the
+    core validates it per game: Wordle's exact `Wordle N X/6` format; for
+    Minute Cryptic and Krillion, the game's name must appear.
+  - Each result posts at most once.
+  - Ad popups are blocked.
+- **Limits.**
+  - Posting is triggered by Share rather than by detecting the end of a game,
+    because that would need each site's internals.
+  - Minute Cryptic and Krillion matching is name-based until their share
+    formats are confirmed.
+
 ## Setup
 
 ### Server (development)

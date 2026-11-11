@@ -27,7 +27,7 @@ parking_lot.workspace = true
 base64 = "0.22"
 tracing.workspace = true
 tracing-subscriber.workspace = true
-tauri = { version = "2", default-features = false, features = ["wry", "common-controls-v6", "compression"] }
+tauri = { version = "2", default-features = false, features = ["wry", "common-controls-v6", "compression", "unstable"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 # Voice: LiveKit SDK with libwebrtc's platform ADM (WASAPI on Windows).
 livekit = { version = "0.10", optional = true }

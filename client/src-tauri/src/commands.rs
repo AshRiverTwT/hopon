@@ -48,11 +48,13 @@ pub fn ui_ready(app: tauri::AppHandle, core: C<'_>, t_paint_ms: f64) {
 #[serde(rename_all = "camelCase")]
 pub struct Config {
     url: String,
+    /// Tests only (HOPON_TEST_OPEN_GAMES): open the games panel on start.
+    test_open_games: bool,
 }
 
 #[tauri::command]
 pub fn get_config(core: C<'_>) -> Config {
-    Config { url: core.url.lock().clone() }
+    Config { url: core.url.lock().clone(), test_open_games: std::env::var("HOPON_TEST_OPEN_GAMES").is_ok() }
 }
 
 #[tauri::command]
