@@ -47,12 +47,6 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn server_of(&self, channel: Id) -> Option<&ServerInfo> {
-        self.servers.iter().find(|s| s.channels.iter().any(|c| c.id == channel))
-    }
-    pub fn user_name(&self, id: Id) -> Option<String> {
-        self.servers.iter().flat_map(|s| s.members.iter()).find(|u| u.id == id).map(|u| u.name.clone())
-    }
     fn insert_recent(&mut self, m: Message) {
         let q = self.recent.entry(m.channel_id).or_default();
         match q.binary_search_by_key(&m.id, |x| x.id) {
@@ -144,10 +138,6 @@ impl Core {
         self.store.lock().session_event()
     }
 
-    pub fn error(&self, m: impl Into<String>) {
-        self.emit(UiEvent::Error { message: m.into() });
-    }
-
     // ---------- requests ----------
 
     fn next_req(&self) -> u32 {
@@ -182,10 +172,6 @@ impl Core {
                 Err("timed out".into())
             }
         }
-    }
-
-    pub fn me(&self) -> Option<Id> {
-        self.store.lock().me.as_ref().map(|u| u.id)
     }
 
     pub fn force_reconnect(&self) {
@@ -273,9 +259,7 @@ impl Core {
         self.emit(UiEvent::Conn { state: "online", rtt_ms: best.map(|r| r as f64 / 1000.0) });
         if std::mem::take(first) {
             let t = now_us() - self.perf.t_main;
-            if let Some(s) = self.perf.startup.lock().as_mut() {
-                s.main_to_connected_ms = Some(t as f64 / 1000.0);
-            }
+            self.perf.t_connected.store(now_us(), Ordering::Relaxed);
             tracing::info!("connected {:.1} ms after start", t as f64 / 1000.0);
         }
         self.clone().authenticate().await;
@@ -338,6 +322,12 @@ impl Core {
                     self.cache.kv_set("refresh", None);
                     self.store.lock().refresh_token = None;
                 }
+            }
+        }
+        // Benchmark automation only: log in without the UI.
+        if let Some((u, p)) = std::env::var("HOPON_PERF_LOGIN").ok().as_deref().and_then(|v| v.split_once(':')) {
+            if self.request(C2S::Login { username: u.into(), password: p.into() }).await.is_ok() {
+                return self.after_auth().await;
             }
         }
         let ev = self.session_snapshot();

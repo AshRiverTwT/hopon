@@ -121,7 +121,8 @@ pub enum UiEvent {
     Presence { server_id: String, presence: UiPresence },
     /// Voice connection status for the local user.
     Voice { channel_id: Option<String>, state: &'static str, muted: bool, deafened: bool, detail: Option<String> },
-    /// Users currently speaking in the joined voice channel (local detection).
+    /// Users currently speaking in the joined voice channel.
     Speaking { user_ids: Vec<String> },
+    #[allow(dead_code)]
     Error { message: String },
 }

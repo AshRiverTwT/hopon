@@ -1,3 +1,4 @@
+#![cfg_attr(not(feature = "voice"), allow(dead_code))]
 mod cache;
 mod commands;
 mod core;
@@ -5,6 +6,10 @@ mod perf;
 mod secure;
 mod sys;
 mod ui;
+#[cfg(feature = "voice")]
+mod voice;
+#[cfg(not(feature = "voice"))]
+#[path = "voice_stub.rs"]
 mod voice;
 
 use std::sync::Arc;
@@ -35,6 +40,17 @@ pub fn run() {
                 load_voice_prefs(&start).await;
                 start.run().await;
             });
+            // Benchmark automation only: dump instrumentation every 2 s.
+            if let Ok(path) = std::env::var("HOPON_PERF_DUMP") {
+                let c = core.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        let v = serde_json::json!({ "rows": c.perf.rows(), "startup": *c.perf.startup.lock() });
+                        let _ = std::fs::write(&path, v.to_string());
+                    }
+                });
+            }
             // Never leave the window hidden if the UI fails to report.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {

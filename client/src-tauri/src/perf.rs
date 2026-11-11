@@ -31,14 +31,8 @@ pub enum H {
     VoiceJoin,
     /// Click "join" → first remote audio frame played.
     VoiceFirstAudio,
-    /// Capture callback → frame handed to the encoder (DSP stage).
-    VoiceCaptureToEncode,
-    /// Decoded frame → consumed by the output callback (playout queue).
-    VoicePlayoutQueue,
-    /// Audio device round trip (output → input) measured by the loopback test.
-    AudioDeviceRtt,
 }
-const NAMES: [&str; 12] = [
+const NAMES: [&str; 9] = [
     "text: input->local echo paint",
     "text: input->own server echo",
     "text: input->durable ack",
@@ -48,9 +42,6 @@ const NAMES: [&str; 12] = [
     "net: ws ping rtt",
     "voice: click->joined+publishing",
     "voice: click->first remote audio",
-    "voice: capture->encoder",
-    "voice: decoded->played",
-    "voice: device out->in loopback",
 ];
 
 #[derive(Clone, Copy)]
@@ -63,6 +54,8 @@ enum Pend {
 
 pub struct Perf {
     pub t_main: i64,
+    /// First successful connect (Unix µs), 0 until then.
+    pub t_connected: std::sync::atomic::AtomicI64,
     hists: Mutex<Vec<Latency>>,
     pend: Mutex<HashMap<String, Pend>>,
     pub startup: Mutex<Option<Startup>>,
@@ -88,6 +81,7 @@ impl Perf {
     pub fn new() -> Self {
         Self {
             t_main: now_us(),
+            t_connected: std::sync::atomic::AtomicI64::new(0),
             hists: Mutex::new(NAMES.iter().map(|n| Latency::new(n)).collect()),
             pend: Mutex::new(HashMap::new()),
             startup: Mutex::new(None),

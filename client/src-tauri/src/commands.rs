@@ -29,7 +29,10 @@ pub fn ui_ready(app: tauri::AppHandle, core: C<'_>, t_paint_ms: f64) {
     let s = Startup {
         process_to_paint_ms: crate::perf::process_start_us().map(|p| (t_paint - p) as f64 / 1000.0),
         main_to_paint_ms: (t_paint - core.perf.t_main) as f64 / 1000.0,
-        main_to_connected_ms: core.perf.startup.lock().and_then(|s| s.main_to_connected_ms),
+        main_to_connected_ms: match core.perf.t_connected.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => None,
+            t => Some((t - core.perf.t_main) as f64 / 1000.0),
+        },
     };
     *core.perf.startup.lock() = Some(s);
     tracing::info!("startup: {s:?}");

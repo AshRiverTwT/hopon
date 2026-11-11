@@ -29,7 +29,7 @@ tracing-subscriber.workspace = true
 tauri = { version = "2", default-features = false, features = ["wry", "common-controls-v6", "compression"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 # Voice: LiveKit SDK with libwebrtc's platform ADM (WASAPI on Windows).
-livekit = "0.10"
+livekit = { version = "0.10", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
@@ -45,5 +45,8 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 [features]
+default = ["voice"]
+# Off only for headless text-path testing on hosts without a libwebrtc toolchain.
+voice = ["dep:livekit"]
 # Passed by `tauri build`; keeps devtools/dev server out of release.
 custom-protocol = ["tauri/custom-protocol"]

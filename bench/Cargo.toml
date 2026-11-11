@@ -6,7 +6,7 @@ edition.workspace = true
 [features]
 default = []
 # The voice benchmarks pull in libwebrtc via the LiveKit SDK.
-voice = ["dep:livekit"]
+voice = ["dep:livekit", "dep:jsonwebtoken"]
 
 [dependencies]
 hopon-shared.workspace = true
@@ -18,10 +18,23 @@ serde.workspace = true
 serde_json = "1"
 rand = "0.8"
 livekit = { version = "0.10", optional = true }
+jsonwebtoken = { version = "9", optional = true }
 
 [[bin]]
 name = "msg_rtt"
 path = "src/bin/msg_rtt.rs"
+
+[[bin]]
+name = "e2e_feed"
+path = "src/bin/e2e_feed.rs"
+
+[[bin]]
+name = "voice_grant_check"
+path = "src/bin/voice_grant_check.rs"
+
+[[bin]]
+name = "smoke"
+path = "src/bin/smoke.rs"
 
 [[bin]]
 name = "voice_loopback"

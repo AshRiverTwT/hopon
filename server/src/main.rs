@@ -54,6 +54,10 @@ async fn main() -> Result<()> {
         let _ = wait.await;
     }
     persister.abort();
-    tracing::info!("shutdown complete");
+    tracing::warn!(
+        messages_fanned_out = st.metrics.messages.load(std::sync::atomic::Ordering::Relaxed),
+        persist_failures = st.metrics.persist_failures.load(std::sync::atomic::Ordering::Relaxed),
+        "shutdown complete, persistence queue drained"
+    );
     Ok(())
 }
