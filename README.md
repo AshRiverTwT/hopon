@@ -3,9 +3,9 @@
 - [HopOn_0.1.0_x64-setup.exe](HopOn_0.1.0_x64-setup.exe): Windows installer (latest)
 - [hopon-windows-kit.zip](hopon-windows-kit.zip): local test kit (installer, server, benchmarks, scripts)
 
-Built from branch `claude/hopon-v1` at 1933652.
+Built from branch `claude/hopon-v1` at 50d69f2.
 
-![12-games](screens/12-games.png)
-![5-voice](screens/5-voice.png)
-![7-settings](screens/7-settings.png)
+![40-chat-qol](screens/40-chat-qol.png)
+![41-server-settings](screens/41-server-settings.png)
+![42-people](screens/42-people.png)
 
