@@ -121,6 +121,12 @@ pub fn send_message(core: C<'_>, channel_id: String, content: String, nonce: Str
 }
 
 #[tauri::command]
+pub fn mark_read(core: C<'_>, channel_id: String, message_id: String) -> Res<()> {
+    core.inner().mark_read(pid(&channel_id)?, pid(&message_id)?);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn edit_message(core: C<'_>, channel_id: String, id: String, content: String) -> Res<()> {
     core.request(C2S::Edit { channel_id: pid(&channel_id)?, message_id: pid(&id)?, content }).await.map(|_| ())
 }

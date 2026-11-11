@@ -12,6 +12,9 @@ pub struct Config {
     pub livekit_secret: String,
     /// Per-connection message send rate (per second); burst is 3x.
     pub send_rate: f64,
+    /// Wait this long after a user's last connection closes before
+    /// announcing them offline (reconnects shouldn't flicker).
+    pub presence_grace_ms: u64,
 }
 
 fn env(k: &str) -> Option<String> {
@@ -31,6 +34,7 @@ impl Config {
             livekit_key: env("LIVEKIT_API_KEY").unwrap_or_else(|| "devkey".into()),
             livekit_secret: env("LIVEKIT_API_SECRET").unwrap_or_else(|| "secret".into()),
             send_rate: env("HOPON_SEND_RATE").and_then(|v| v.parse().ok()).unwrap_or(10.0),
+            presence_grace_ms: env("HOPON_PRESENCE_GRACE_MS").and_then(|v| v.parse().ok()).unwrap_or(8000),
         })
     }
 }

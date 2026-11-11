@@ -197,7 +197,16 @@ impl Session {
 
     fn cleanup(&mut self) {
         if let Some((uid, _)) = self.user.take() {
-            self.st.unregister(uid, self.conn);
+            if self.st.unregister(uid, self.conn) {
+                // Grace period: a quick reconnect shouldn't flash "offline".
+                let st = self.st.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(st.cfg.presence_grace_ms)).await;
+                    if !st.is_online(uid) {
+                        st.announce_presence(uid, false);
+                    }
+                });
+            }
             self.leave_voice(uid);
         }
     }
@@ -345,7 +354,9 @@ impl Session {
                 .collect()
         };
         self.user = Some((uid, name.clone()));
-        self.st.register(uid, self.conn, self.tx.clone());
+        if self.st.register(uid, self.conn, self.tx.clone()) {
+            self.st.announce_presence(uid, true);
+        }
         let access_token = self.st.keys.access_token(uid, &name);
         let avatar_v = servers.iter().flat_map(|s| s.members.iter()).find(|m| m.id == uid).map(|m| m.avatar_v);
         let avatar_v = match avatar_v {
@@ -405,6 +416,7 @@ impl Session {
                         return Err((ErrorCode::NotFound, "channel was deleted".into()));
                     }
                     let id = self.st.ids.next();
+                    chan.last_id.store(id, Ordering::Relaxed);
                     let t_send = now_us();
                     let msg = Message {
                         id,
@@ -532,7 +544,7 @@ impl Session {
                 sqlx::query("INSERT INTO channels (id, server_id, name, kind) VALUES ($1, $2, $3, $4)")
                     .bind(id).bind(server_id).bind(&cname).bind(kind_to_i16(kind))
                     .execute(&self.st.db).await.map_err(internal)?;
-                let info = ChannelInfo { id, server_id, name: cname, kind, topic: String::new() };
+                let info = ChannelInfo { id, server_id, name: cname, kind, topic: String::new(), last_id: 0 };
                 self.st.chan_insert(&info);
                 let g = self.st.guild(server_id).await.map_err(internal)?;
                 g.publish(frame(0, S2C::ChannelCreated(info)));
@@ -632,6 +644,24 @@ impl Session {
                 let _ = self.tx.send(Out::UnsubscribeAll).await;
                 self.guilds.clear();
                 self.send(req, S2C::LoggedOut).await;
+                Ok(())
+            }
+            C2S::MarkRead { channel_id, message_id } => {
+                self.member_chan(channel_id, uid).await?;
+                let (last,): (i64,) = sqlx::query_as(
+                    "INSERT INTO channel_reads (user_id, channel_id, last_read) VALUES ($1, $2, $3) \
+                     ON CONFLICT (user_id, channel_id) DO UPDATE SET last_read = GREATEST(channel_reads.last_read, EXCLUDED.last_read) \
+                     RETURNING last_read",
+                )
+                .bind(uid)
+                .bind(channel_id)
+                .bind(message_id)
+                .fetch_one(&self.st.db)
+                .await
+                .map_err(internal)?;
+                let f = frame(0, S2C::ReadUpdated { channel_id, last_read: last });
+                self.st.to_user(uid, || Out::Frame(f.clone()));
+                self.send(req, S2C::Ok).await;
                 Ok(())
             }
             m @ (C2S::RenameServer { .. }

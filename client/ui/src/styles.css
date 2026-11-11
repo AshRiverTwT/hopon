@@ -365,3 +365,9 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 .pill.danger { background: var(--hot); color: var(--cream); }
 .pill.danger:hover:not(:disabled) { background: #ff3d6a; }
 .danger-zone { padding-top: 8px; border-top: 1px solid rgba(255, 27, 80, 0.35); }
+
+/* ---------- presence ---------- */
+.avatar-wrap { position: relative; display: inline-flex; flex: none; }
+.presence { position: absolute; right: -3px; bottom: -3px; width: 10px; height: 10px; border-radius: 50%; background: var(--ink); border: 2px solid var(--cream-35); }
+.presence.on { background: #3ecf7a; border-color: var(--ink); }
+.index-name.offline { color: var(--cream-35); }

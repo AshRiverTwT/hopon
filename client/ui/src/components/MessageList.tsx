@@ -2,7 +2,7 @@
 // in the DOM; row heights are measured once after mount and cached by id, so
 // a 5000-message channel renders ~30 rows and scrolls at full frame rate.
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { deleteMessage, editMessage, isOwner, loadOlder, s, set, userName } from "../store";
+import { deleteMessage, editMessage, isOwner, loadOlder, maybeMarkRead, s, set, userName } from "../store";
 import { showsHeader } from "../merge";
 import type { Msg } from "../types";
 import { Avatar } from "./Avatar";
@@ -69,6 +69,7 @@ export default function MessageList() {
     if (Math.abs(el.scrollTop - pinnedAt) < 2) return;
     pinnedAt = -1;
     atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+    if (atBottom !== s.atBottom) { set("atBottom", atBottom); if (atBottom) maybeMarkRead(); }
     if (el.scrollTop < 1500 && s.more && !s.loadingOlder) loadOlder();
   };
 
@@ -91,7 +92,7 @@ export default function MessageList() {
       prevHeight = total;
     });
   }));
-  createEffect(on(() => s.selChannel, () => { atBottom = true; setHeights(new Map()); }));
+  createEffect(on(() => s.selChannel, () => { atBottom = true; set("atBottom", true); setHeights(new Map()); }));
 
   return (
     <div class="messages" ref={el} onScroll={onScroll}>

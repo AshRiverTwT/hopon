@@ -15,7 +15,7 @@ if [ "${1:-}" = "--restart-server" ]; then
 fi
 if ! pgrep -x hopon-server >/dev/null; then
   export DATABASE_URL=postgres://postgres@127.0.0.1/hopon HOPON_JWT_SECRET=devsecret-change-me RUST_LOG=${RUST_LOG:-warn} \
-    HOPON_SEND_RATE=100000 LIVEKIT_URL=ws://127.0.0.1:7880 LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=secret-secret-secret-secret-secret
+    HOPON_SEND_RATE=100000 HOPON_PRESENCE_GRACE_MS=500 LIVEKIT_URL=ws://127.0.0.1:7880 LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=secret-secret-secret-secret-secret
   nohup ./target/release/hopon-server > /tmp/claude-0/server.log 2>&1 &
 fi
 for _ in $(seq 1 100); do curl -s localhost:8080/health >/dev/null && break; python3 -c "import time; time.sleep(0.1)"; done

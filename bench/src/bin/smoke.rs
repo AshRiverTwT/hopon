@@ -341,6 +341,53 @@ async fn main() -> Result<()> {
         ensure!(o.call(C2S::RenameServer { server_id: sid, name: "zombie".into() }).await.is_err(), "rename after delete");
         Ok(())
     });
+    pass &= check!("read state: forward-only, synced to other devices, in the snapshot; own sends count as read", {
+        let mut o = Client::connect(&url).await?;
+        let ou = o.signup("rown").await?;
+        let S2C::ServerJoined(sv) = o.call(C2S::CreateServer { name: "Reads".into() }).await? else { bail!("create") };
+        let text = sv.channels.iter().find(|c| c.kind == ChannelKind::Text).unwrap().id;
+        let S2C::Invite { code, .. } = o.call(C2S::CreateInvite { server_id: sv.id }).await? else { bail!("invite") };
+        let mut m = Client::connect(&url).await?;
+        let mu = m.signup("rmem").await?;
+        m.call(C2S::JoinInvite { code }).await?;
+        let mut newest = 0;
+        for i in 0..3u64 {
+            let t = now_us();
+            o.send(C2S::Send { channel_id: text, content: format!("r{i}"), nonce: 50 + i, t_input: t, t_client_send: t }).await?;
+            newest = wait_for(&mut m, |e| if let S2C::Message(x) = e { Some(x.id) } else { None }).await?;
+        }
+        // Second device of the member sees the marker move.
+        let mut m2 = Client::connect(&url).await?;
+        m2.call(C2S::Login { username: mu.name.clone(), password: "benchmark-pass".into() }).await?;
+        m.call(C2S::MarkRead { channel_id: text, message_id: newest }).await?;
+        let lr = wait_for(&mut m2, |e| if let S2C::ReadUpdated { last_read, .. } = e { Some(*last_read) } else { None }).await?;
+        ensure!(lr == newest, "other device not told");
+        m.call(C2S::MarkRead { channel_id: text, message_id: newest - 1 }).await?;
+        // (m's own copy is skipped by call() while it waits for the reply.)
+        let lr2 = wait_for(&mut m2, |e| if let S2C::ReadUpdated { last_read, .. } = e { Some(*last_read) } else { None }).await?;
+        ensure!(lr2 == newest, "marker moved backwards");
+        // Fresh login: snapshot carries last_id and the marker.
+        let mut m3 = Client::connect(&url).await?;
+        let S2C::Authed { servers, .. } = m3.call(C2S::Login { username: mu.name.clone(), password: "benchmark-pass".into() }).await? else { bail!("login") };
+        let s3 = servers.iter().find(|x| x.id == sv.id).unwrap();
+        ensure!(s3.channels.iter().find(|c| c.id == text).unwrap().last_id == newest, "last_id");
+        ensure!(s3.reads.contains(&(text, newest)), "reads {:?}", s3.reads);
+        // The author's own sends marked the channel read for them.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let mut o2 = Client::connect(&url).await?;
+        let S2C::Authed { servers, .. } = o2.call(C2S::Login { username: ou.name.clone(), password: "benchmark-pass".into() }).await? else { bail!("login") };
+        let so = servers.iter().find(|x| x.id == sv.id).unwrap();
+        ensure!(so.reads.contains(&(text, newest)), "own sends not read: {:?}", so.reads);
+        ensure!(so.online.contains(&mu.id), "member not listed online");
+        Ok(())
+    });
+    pass &= check!("presence: offline announced after the last connection closes", {
+        let (mut o, m, _, _, _, mid) = admin_setup(&url).await?;
+        drop(m);
+        let off = wait_for(&mut o, |e| if let S2C::UserPresence { user_id, online } = e { (*user_id == mid).then_some(*online) } else { None }).await?;
+        ensure!(!off, "expected offline");
+        Ok(())
+    });
     pass &= check!("logout revokes the refresh token", {
         let mut c = Client::connect(&url).await?;
         let S2C::Authed { refresh_token, .. } = c.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("login") };

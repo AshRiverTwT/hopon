@@ -57,11 +57,11 @@ export function MembersSheet(p: { close: () => void }) {
   return (
     <Overlay title="People" close={p.close}>
       <ol class="index">
-        <For each={currentServer()?.members ?? []}>
+        <For each={[...(currentServer()?.members ?? [])].sort((a, b) => Number(!!s.online[b.id]) - Number(!!s.online[a.id]) || a.name.localeCompare(b.name))}>
           {(m, i) => (
             <li class="index-row static">
               <span class="index-no">{String(i() + 1).padStart(2, "0")}</span>
-              <span class="index-name"><Avatar id={m.id} size={32} />{m.name}<Show when={s.speaking.includes(m.id)}><span class="live-dot" /></Show></span>
+              <span class="index-name" classList={{ offline: !s.online[m.id] }}><span class="avatar-wrap"><Avatar id={m.id} size={32} /><span class="presence" classList={{ on: !!s.online[m.id] }} /></span>{m.name}<Show when={s.speaking.includes(m.id)}><span class="live-dot" /></Show></span>
               <span class="index-meta">
                 {m.id === currentServer()?.ownerId ? "Owner" : ""}
                 <Show when={voiceOf(m.id)}>{(v) => <> · in {v()}</>}</Show>

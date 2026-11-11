@@ -2,7 +2,7 @@
 // item under the cursor is in the pill. Wheel / arrow keys turn the dial, and
 // it settles on (selects) the channel under the cursor after a short pause.
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
-import { currentServer, s, selectChannel, showStage } from "../store";
+import { currentServer, isUnread, s, selectChannel, showStage } from "../store";
 import type { Channel } from "../types";
 import { VoiceGlyph } from "./icons";
 
@@ -103,7 +103,7 @@ export default function Dial(p: { onNewChannel: (voice: boolean) => void; onServ
               <Show when={it.kind === "ch" && it.ch.voice && occupants(it.ch).length}>
                 <span class="count">{it.kind === "ch" ? occupants(it.ch).length : ""}</span>
               </Show>
-              <Show when={(it.kind === "ch" && !!s.unread[it.ch.id]) || speaking()}><span class="live-dot" /></Show>
+              <Show when={(it.kind === "ch" && isUnread(it.ch) && s.selChannel !== it.ch.id) || speaking()}><span class="live-dot" /></Show>
             </button>
           );
         }}

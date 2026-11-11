@@ -2,7 +2,7 @@ import { batch } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import { call, markPainted, now, randomNonce } from "./ipc";
 import { findId, mergeMsgs, trimTop } from "./merge";
-import type { Msg, Presence, Server, UiEvent, User } from "./types";
+import { cmpId, type Channel, type Msg, type Presence, type Server, type UiEvent, type User } from "./types";
 import { chime, closeAudio } from "./sounds";
 
 /** The open channel holds at most this many messages in the DOM model. */
@@ -22,7 +22,12 @@ export const [s, set] = createStore({
   selChannel: null as string | null,
   /** Voice channel shown on the stage (null = show the text channel). */
   stage: null as string | null,
-  unread: {} as Record<string, boolean>,
+  /** channel → last read message id (yours, from the server + live). */
+  reads: {} as Record<string, string>,
+  /** users currently online */
+  online: {} as Record<string, boolean>,
+  /** the open list is scrolled to the newest message */
+  atBottom: true,
   msgs: [] as Msg[],
   more: true,
   loadingOlder: false,
@@ -36,6 +41,56 @@ export const userName = (id: string) => {
 };
 export const currentServer = () => s.servers.find((x) => x.id === s.selServer) ?? null;
 export const isOwner = () => !!s.user && currentServer()?.ownerId === s.user.id;
+
+// ---------- read state ----------
+
+function setRead(channelId: string, id: string) {
+  const cur = s.reads[channelId];
+  if (!cur || cmpId(id, cur) > 0) set("reads", channelId, id);
+}
+
+function absorbServers(servers: Server[], replace: boolean) {
+  const reads: Record<string, string> = replace ? {} : { ...s.reads };
+  const online: Record<string, boolean> = replace ? {} : { ...s.online };
+  for (const sv of servers) {
+    for (const [c, r] of Object.entries(sv.reads ?? {})) if (!reads[c] || cmpId(r, reads[c]) > 0) reads[c] = r;
+    for (const u of sv.online ?? []) online[u] = true;
+  }
+  if (s.user) online[s.user.id] = true;
+  set("reads", reconcile(reads));
+  set("online", reconcile(online));
+}
+
+/** Track the newest id per channel; your own messages count as read. */
+function bumpLastId(channelId: string, msgs: Msg[]) {
+  for (let i = 0; i < s.servers.length; i++) {
+    const j = s.servers[i].channels.findIndex((c) => c.id === channelId);
+    if (j < 0) continue;
+    for (const m of msgs) {
+      if (m.id.startsWith("p")) continue;
+      if (cmpId(m.id, s.servers[i].channels[j].lastId) > 0) set("servers", i, "channels", j, "lastId", m.id);
+      if (m.authorId === s.user?.id) setRead(channelId, m.id);
+    }
+    return;
+  }
+}
+
+export const isUnread = (c: Channel) => !c.voice && c.lastId !== "0" && cmpId(c.lastId, s.reads[c.id] ?? "0") > 0;
+
+let markTimer = 0;
+/** Mark the open channel read when it is actually being looked at. */
+export function maybeMarkRead() {
+  clearTimeout(markTimer);
+  markTimer = window.setTimeout(() => {
+    const ch = s.selChannel;
+    if (!ch || s.stage || !s.atBottom || !document.hasFocus() || document.hidden) return;
+    let newest = "";
+    for (let i = s.msgs.length - 1; i >= 0; i--) if (!s.msgs[i].id.startsWith("p")) { newest = s.msgs[i].id; break; }
+    if (!newest || (s.reads[ch] && cmpId(newest, s.reads[ch]) <= 0)) return;
+    setRead(ch, newest);
+    call("mark_read", { channelId: ch, messageId: newest }).catch(() => {});
+  }, 500);
+}
 
 let toastTimer = 0;
 export function toast(m: string) {
@@ -83,13 +138,15 @@ function apply(e: UiEvent, painted: string[]) {
         if (sv) pres[p.userId] = { ...p, serverId: sv.id };
       }
       set("presence", reconcile(pres));
+      absorbServers(e.servers, true);
       if (changedUser) {
-        set({ selServer: null, selChannel: null, stage: null, msgs: [], unread: {} });
+        set({ selServer: null, selChannel: null, stage: null, msgs: [] });
       }
       if (e.user && !s.selServer && e.servers.length) selectServer(e.servers[0].id);
       break;
     }
     case "server": {
+      absorbServers([e.server], false);
       const i = s.servers.findIndex((x) => x.id === e.server.id);
       if (i >= 0) set("servers", i, reconcile(e.server));
       else set("servers", s.servers.length, e.server);
@@ -105,8 +162,15 @@ function apply(e: UiEvent, painted: string[]) {
       const i = s.servers.findIndex((x) => x.id === e.serverId);
       if (i >= 0 && !s.servers[i].members.some((m) => m.id === e.user.id))
         set("servers", i, "members", (m) => [...m, e.user]);
+      set("online", e.user.id, true);
       break;
     }
+    case "readUpdated":
+      setRead(e.channelId, e.lastRead);
+      break;
+    case "userPresence":
+      set("online", e.userId, e.online);
+      break;
     case "serverRemoved": {
       const name = s.servers.find((x) => x.id === e.serverId)?.name ?? "the server";
       set("servers", (l) => l.filter((x) => x.id !== e.serverId));
@@ -141,9 +205,9 @@ function apply(e: UiEvent, painted: string[]) {
         const r = mergeMsgs([...s.msgs], e.msgs);
         set("msgs", reconcile(trimTop(r.list, OPEN_CAP), { key: "id", merge: false }));
         painted.push(...r.changed);
-      } else if (e.msgs.some((m) => m.authorId !== s.user?.id)) {
-        set("unread", e.channelId, true);
+        maybeMarkRead();
       }
+      bumpLastId(e.channelId, e.msgs);
       break;
     case "msgState":
       if (e.channelId === s.selChannel) {
@@ -211,12 +275,12 @@ export async function selectChannel(id: string) {
   const seq = ++openSeq;
   batch(() => {
     set({ selChannel: id, stage: null, msgs: [], more: true, loadingOlder: false, editing: null });
-    set("unread", id, false);
   });
   const msgs = await call<Msg[]>("open_channel", { channelId: id });
   if (seq !== openSeq) return;
   const r = mergeMsgs([...s.msgs], msgs);
   set("msgs", reconcile(r.list, { key: "id", merge: false }));
+  maybeMarkRead();
 }
 
 export function showStage(id: string) {

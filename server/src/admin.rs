@@ -108,7 +108,8 @@ pub async fn handle(st: &Arc<State>, uid: Id, msg: C2S) -> R {
                 .execute(&st.db)
                 .await
                 .map_err(internal)?;
-            let info = ChannelInfo { id: channel_id, server_id, name, kind: crate::state::kind_from_i16(kind), topic };
+            let last_id = st.chans.get(&channel_id).map_or(0, |c| c.last_id.load(Ordering::Relaxed));
+            let info = ChannelInfo { id: channel_id, server_id, name, kind: crate::state::kind_from_i16(kind), topic, last_id };
             st.guild(server_id).await.map_err(internal)?.publish(frame(S2C::ChannelUpdated(info)));
             Ok(S2C::Ok)
         }

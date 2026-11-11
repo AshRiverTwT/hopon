@@ -437,6 +437,9 @@ impl Core {
                         }
                     }
                     s.insert_recent(m.clone());
+                    if let Some(c) = s.servers.iter_mut().flat_map(|sv| sv.channels.iter_mut()).find(|c| c.id == m.channel_id) {
+                        c.last_id = c.last_id.max(m.id);
+                    }
                     (own, t_in)
                 };
                 let clock = *self.clock.lock();
@@ -506,6 +509,9 @@ impl Core {
                         if !sv.members.iter().any(|x| x.id == user.id) {
                             sv.members.push(user.clone());
                         }
+                        if !sv.online.contains(&user.id) {
+                            sv.online.push(user.id);
+                        }
                     }
                 }
                 self.emit(UiEvent::MemberJoined { server_id: sid(*server_id), user: user.into() });
@@ -519,7 +525,9 @@ impl Core {
             S2C::ChannelUpdated(c) => {
                 if let Some(sv) = self.store.lock().servers.iter_mut().find(|x| x.id == c.server_id) {
                     if let Some(x) = sv.channels.iter_mut().find(|x| x.id == c.id) {
+                        let last = x.last_id.max(c.last_id);
                         *x = c.clone();
+                        x.last_id = last;
                     }
                 }
                 self.emit_server(c.server_id);
@@ -570,6 +578,30 @@ impl Core {
                 };
                 self.emit(UiEvent::ServerRemoved { server_id: sid(*server_id), reason });
             }
+            S2C::ReadUpdated { channel_id, last_read } => {
+                {
+                    let mut s = self.store.lock();
+                    if let Some(sv) = s.servers.iter_mut().find(|sv| sv.channels.iter().any(|c| c.id == *channel_id)) {
+                        match sv.reads.iter_mut().find(|(c, _)| c == channel_id) {
+                            Some(r) => r.1 = r.1.max(*last_read),
+                            None => sv.reads.push((*channel_id, *last_read)),
+                        }
+                    }
+                }
+                self.emit(UiEvent::ReadUpdated { channel_id: sid(*channel_id), last_read: sid(*last_read) });
+            }
+            S2C::UserPresence { user_id, online } => {
+                {
+                    let mut s = self.store.lock();
+                    for sv in s.servers.iter_mut().filter(|sv| sv.members.iter().any(|m| m.id == *user_id)) {
+                        sv.online.retain(|u| u != user_id);
+                        if *online {
+                            sv.online.push(*user_id);
+                        }
+                    }
+                }
+                self.emit(UiEvent::UserPresence { user_id: sid(*user_id), online: *online });
+            }
             S2C::UserUpdated(u) => {
                 {
                     let mut s = self.store.lock();
@@ -611,6 +643,21 @@ impl Core {
                 tracing::debug!("server error: {message}");
             }
             S2C::Pong { .. } | S2C::History { .. } | S2C::Invite { .. } | S2C::VoiceGrant { .. } | S2C::Avatar { .. } | S2C::Ok => {}
+        }
+    }
+
+    /// Mark `channel` read up to `message_id` (skipped if not newer).
+    pub fn mark_read(self: &Arc<Self>, channel: Id, message_id: Id) {
+        let newer = {
+            let s = self.store.lock();
+            let cur = s.servers.iter().flat_map(|sv| sv.reads.iter()).find(|(c, _)| *c == channel).map_or(0, |r| r.1);
+            message_id > cur
+        };
+        if newer {
+            let me = self.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = me.request(C2S::MarkRead { channel_id: channel, message_id }).await;
+            });
         }
     }
 

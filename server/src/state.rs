@@ -48,6 +48,8 @@ pub struct Chan {
     /// Set (under `order`) when the channel is deleted; sends check it under
     /// the same lock so nothing is published into a deleted channel.
     pub deleted: std::sync::atomic::AtomicBool,
+    /// Newest message id fanned out in this process (0 = none yet).
+    pub last_id: std::sync::atomic::AtomicI64,
     /// Held while assigning an ID and publishing, so fan-out order equals ID
     /// order within a channel. Never held across an await.
     pub order: Mutex<()>,
@@ -121,15 +123,32 @@ impl State {
         self.next_conn.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn register(&self, user: Id, conn: u64, tx: ConnTx) {
-        self.conns.entry(user).or_default().push((conn, tx));
+    /// Returns true if this is the user's first connection (came online).
+    pub fn register(&self, user: Id, conn: u64, tx: ConnTx) -> bool {
+        let mut e = self.conns.entry(user).or_default();
+        let first = e.is_empty();
+        e.push((conn, tx));
+        first
     }
 
-    pub fn unregister(&self, user: Id, conn: u64) {
+    /// Returns true if that was the user's last connection.
+    pub fn unregister(&self, user: Id, conn: u64) -> bool {
         if let Some(mut v) = self.conns.get_mut(&user) {
             v.retain(|(c, _)| *c != conn);
         }
-        self.conns.remove_if(&user, |_, v| v.is_empty());
+        self.conns.remove_if(&user, |_, v| v.is_empty()).is_some()
+    }
+
+    pub fn is_online(&self, user: Id) -> bool {
+        self.conns.get(&user).map_or(false, |v| !v.is_empty())
+    }
+
+    /// Tell every server the user is in about an online/offline change.
+    pub fn announce_presence(&self, user: Id, online: bool) {
+        let f = Bytes::from(hopon_shared::encode(&hopon_shared::ServerFrame { req: 0, msg: hopon_shared::S2C::UserPresence { user_id: user, online } }));
+        for g in self.guilds.iter().filter(|g| g.is_member(user)) {
+            g.publish(f.clone());
+        }
     }
 
     /// Owner of a server (DB lookup; admin actions are rare).
@@ -187,7 +206,7 @@ impl State {
         self.chans
             .entry(c.id)
             .or_insert_with(|| {
-                Arc::new(Chan { server_id: c.server_id, kind: c.kind, deleted: Default::default(), order: Mutex::new(()) })
+                Arc::new(Chan { server_id: c.server_id, kind: c.kind, deleted: Default::default(), last_id: Default::default(), order: Mutex::new(()) })
             })
             .clone()
     }
@@ -204,7 +223,7 @@ impl State {
                         .await
                         .ok()?;
                 let (id, server_id, name, kind, topic) = row?;
-                self.chan_insert(&ChannelInfo { id, server_id, name, kind: kind_from_i16(kind), topic })
+                self.chan_insert(&ChannelInfo { id, server_id, name, kind: kind_from_i16(kind), topic, last_id: 0 })
             }
         };
         if chan.deleted.load(std::sync::atomic::Ordering::Relaxed) {
@@ -254,17 +273,42 @@ impl State {
         .fetch_all(&self.db)
         .await?;
 
+        let chan_ids: Vec<i64> = chans.iter().map(|c| c.0).collect();
+        // Newest message per channel: one backward index probe each.
+        let lasts: Vec<(i64, Option<i64>)> = sqlx::query_as(
+            "SELECT c.id, (SELECT m.id FROM messages m WHERE m.channel_id = c.id ORDER BY m.id DESC LIMIT 1) \
+             FROM unnest($1::bigint[]) AS c(id)",
+        )
+        .bind(&chan_ids)
+        .fetch_all(&self.db)
+        .await?;
+        let lasts: HashMap<i64, i64> = lasts.into_iter().map(|(c, m)| (c, m.unwrap_or(0))).collect();
+        let reads: Vec<(i64, i64)> = sqlx::query_as("SELECT channel_id, last_read FROM channel_reads WHERE user_id = $1 AND channel_id = ANY($2)")
+            .bind(user)
+            .bind(&chan_ids)
+            .fetch_all(&self.db)
+            .await?;
+        let read_map: HashMap<i64, i64> = reads.into_iter().collect();
+
         let mut out: Vec<ServerInfo> = rows
             .into_iter()
-            .map(|(id, name, owner_id)| ServerInfo { id, name, owner_id, channels: vec![], members: vec![] })
+            .map(|(id, name, owner_id)| ServerInfo { id, name, owner_id, channels: vec![], members: vec![], reads: vec![], online: vec![] })
             .collect();
         let idx: HashMap<i64, usize> = out.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
         for (id, server_id, name, kind, topic) in chans {
-            let c = ChannelInfo { id, server_id, name, kind: kind_from_i16(kind), topic };
-            self.chan_insert(&c);
+            let mut c = ChannelInfo { id, server_id, name, kind: kind_from_i16(kind), topic, last_id: 0 };
+            let chan = self.chan_insert(&c);
+            // Persistence lags fan-out slightly: take whichever is newer.
+            c.last_id = lasts.get(&id).copied().unwrap_or(0).max(chan.last_id.load(std::sync::atomic::Ordering::Relaxed));
+            if let Some(r) = read_map.get(&id) {
+                out[idx[&server_id]].reads.push((id, *r));
+            }
             out[idx[&server_id]].channels.push(c);
         }
         for (sid, id, name, av) in mems {
+            if self.is_online(id) {
+                out[idx[&sid]].online.push(id);
+            }
             out[idx[&sid]].members.push(UserInfo { id, name, avatar_v: av as u32 });
         }
         for s in &out {

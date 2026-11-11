@@ -1,6 +1,6 @@
 import { Match, Show, Switch, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { call } from "./ipc";
-import { currentServer, isOwner, s, toast } from "./store";
+import { currentServer, isOwner, maybeMarkRead, s, toast } from "./store";
 import Login from "./components/Login";
 import MessageList from "./components/MessageList";
 import Composer from "./components/Composer";
@@ -30,7 +30,13 @@ export default function App() {
       if (e.ctrlKey && e.shiftKey && e.code === "KeyP") { e.preventDefault(); setPerf((v) => !v); }
     };
     window.addEventListener("keydown", k);
-    onCleanup(() => window.removeEventListener("keydown", k));
+    window.addEventListener("focus", maybeMarkRead);
+    document.addEventListener("visibilitychange", maybeMarkRead);
+    onCleanup(() => {
+      window.removeEventListener("keydown", k);
+      window.removeEventListener("focus", maybeMarkRead);
+      document.removeEventListener("visibilitychange", maybeMarkRead);
+    });
   });
   const channel = () => currentServer()?.channels.find((c) => c.id === s.selChannel);
   const invite = async () => {
@@ -47,7 +53,7 @@ export default function App() {
               <button class="pill ghost" onClick={() => setSheet({ k: "servers" })}>{currentServer()?.name ?? "Servers"}</button>
               <div class="topbar-right">
                 <Show when={currentServer()}>
-                  <button class="pill ghost" onClick={() => setSheet({ k: "members" })}>People {currentServer()!.members.length}</button>
+                  <button class="pill ghost" onClick={() => setSheet({ k: "members" })}>People {currentServer()!.members.filter((m) => s.online[m.id]).length}/{currentServer()!.members.length}</button>
                   <button class="pill ghost" onClick={() => setSheet({ k: "server" })}>{isOwner() ? "Server settings" : "Leave"}</button>
                   <button class="pill ghost" onClick={invite}>Invite</button>
                   <button class="pill ghost" classList={{ active: games() }} onClick={() => setGames((v) => !v)}>Games</button>

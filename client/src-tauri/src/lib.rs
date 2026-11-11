@@ -65,6 +65,7 @@ pub fn run() {
             commands::open_channel,
             commands::load_older,
             commands::send_message,
+            commands::mark_read,
             commands::edit_message,
             commands::delete_message,
             commands::create_server,

@@ -33,10 +33,11 @@ pub struct UiChannel {
     pub name: String,
     pub voice: bool,
     pub topic: String,
+    pub last_id: String,
 }
 impl From<&ChannelInfo> for UiChannel {
     fn from(c: &ChannelInfo) -> Self {
-        Self { id: sid(c.id), server_id: sid(c.server_id), name: c.name.clone(), voice: c.kind == ChannelKind::Voice, topic: c.topic.clone() }
+        Self { id: sid(c.id), server_id: sid(c.server_id), name: c.name.clone(), voice: c.kind == ChannelKind::Voice, topic: c.topic.clone(), last_id: sid(c.last_id) }
     }
 }
 
@@ -48,6 +49,9 @@ pub struct UiServer {
     pub owner_id: String,
     pub channels: Vec<UiChannel>,
     pub members: Vec<UiUser>,
+    /// channel id → last read message id.
+    pub reads: std::collections::HashMap<String, String>,
+    pub online: Vec<String>,
 }
 impl From<&ServerInfo> for UiServer {
     fn from(s: &ServerInfo) -> Self {
@@ -57,6 +61,8 @@ impl From<&ServerInfo> for UiServer {
             owner_id: sid(s.owner_id),
             channels: s.channels.iter().map(Into::into).collect(),
             members: s.members.iter().map(Into::into).collect(),
+            reads: s.reads.iter().map(|(c, r)| (sid(*c), sid(*r))).collect(),
+            online: s.online.iter().map(|u| sid(*u)).collect(),
         }
     }
 }
@@ -120,6 +126,8 @@ pub enum UiEvent {
     /// "deleted" | "kicked" | "left".
     ServerRemoved { server_id: String, reason: &'static str },
     ChannelDeleted { server_id: String, channel_id: String },
+    ReadUpdated { channel_id: String, last_read: String },
+    UserPresence { user_id: String, online: bool },
     /// New or updated messages (merge by `id`, replacing pending by `nonce`).
     Messages { channel_id: String, msgs: Vec<UiMsg> },
     MsgState { channel_id: String, nonce: String, id: String, state: u8 },

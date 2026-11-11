@@ -92,6 +92,30 @@ async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<bool
         .execute(&mut *tx)
         .await?;
     }
+    if !ids.is_empty() {
+        // Your own message marks the channel read for you (same transaction,
+        // no extra round trip). Newest id per (author, channel) in the batch.
+        let mut newest: std::collections::HashMap<(Id, Id), Id> = std::collections::HashMap::new();
+        for i in 0..ids.len() {
+            let e = newest.entry((au[i], ch[i])).or_insert(ids[i]);
+            *e = (*e).max(ids[i]);
+        }
+        let (ru, rc, rm): (Vec<Id>, Vec<Id>, Vec<Id>) = newest.into_iter().fold((vec![], vec![], vec![]), |mut a, ((u, c), m)| {
+            a.0.push(u);
+            a.1.push(c);
+            a.2.push(m);
+            a
+        });
+        sqlx::query(
+            "INSERT INTO channel_reads (user_id, channel_id, last_read) SELECT * FROM UNNEST($1::bigint[], $2::bigint[], $3::bigint[]) \
+             ON CONFLICT (user_id, channel_id) DO UPDATE SET last_read = GREATEST(channel_reads.last_read, EXCLUDED.last_read)",
+        )
+        .bind(&ru)
+        .bind(&rc)
+        .bind(&rm)
+        .execute(&mut *tx)
+        .await?;
+    }
     let mut results = Vec::with_capacity(batch.len());
     for op in batch {
         let ok = match op {
@@ -122,6 +146,7 @@ async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<bool
             }
             PersistOp::PurgeChannels(ids) => {
                 sqlx::query("DELETE FROM messages WHERE channel_id = ANY($1)").bind(ids).execute(&mut *tx).await?;
+                sqlx::query("DELETE FROM channel_reads WHERE channel_id = ANY($1)").bind(ids).execute(&mut *tx).await?;
                 true
             }
             _ => true,

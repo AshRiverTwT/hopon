@@ -48,6 +48,8 @@ pub struct ChannelInfo {
     pub kind: ChannelKind,
     /// Short description shown under the channel title (may be empty).
     pub topic: String,
+    /// Newest message id at snapshot time (0 = empty). Clients track it live.
+    pub last_id: Id,
 }
 
 pub const MAX_NAME_CHARS: usize = 64;
@@ -67,6 +69,10 @@ pub struct ServerInfo {
     pub owner_id: Id,
     pub channels: Vec<ChannelInfo>,
     pub members: Vec<UserInfo>,
+    /// Your read markers in this server (channel, last read message id).
+    pub reads: Vec<(Id, Id)>,
+    /// Members currently connected.
+    pub online: Vec<Id>,
 }
 
 /// Latency stamps (Unix µs). Client stamps are in the sender's clock, server
@@ -135,6 +141,9 @@ pub enum C2S {
         data: Vec<u8>,
     },
     GetAvatar { user_id: Id },
+    /// Everything up to and including `message_id` has been seen. Markers
+    /// only move forward.
+    MarkRead { channel_id: Id, message_id: Id },
     // ----- server administration (owner only unless noted) -----
     RenameServer { server_id: Id, name: String },
     DeleteServer { server_id: Id },
@@ -193,6 +202,9 @@ pub enum S2C {
     Ok,
     /// A user's profile changed (e.g. new avatar); sent to all their servers.
     UserUpdated(UserInfo),
+    /// Your read marker moved (from another of your devices).
+    ReadUpdated { channel_id: Id, last_read: Id },
+    UserPresence { user_id: Id, online: bool },
     ServerUpdated { server_id: Id, name: String },
     /// You are no longer in this server (sent to the affected user, or to
     /// everyone when it was deleted).
