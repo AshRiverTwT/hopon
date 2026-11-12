@@ -5,6 +5,11 @@ Rust everywhere: Tauri 2 client (Rust core, thin SolidJS UI), Axum/Tokio
 server, PostgreSQL, LiveKit SFU for voice. Latency is the primary design
 constraint, and every stage is instrumented.
 
+**Download:** [HopOn_0.1.0_x64-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn_0.1.0_x64-setup.exe)
+(9.9 MB, Windows 10/11). It connects to the public server
+(`wss://hopon-chat.duckdns.org/ws`) out of the box. What's new:
+[RELEASE_NOTES.md](RELEASE_NOTES.md).
+
 ```
 client/      Tauri 2 app: src-tauri/ (Rust core: net, cache, voice, PTT) + ui/ (SolidJS; `pnpm dev` → /preview.html for a mocked design preview)
 server/      Axum + Tokio + SQLx chat server
@@ -21,6 +26,7 @@ results/     raw benchmark output (JSON lines)
 - Servers with text channels (with topics) and voice rooms; invite links.
 - Messages: send, edit and delete your own; replies with jump-to-message;
   emoji reactions; @mentions with autocomplete; typing indicator.
+- Emoji picker at the end of the message bar; reactions use the same picker.
 - Formatting: `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, code
   blocks, and clickable http(s) links.
 - Unread markers that survive restarts, a "new messages" divider, day
@@ -33,16 +39,20 @@ results/     raw benchmark output (JSON lines)
 - Echo cancellation, noise suppression and gain control, each toggleable.
 - Join/leave chimes and speaking indicators.
 
-**Profiles:** profile pictures.
+**Your account**
+- Profile pictures.
+- Preferences are stored on the server and follow you to any PC: sounds,
+  push-to-talk, voice processing, recent emoji, last server and channel.
+  Audio devices stay per-PC.
 
 **Server settings (owner)**
 - Rename the server and channels; set channel topics.
 - Delete channels or the whole server, with a type-the-name confirmation.
 - Remove members, revoke all invites, and delete anyone's message.
-- Members can leave a server.
+- Members leave a server from the People panel.
 
 **Extras:** a games panel (Wordle, Minute Cryptic, Krillion) that posts
-your result to general.
+your result to general, as often as you like.
 
 **Not in this version:** image and file attachments, per-user voice
 volume, message search.
@@ -114,9 +124,9 @@ Target: 150 ms.
 
 | item | result | target |
 |---|---|---|
-| Windows installer (NSIS, LZMA) | **9.34 MB** | < 30 MB |
+| Windows installer (NSIS, LZMA) | **9.93 MB** | < 30 MB |
 | `hopon.exe` uncompressed (mostly libwebrtc) | 29.2 MB | — |
-| UI bundle | 43 KB JS + 6 KB CSS | — |
+| UI bundle | 93 KB JS + 22 KB CSS (33 + 6 KB gzipped), plus 132 KB of fonts | — |
 | client start → chat socket connected | 2.3–6.4 ms | pre-connect |
 | client start → first paint (WebKitGTK, software GL) | 666–696 ms | < 1 s |
 | voice join (connect + publish + subscribe), loopback | 166 ms | < 1 s |
@@ -246,7 +256,8 @@ The exact commands are in [Measuring on Windows](#measuring-on-windows).
    MessagePack decoder.
 7. **Not in v1:** Redis pub/sub for multiple server instances (single
    instance only), `hopon://` deep-link registration (paste the invite link or
-   code instead), code signing of the installer.
+   code instead), code signing of the installer (Windows SmartScreen warns
+   on first run: More info → Run anyway).
 
 ## Games panel
 
@@ -340,9 +351,14 @@ You can also build on Windows: `pnpm --dir client/ui install`, then
 `cd client/src-tauri && ../ui/node_modules/.bin/tauri build`.
 
 The installer installs per-user, with no admin needed, and pulls the WebView2
-runtime only if it is missing. Set the server URL on the login screen, under
-"Server", for example `wss://chat.example.com/ws`. Press Ctrl+Shift+P in the
-app for the live latency overlay.
+runtime only if it is missing. The app connects to `wss://hopon-chat.duckdns.org/ws`
+by default. To use another server, pick it on the login screen under
+"Server" (it is remembered), build with `HOPON_DEFAULT_URL=wss://.../ws`, or
+set `HOPON_URL` when launching. Press Ctrl+Shift+P in the app for the live
+latency overlay.
+
+Publish the installer and kit to the `downloads` branch with
+`scripts/publish-downloads.sh`.
 
 ## Benchmarks
 
@@ -385,7 +401,7 @@ These cover the numbers still listed as unmeasured.
 
    It reports process start → first paint (median of 5), and RAM and CPU
    summed over `hopon.exe` and all of its WebView2 processes. The targets are
-   < 1 s, < 150 MB and < 1%.
+   < 1 s, < 200 MB and < 1%.
 
 2. **Text over LAN or internet**, from a second PC:
 
