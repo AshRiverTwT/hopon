@@ -1,6 +1,7 @@
 import { createResource, createSignal, Show } from "solid-js";
 import { call } from "../ipc";
 import { s } from "../store";
+import { loadMediaBase } from "../media";
 
 export default function Login() {
   const [cfg] = createResource(() => call<{ url: string }>("get_config"));
@@ -15,7 +16,7 @@ export default function Login() {
     setErr(""); setBusy(true);
     try {
       const u = url();
-      if (u !== null && u !== cfg()?.url) await call("set_server_url", { url: u });
+      if (u !== null && u !== cfg()?.url) { await call("set_server_url", { url: u }); loadMediaBase(); }
       await call(signup ? "signup" : "login", { username: user(), password: pw() });
     } catch (e) {
       setErr(String(e));

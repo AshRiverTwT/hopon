@@ -141,13 +141,13 @@ Target: 150 ms.
 
 | item | result | target |
 |---|---|---|
-| Windows installer (NSIS, LZMA) | **9.93 MB** | < 30 MB |
+| Windows installer (NSIS, LZMA) | **10.5 MB** (0.2.0) | < 30 MB |
 | `hopon.exe` uncompressed (mostly libwebrtc) | 29.2 MB | — |
-| UI bundle | 93 KB JS + 22 KB CSS (33 + 6 KB gzipped), plus 132 KB of fonts | — |
+| UI bundle (main window) | 114 KB JS + 27 KB CSS (39 + 6 KB gzipped), plus 132 KB of fonts; overlay page 5 KB JS | — |
 | client start → chat socket connected | 2.3–6.4 ms | pre-connect |
 | client start → first paint (WebKitGTK, software GL) | 666–696 ms | < 1 s |
 | voice join (connect + publish + subscribe), loopback | 166 ms | < 1 s |
-| functional smoke test (`smoke`) | 34 / 34 checks pass | — |
+| functional smoke test (`smoke`) | 38 / 38 checks pass (incl. uploads, welcome, GIF ids) | — |
 | 1-hour voice loopback | 0 / 7200 clicks missed | no dropouts |
 
 ### Not representative (measured here, but the wrong platform)

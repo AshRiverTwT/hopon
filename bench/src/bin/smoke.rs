@@ -488,10 +488,15 @@ async fn main() -> Result<()> {
         Ok(())
     });
     let mut fa = Client::connect(&url).await?;
-    let S2C::Authed { access_token: fa_access, .. } = fa.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("login") };
+    let S2C::Authed { .. } = fa.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("login") };
     pass &= check!("attachments: upload, send without text, deliver, history, download, claim rules, delete removes file", {
         let png: Vec<u8> = [&[0x89u8, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a][..], &[7u8; 200][..]].concat();
-        let auth = ("Authorization", format!("Bearer {fa_access}"));
+        // Upload with a token from AccessToken (what the app does near expiry).
+        let S2C::AccessToken { token } = fa.call(C2S::AccessToken).await? else { bail!("access token") };
+        ensure!(!token.is_empty(), "empty token");
+        let auth = ("Authorization", format!("Bearer {token}"));
+        let (st, _, _) = http(&url, "POST", "/files?name=x.png", &[("Authorization", "Bearer not-a-token".to_string())], &png).await?;
+        ensure!(st == 401, "bad token accepted: {st}");
         let (st, _, _) = http(&url, "POST", "/files?name=pic.png&w=640&h=480", &[], &png).await?;
         ensure!(st == 401, "upload without token: {st}");
         let (st, _, _) = http(&url, "POST", "/files?name=empty", &[auth.clone()], &[]).await?;

@@ -6,6 +6,7 @@ import { cmpId, SYSTEM_USER, type Attachment, type Channel, type Gif, type Msg, 
 import { chime, closeAudio } from "./sounds";
 import { encodeMentions } from "./rich";
 import { applyPrefs, prefs, resetPrefs, setPrefs } from "./prefs";
+import { loadMediaBase } from "./media";
 
 /** The open channel holds at most this many messages in the DOM model. */
 const OPEN_CAP = 5000;
@@ -191,6 +192,7 @@ function apply(e: UiEvent, painted: string[]) {
       break;
     case "session": {
       set("ready", true);
+      loadMediaBase(); // the server address may have changed at sign-in
       const changedUser = s.user?.id !== e.user?.id;
       const loggingOut = !e.user && !!s.user;
       set("user", e.user);

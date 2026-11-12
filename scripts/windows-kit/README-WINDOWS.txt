@@ -6,7 +6,7 @@ HopOn - local Windows test kit
 
 2. Servers + benchmarks (leave this window open):
      powershell -ExecutionPolicy Bypass -File start-local.ps1 -PgPassword PASS -PgPort PORT
-   Prints: 20 functional checks, text round trip p50/p95/p99, voice network
+   Prints: 38 functional checks, text round trip p50/p95/p99, voice network
    path p50/p95/p99. Chat server: ws://127.0.0.1:18080/ws
 
 3. App: run HopOn-setup.exe. On the login screen open "Server",
