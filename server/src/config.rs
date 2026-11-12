@@ -15,10 +15,22 @@ pub struct Config {
     /// Wait this long after a user's last connection closes before
     /// announcing them offline (reconnects shouldn't flicker).
     pub presence_grace_ms: u64,
+    /// Where uploaded files live (a persistent volume in production).
+    pub files_dir: std::path::PathBuf,
+    pub max_upload_bytes: u64,
+    pub user_quota_bytes: u64,
+    /// Uploads are refused when free disk space would drop below this.
+    pub min_free_bytes: u64,
+    /// KLIPY API key for GIF search; none = GIFs off.
+    pub klipy_key: Option<String>,
 }
 
 fn env(k: &str) -> Option<String> {
     std::env::var(k).ok().filter(|v| !v.is_empty())
+}
+
+fn mb(k: &str, default: u64) -> u64 {
+    env(k).and_then(|v| v.parse::<u64>().ok()).unwrap_or(default) * 1_048_576
 }
 
 impl Config {
@@ -35,6 +47,11 @@ impl Config {
             livekit_secret: env("LIVEKIT_API_SECRET").unwrap_or_else(|| "secret".into()),
             send_rate: env("HOPON_SEND_RATE").and_then(|v| v.parse().ok()).unwrap_or(10.0),
             presence_grace_ms: env("HOPON_PRESENCE_GRACE_MS").and_then(|v| v.parse().ok()).unwrap_or(8000),
+            files_dir: env("HOPON_FILES_DIR").unwrap_or_else(|| "./files".into()).into(),
+            max_upload_bytes: mb("HOPON_MAX_UPLOAD_MB", 25),
+            user_quota_bytes: mb("HOPON_USER_QUOTA_MB", 1024),
+            min_free_bytes: mb("HOPON_MIN_FREE_MB", 2048),
+            klipy_key: env("KLIPY_API_KEY"),
         })
     }
 }

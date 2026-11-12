@@ -25,7 +25,9 @@ pub struct AckTo {
 }
 
 pub enum PersistOp {
-    Insert { channel_id: Id, id: Id, author_id: Id, content: String, reply_to: Option<Id>, t_enqueue: i64, ack: AckTo },
+    /// `attachments` is the JSON array stored with the row. `ack = None` for
+    /// server-authored messages (no one to acknowledge).
+    Insert { channel_id: Id, id: Id, author_id: Id, content: String, reply_to: Option<Id>, attachments: Option<String>, t_enqueue: i64, ack: Option<AckTo> },
     /// Add/remove a reaction. `reply` gets whether anything changed
     /// (Err = message missing or reaction limit reached).
     React { channel_id: Id, message_id: Id, user_id: Id, emoji: String, add: bool, reply: oneshot::Sender<Result<bool, &'static str>> },
@@ -75,21 +77,22 @@ pub async fn run(st: Arc<State>, mut rx: mpsc::Receiver<PersistOp>) {
 type Outcome = Result<bool, &'static str>;
 
 async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<Outcome>> {
-    let (mut ch, mut ids, mut au, mut ct, mut rt) = (vec![], vec![], vec![], vec![], vec![]);
+    let (mut ch, mut ids, mut au, mut ct, mut rt, mut at) = (vec![], vec![], vec![], vec![], vec![], vec![]);
     for op in batch {
-        if let PersistOp::Insert { channel_id, id, author_id, content, reply_to, .. } = op {
+        if let PersistOp::Insert { channel_id, id, author_id, content, reply_to, attachments, .. } = op {
             ch.push(*channel_id);
             ids.push(*id);
             au.push(*author_id);
             ct.push(content.as_str());
             rt.push(*reply_to);
+            at.push(attachments.as_deref());
         }
     }
     let mut tx = st.db.begin().await?;
     if !ids.is_empty() {
         sqlx::query(
-            "INSERT INTO messages (channel_id, id, author_id, content, reply_to) \
-             SELECT * FROM UNNEST($1::bigint[], $2::bigint[], $3::bigint[], $4::text[], $5::bigint[]) \
+            "INSERT INTO messages (channel_id, id, author_id, content, reply_to, attachments) \
+             SELECT * FROM UNNEST($1::bigint[], $2::bigint[], $3::bigint[], $4::text[], $5::bigint[], $6::text[]) \
              ON CONFLICT DO NOTHING",
         )
         .bind(&ch)
@@ -97,6 +100,7 @@ async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<Outc
         .bind(&au)
         .bind(&ct)
         .bind(&rt)
+        .bind(&at)
         .execute(&mut *tx)
         .await?;
     }
@@ -104,7 +108,7 @@ async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<Outc
         // Your own message marks the channel read for you (same transaction,
         // no extra round trip). Newest id per (author, channel) in the batch.
         let mut newest: std::collections::HashMap<(Id, Id), Id> = std::collections::HashMap::new();
-        for i in 0..ids.len() {
+        for i in (0..ids.len()).filter(|i| au[*i] != hopon_shared::SYSTEM_USER) {
             let e = newest.entry((au[i], ch[i])).or_insert(ids[i]);
             *e = (*e).max(ids[i]);
         }
@@ -222,10 +226,16 @@ fn finish(st: &State, ops: impl Iterator<Item = PersistOp>, results: Option<Vec<
             PersistOp::Insert { channel_id, id, t_enqueue, ack, .. } => {
                 hist.record_us(t - t_enqueue);
                 let msg = match ok {
-                    Some(_) => S2C::Ack { channel_id, nonce: ack.nonce, id, t_server_recv: ack.t_server_recv, t_persisted: t },
+                    Some(_) => S2C::Ack { channel_id, nonce: 0, id, t_server_recv: 0, t_persisted: t },
                     None => S2C::Error { code: ErrorCode::Internal, message: "message could not be saved".into() },
                 };
-                let _ = ack.conn.try_send(Out::Frame(Bytes::from(encode(&ServerFrame { req: ack.req, msg }))));
+                if let Some(ack) = ack {
+                    let msg = match msg {
+                        S2C::Ack { channel_id, id, t_persisted, .. } => S2C::Ack { channel_id, nonce: ack.nonce, id, t_server_recv: ack.t_server_recv, t_persisted },
+                        m => m,
+                    };
+                    let _ = ack.conn.try_send(Out::Frame(Bytes::from(encode(&ServerFrame { req: ack.req, msg }))));
+                }
             }
             PersistOp::Edit { reply, .. } | PersistOp::Delete { reply, .. } => {
                 let _ = reply.send(matches!(ok, Some(Ok(true))));

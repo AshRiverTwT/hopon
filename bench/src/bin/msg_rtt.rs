@@ -122,7 +122,7 @@ async fn main() -> Result<()> {
         sent[i].store(t, Ordering::Relaxed);
         let f = ClientFrame {
             req: 1_000 + i as u32,
-            msg: C2S::Send { channel_id, content: format!("bench message {i}"), nonce: i as u64, t_input: t, t_client_send: t, reply_to: None },
+            msg: C2S::Send { channel_id, content: format!("bench message {i}"), nonce: i as u64, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] },
         };
         sink.send(WsMsg::Binary(encode(&f).into())).await?;
     }

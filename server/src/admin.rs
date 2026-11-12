@@ -127,6 +127,7 @@ pub async fn handle(st: &Arc<State>, uid: Id, msg: C2S) -> R {
                 chan.deleted.store(true, Ordering::Relaxed);
             }
             st.persist.send(PersistOp::PurgeChannels(vec![channel_id])).await.map_err(internal)?;
+            crate::files::purge_channels(st.clone(), vec![channel_id]);
             let guild = st.guild(server_id).await.map_err(internal)?;
             if kind == kind_to_i16(ChannelKind::Voice) {
                 let in_room: Vec<Id> = st.voice.lock().iter().filter(|(_, e)| e.channel_id == channel_id).map(|(u, _)| *u).collect();
@@ -159,6 +160,7 @@ pub async fn handle(st: &Arc<State>, uid: Id, msg: C2S) -> R {
                 }
             }
             st.persist.send(PersistOp::PurgeChannels(chans.iter().map(|c| c.0).collect())).await.map_err(internal)?;
+            crate::files::purge_channels(st.clone(), chans.iter().map(|c| c.0).collect());
             for (cid, kind) in &chans {
                 if *kind == kind_to_i16(ChannelKind::Voice) {
                     livekit::delete_room(st.clone(), voice::room_name(*cid));

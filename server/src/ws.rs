@@ -380,13 +380,17 @@ impl Session {
 
     async fn authed(&mut self, req: u32, uid: Id, name: &str, msg: C2S, t_recv: i64) -> R {
         match msg {
-            C2S::Send { channel_id, content, nonce, t_input, t_client_send, reply_to } => {
+            C2S::Send { channel_id, content, nonce, t_input, t_client_send, reply_to, files, gifs } => {
                 let reply_to = reply_to.filter(|r| *r > 0);
                 if !self.take_token() {
                     return Err((ErrorCode::RateLimited, "slow down".into()));
                 }
                 let content = content.trim().to_owned();
-                if content.is_empty() || content.chars().count() > MAX_MESSAGE_CHARS {
+                let n_att = files.len() + gifs.len();
+                if n_att > MAX_ATTACHMENTS {
+                    return Err((ErrorCode::BadRequest, format!("at most {MAX_ATTACHMENTS} attachments per message")));
+                }
+                if (content.is_empty() && n_att == 0) || content.chars().count() > MAX_MESSAGE_CHARS {
                     return Err((ErrorCode::BadRequest, "message must be 1-4000 characters".into()));
                 }
                 let (chan, guild) = self.member_chan(channel_id, uid).await?;
@@ -405,17 +409,26 @@ impl Session {
                             author_id: uid,
                             content: prev.content,
                             reply_to: prev.reply_to,
+                            attachments: attachments_json(&prev.attachments),
                             t_enqueue: now_us(),
-                            ack: AckTo { conn: self.tx.clone(), req, nonce, t_server_recv: t_recv },
+                            ack: Some(AckTo { conn: self.tx.clone(), req, nonce, t_server_recv: t_recv }),
                         };
                         self.st.persist.send(op).await.map_err(internal)?;
                         return Ok(());
                     }
                 }
+                // Attachments resolve before the hot path (only messages that
+                // have them pay for the lookup).
+                let mut attachments = crate::gifs::claim(&self.st, &gifs).map_err(|e| (ErrorCode::NotFound, e))?;
+                let claimed = crate::files::claim(&self.st, uid, &files).await.map_err(|e| (ErrorCode::NotFound, e))?;
+                let file_ids: Vec<String> = claimed.iter().map(|a| a.id.clone()).collect();
+                attachments.splice(0..0, claimed);
                 // Hot path: assign ID, fan out, then persist asynchronously.
                 let id = {
                     let _order = chan.order.lock();
                     if chan.deleted.load(Ordering::Relaxed) {
+                        drop(_order);
+                        crate::files::release(&self.st, file_ids).await;
                         return Err((ErrorCode::NotFound, "channel was deleted".into()));
                     }
                     let id = self.st.ids.next();
@@ -431,6 +444,7 @@ impl Session {
                         trace: Some(Trace { t_input, t_client_send, t_server_recv: t_recv, t_server_send: t_send }),
                         reply_to,
                         reactions: vec![],
+                        attachments: attachments.clone(),
                     };
                     guild.publish(frame(0, S2C::Message(msg.clone())));
                     self.st.metrics.fanout.lock().record_us(t_send - t_recv);
@@ -446,10 +460,27 @@ impl Session {
                     author_id: uid,
                     content,
                     reply_to,
+                    attachments: attachments_json(&attachments),
                     t_enqueue: now_us(),
-                    ack: AckTo { conn: self.tx.clone(), req, nonce, t_server_recv: t_recv },
+                    ack: Some(AckTo { conn: self.tx.clone(), req, nonce, t_server_recv: t_recv }),
                 };
                 self.st.persist.send(op).await.map_err(internal)?;
+                if !file_ids.is_empty() {
+                    let st = self.st.clone();
+                    tokio::spawn(async move { crate::files::link(&st, file_ids, channel_id, id).await });
+                }
+                Ok(())
+            }
+            C2S::GifSearch { query } => {
+                let (st, tx) = (self.st.clone(), self.tx.clone());
+                // Off the reader loop: the provider can take a while.
+                tokio::spawn(async move {
+                    let msg = match crate::gifs::search(&st, uid, &query).await {
+                        Some(results) => S2C::Gifs { enabled: true, results },
+                        None => S2C::Gifs { enabled: false, results: vec![] },
+                    };
+                    let _ = tx.send(Out::Frame(frame(req, msg))).await;
+                });
                 Ok(())
             }
             C2S::Edit { channel_id, message_id, content } => {
@@ -486,6 +517,7 @@ impl Session {
                     return Err((ErrorCode::NotFound, "no such message of yours".into()));
                 }
                 guild.publish(frame(0, S2C::Deleted { channel_id, id: message_id }));
+                crate::files::purge_message(self.st.clone(), channel_id, message_id);
                 self.send(req, S2C::Ok).await;
                 Ok(())
             }
@@ -565,7 +597,11 @@ impl Session {
                         .bind(uid).fetch_one(&self.st.db).await.map_err(internal)?;
                     g.publish(frame(0, S2C::MemberJoined { server_id: sid, user: UserInfo { id: uid, name: name.to_owned(), avatar_v: av as u32 } }));
                 }
-                self.joined_server(req, uid, sid).await
+                self.joined_server(req, uid, sid).await?;
+                if inserted {
+                    welcome(&self.st, sid, uid).await;
+                }
+                Ok(())
             }
             C2S::VoiceGrant { channel_id } => {
                 let (chan, _) = self.member_chan(channel_id, uid).await?;
@@ -753,8 +789,8 @@ type R = Result<(), (ErrorCode, String)>;
 
 /// Newest-first page plus its reactions (two queries for the whole page).
 async fn history_page(st: &State, channel_id: Id, before: Option<Id>, limit: i64) -> anyhow::Result<(Vec<Message>, bool)> {
-    let mut rows: Vec<(i64, i64, String, Option<i64>, Option<i64>)> = sqlx::query_as(
-        "SELECT id, author_id, content, edited_at, reply_to FROM messages \
+    let mut rows: Vec<(i64, i64, String, Option<i64>, Option<i64>, Option<String>)> = sqlx::query_as(
+        "SELECT id, author_id, content, edited_at, reply_to, attachments FROM messages \
          WHERE channel_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3",
     )
     .bind(channel_id)
@@ -779,7 +815,7 @@ async fn history_page(st: &State, channel_id: Id, before: Option<Id>, limit: i64
     }
     let messages = rows
         .into_iter()
-        .map(|(id, author_id, content, edited_at, reply_to)| Message {
+        .map(|(id, author_id, content, edited_at, reply_to, attachments)| Message {
             id,
             channel_id,
             author_id,
@@ -789,9 +825,75 @@ async fn history_page(st: &State, channel_id: Id, before: Option<Id>, limit: i64
             trace: None,
             reply_to,
             reactions: by_msg.remove(&id).unwrap_or_default(),
+            attachments: attachments.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default(),
         })
         .collect();
     Ok((messages, more))
+}
+
+fn attachments_json(a: &[Attachment]) -> Option<String> {
+    (!a.is_empty()).then(|| serde_json::to_string(a).unwrap_or_default())
+}
+
+const WELCOMES: &[&str] = &[
+    "{u} just hopped on. Say hi!",
+    "Welcome aboard, {u}!",
+    "{u} has entered the chat.",
+    "Look who's here: {u}!",
+    "{u} pulled up. Make some room.",
+    "A wild {u} appeared!",
+    "{u} joined the party.",
+    "Everyone, give {u} a warm welcome.",
+    "{u} is here. Good vibes only.",
+    "Hop on, {u}. We saved you a seat.",
+    "{u} just landed.",
+    "Glad you made it, {u}!",
+];
+
+/// Post a random welcome for a new member in the server's main text channel
+/// (`general` if there is one). Server-authored: author `SYSTEM_USER`.
+pub async fn welcome(st: &Arc<State>, server_id: Id, user: Id) {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM channels WHERE server_id = $1 AND kind = 0 ORDER BY (lower(name) = 'general') DESC, id LIMIT 1",
+    )
+    .bind(server_id)
+    .fetch_optional(&st.db)
+    .await
+    .ok()
+    .flatten();
+    let Some((channel_id,)) = row else { return };
+    let Some((chan, guild)) = st.chan_for(channel_id, user).await else { return };
+    let pick = {
+        use rand::Rng;
+        rand::thread_rng().gen_range(0..WELCOMES.len())
+    };
+    let content = WELCOMES[pick].replace("{u}", &mention_token(user));
+    let id = {
+        let _order = chan.order.lock();
+        if chan.deleted.load(Ordering::Relaxed) {
+            return;
+        }
+        let id = st.ids.next();
+        chan.last_id.store(id, Ordering::Relaxed);
+        let msg = Message {
+            id,
+            channel_id,
+            author_id: SYSTEM_USER,
+            content: content.clone(),
+            edited_at: None,
+            nonce: 0,
+            trace: None,
+            reply_to: None,
+            reactions: vec![],
+            attachments: vec![],
+        };
+        guild.publish(frame(0, S2C::Message(msg)));
+        id
+    };
+    let _ = st
+        .persist
+        .send(PersistOp::Insert { channel_id, id, author_id: SYSTEM_USER, content, reply_to: None, attachments: None, t_enqueue: now_us(), ack: None })
+        .await;
 }
 
 fn internal<E: std::fmt::Display>(e: E) -> (ErrorCode, String) {

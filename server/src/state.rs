@@ -79,6 +79,8 @@ pub struct State {
     /// (author, nonce) → (message, accepted at µs). Makes client resends after
     /// a reconnect idempotent. Entries live `NONCE_TTL_US`.
     pub nonces: DashMap<(Id, u64), (hopon_shared::Message, i64)>,
+    /// GIF id → (attachment, fetched at), from this server's own searches.
+    pub gifs: DashMap<String, (hopon_shared::Attachment, std::time::Instant)>,
     next_conn: AtomicU64,
 }
 
@@ -109,6 +111,7 @@ impl State {
             metrics: Metrics::new(),
             http: reqwest::Client::new(),
             nonces: DashMap::new(),
+            gifs: DashMap::new(),
             next_conn: AtomicU64::new(1),
         }
     }

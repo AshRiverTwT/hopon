@@ -1,6 +1,8 @@
 mod admin;
 mod auth;
 mod config;
+mod files;
+mod gifs;
 mod livekit;
 mod metrics;
 mod persist;
@@ -26,6 +28,7 @@ async fn main() -> Result<()> {
         .connect(&cfg.database_url)
         .await?;
     sqlx::migrate!("./migrations").run(&db).await?;
+    tokio::fs::create_dir_all(&cfg.files_dir).await?;
 
     let (ptx, prx) = mpsc::channel(persist::QUEUE);
     let st = Arc::new(state::State::new(cfg.clone(), db, ptx));
@@ -37,12 +40,16 @@ async fn main() -> Result<()> {
             loop {
                 iv.tick().await;
                 st.prune_nonces();
+                gifs::prune(&st);
             }
         });
     }
+    tokio::spawn(files::sweep(st.clone()));
 
     let app = Router::new()
         .route("/ws", get(ws::handler))
+        .route("/files", axum::routing::post(files::upload))
+        .route("/files/{id}", get(files::download))
         .route("/health", get(|| async { "ok" }))
         .route("/metrics", get(|AxState(st): AxState<Arc<state::State>>| async move { st.metrics.render() }))
         .route("/metrics/reset", get(|AxState(st): AxState<Arc<state::State>>| async move { st.metrics.reset(); "reset" }))

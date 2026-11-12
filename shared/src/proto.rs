@@ -11,7 +11,7 @@ pub type Id = i64;
 /// Bumped on every wire-incompatible change. Sent as `?v=` on the WebSocket
 /// URL; the server answers HTTP 426 to any other version before any
 /// MessagePack is exchanged, so old and new builds fail loudly, not silently.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Append the protocol version to a chat URL (`ws://host:port/ws`).
 pub fn versioned_url(url: &str) -> String {
@@ -25,6 +25,10 @@ pub const HISTORY_PAGE_MAX: u16 = 100;
 /// Avatars are small square images (the client uploads 128 px WebP).
 pub const MAX_AVATAR_BYTES: usize = 48 * 1024;
 pub const MAX_PREFS_BYTES: usize = 16 * 1024;
+/// Attachments per message.
+pub const MAX_ATTACHMENTS: usize = 10;
+/// Author id of messages written by the server itself (welcomes).
+pub const SYSTEM_USER: Id = 0;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChannelKind {
@@ -106,6 +110,39 @@ pub struct Message {
     pub reply_to: Option<Id>,
     /// Aggregated reactions (history pages; live messages start empty).
     pub reactions: Vec<Reaction>,
+    pub attachments: Vec<Attachment>,
+}
+
+/// A file or GIF attached to a message.
+///
+/// Uploaded files: `url` is empty and the file is served by the chat server at
+/// `/files/{id}`. GIFs: `url` is the provider's media URL (set by the server
+/// from its own search results, never taken from a client).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+pub struct Attachment {
+    pub id: String,
+    pub name: String,
+    pub mime: String,
+    pub size: u64,
+    /// Pixel size for images, video and GIFs (0 if unknown); lets clients
+    /// reserve the box before the media loads.
+    pub width: u32,
+    pub height: u32,
+    pub url: String,
+    /// Small preview (GIFs: a still or small animation). May be empty.
+    pub preview: String,
+}
+
+/// One GIF search result.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Gif {
+    /// Opaque id to send back in `Send.gifs`.
+    pub id: String,
+    pub title: String,
+    /// Small animated preview for the picker.
+    pub preview: String,
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -170,7 +207,11 @@ pub enum C2S {
     /// Revokes this device's refresh token.
     Logout { refresh_token: String },
     Ping { t_client: i64 },
-    Send { channel_id: Id, content: String, nonce: u64, t_input: i64, t_client_send: i64, reply_to: Option<Id> },
+    /// `content` may be empty when there are attachments or GIFs. `files` are
+    /// ids returned by `POST /files`; `gifs` are ids from `Gifs` results.
+    Send { channel_id: Id, content: String, nonce: u64, t_input: i64, t_client_send: i64, reply_to: Option<Id>, files: Vec<String>, gifs: Vec<String> },
+    /// GIF search; an empty query returns trending GIFs.
+    GifSearch { query: String },
     /// Add (`add = true`) or remove your reaction. Idempotent.
     React { channel_id: Id, message_id: Id, emoji: String, add: bool },
     Edit { channel_id: Id, message_id: Id, content: String },
@@ -273,6 +314,8 @@ pub enum S2C {
     ChannelUpdated(ChannelInfo),
     ChannelDeleted { server_id: Id, channel_id: Id },
     MemberLeft { server_id: Id, user_id: Id, reason: RemovedReason },
+    /// GIF search results. `enabled = false`: this server has no GIF provider.
+    Gifs { enabled: bool, results: Vec<Gif> },
     Avatar {
         user_id: Id,
         avatar_v: u32,
@@ -357,6 +400,7 @@ mod tests {
                 trace: Some(Trace { t_input: 1, t_client_send: 2, t_server_recv: 3, t_server_send: 4 }),
                 reply_to: None,
                 reactions: vec![],
+                attachments: vec![],
             }),
         };
         let b = encode(&f);

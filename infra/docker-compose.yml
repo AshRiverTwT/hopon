@@ -26,7 +26,15 @@ services:
       LIVEKIT_URL: ${LIVEKIT_PUBLIC_URL}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      # Uploaded files (a named volume, so rebuilds keep them).
+      HOPON_FILES_DIR: /data/files
+      HOPON_MAX_UPLOAD_MB: ${HOPON_MAX_UPLOAD_MB:-25}
+      HOPON_USER_QUOTA_MB: ${HOPON_USER_QUOTA_MB:-1024}
+      HOPON_MIN_FREE_MB: ${HOPON_MIN_FREE_MB:-2048}
+      # GIF search (https://klipy.com/developers); empty = GIFs off.
+      KLIPY_API_KEY: ${KLIPY_API_KEY:-}
       RUST_LOG: info
+    volumes: [files:/data/files]
     # Localhost only: put a TLS reverse proxy (e.g. Caddy) in front.
     ports: ["127.0.0.1:8080:8080"]
     restart: unless-stopped
@@ -47,3 +55,4 @@ services:
 
 volumes:
   pgdata:
+  files:

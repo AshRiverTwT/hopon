@@ -1856,6 +1856,7 @@ dependencies = [
  "futures-util",
  "hopon-shared",
  "jsonwebtoken",
+ "libc",
  "parking_lot",
  "rand 0.8.8",
  "reqwest 0.12.28",
@@ -1865,6 +1866,7 @@ dependencies = [
  "sqlx",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
 ]

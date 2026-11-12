@@ -54,6 +54,40 @@ async fn admin_setup(url: &str) -> Result<(Client, Client, Id, Id, Id, Id)> {
     Ok((o, m, s.id, text, voice, mid))
 }
 
+/// Minimal HTTP/1.1 request to the chat server (plain http only; smoke runs
+/// against a local server). Returns (status, headers, body).
+async fn http(ws_url: &str, method: &str, path: &str, headers: &[(&str, String)], body: &[u8]) -> Result<(u16, String, Vec<u8>)> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let u = hopon_bench::url_lite::parse(ws_url)?;
+    let mut s = tokio::net::TcpStream::connect((u.host.as_str(), u.port)).await?;
+    let mut req = format!("{method} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Length: {}\r\n", u.host, body.len());
+    for (k, v) in headers {
+        req.push_str(&format!("{k}: {v}\r\n"));
+    }
+    req.push_str("\r\n");
+    s.write_all(req.as_bytes()).await?;
+    s.write_all(body).await?;
+    let mut buf = vec![];
+    tokio::time::timeout(std::time::Duration::from_secs(5), s.read_to_end(&mut buf)).await??;
+    let split = buf.windows(4).position(|w| w == b"\r\n\r\n").ok_or_else(|| anyhow::anyhow!("bad http response"))?;
+    let head = String::from_utf8_lossy(&buf[..split]).to_string();
+    let status: u16 = head.split_whitespace().nth(1).unwrap_or("0").parse()?;
+    let mut body = buf[split + 4..].to_vec();
+    if head.to_ascii_lowercase().contains("transfer-encoding: chunked") {
+        let mut out = vec![];
+        let mut rest = &body[..];
+        loop {
+            let nl = rest.windows(2).position(|w| w == b"\r\n").unwrap_or(0);
+            let n = usize::from_str_radix(std::str::from_utf8(&rest[..nl])?.trim(), 16)?;
+            if n == 0 { break; }
+            out.extend_from_slice(&rest[nl + 2..nl + 2 + n]);
+            rest = &rest[nl + 2 + n + 2..];
+        }
+        body = out;
+    }
+    Ok((status, head, body))
+}
+
 macro_rules! check {
     ($name:expr, $e:expr) => {{
         let r: Result<()> = async { $e }.await;
@@ -92,7 +126,7 @@ async fn main() -> Result<()> {
     });
     pass &= check!("unauthenticated send rejected", {
         let mut c = Client::connect(&url).await?;
-        ensure!(c.call(C2S::Send { channel_id: 1, content: "x".into(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None }).await.is_err());
+        ensure!(c.call(C2S::Send { channel_id: 1, content: "x".into(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] }).await.is_err());
         Ok(())
     });
     pass &= check!("resume with access token", {
@@ -125,7 +159,7 @@ async fn main() -> Result<()> {
     b.signup("smokeb").await?;
     pass &= check!("non-member cannot read or send", {
         ensure!(b.call(C2S::History { channel_id: text, before: None, limit: 10 }).await.is_err());
-        ensure!(b.call(C2S::Send { channel_id: text, content: "x".into(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None }).await.is_err());
+        ensure!(b.call(C2S::Send { channel_id: text, content: "x".into(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] }).await.is_err());
         Ok(())
     });
     pass &= check!("invite link join + member event", {
@@ -143,7 +177,7 @@ async fn main() -> Result<()> {
     pass &= check!("send: realtime delivery, echo, durable ack, ordering", {
         for i in 0..20u64 {
             let t = now_us();
-            a.send(C2S::Send { channel_id: text, content: format!("m{i}"), nonce: 100 + i, t_input: t, t_client_send: t, reply_to: None }).await?;
+            a.send(C2S::Send { channel_id: text, content: format!("m{i}"), nonce: 100 + i, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
         }
         let mut last = 0;
         for i in 0..20u64 {
@@ -164,7 +198,7 @@ async fn main() -> Result<()> {
         let t = now_us();
         let mut a2 = Client::connect(&url).await?;
         a2.call(C2S::Refresh { refresh_token: refresh.clone() }).await.map(|r| if let S2C::Authed { refresh_token, .. } = r { refresh = refresh_token; }).ok();
-        let send = C2S::Send { channel_id: text, content: "once".into(), nonce: 4242, t_input: t, t_client_send: t, reply_to: None };
+        let send = C2S::Send { channel_id: text, content: "once".into(), nonce: 4242, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] };
         a.send(send.clone()).await?;
         let S2C::Message(first) = next_msg(&mut b).await? else { bail!("expected message") };
         // Same nonce from another socket of the same user (as after a reconnect).
@@ -188,8 +222,8 @@ async fn main() -> Result<()> {
         Ok(())
     });
     pass &= check!("empty and oversized messages rejected", {
-        ensure!(a.call(C2S::Send { channel_id: text, content: "   ".into(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None }).await.is_err());
-        ensure!(a.call(C2S::Send { channel_id: text, content: "x".repeat(4001), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None }).await.is_err());
+        ensure!(a.call(C2S::Send { channel_id: text, content: "   ".into(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] }).await.is_err());
+        ensure!(a.call(C2S::Send { channel_id: text, content: "x".repeat(4001), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] }).await.is_err());
         Ok(())
     });
     pass &= check!("edit own message (broadcast)", {
@@ -208,6 +242,8 @@ async fn main() -> Result<()> {
         let S2C::History { messages: p2, .. } = b.call(C2S::History { channel_id: text, before: Some(p1[7].id), limit: 8 }).await? else { bail!("h") };
         ensure!(p2[0].id < p1[7].id && p2[0].content == "m12");
         let S2C::History { messages: p3, more, .. } = b.call(C2S::History { channel_id: text, before: Some(p2[7].id), limit: 8 }).await? else { bail!("h") };
+        // (Plus the server's welcome for b, the oldest message.)
+        let p3: Vec<_> = p3.into_iter().filter(|m| m.author_id != SYSTEM_USER).collect();
         ensure!(p3.len() == 5 && !more, "got {} more={more}", p3.len());
         ensure!(p3.last().unwrap().content == "edited", "edit not persisted");
         Ok(())
@@ -216,7 +252,7 @@ async fn main() -> Result<()> {
         ensure!(matches!(a.call(C2S::Delete { channel_id: text, message_id: first_id }).await?, S2C::Ok));
         loop { if let S2C::Deleted { id, .. } = next_msg(&mut b).await? { ensure!(id == first_id); break; } }
         let S2C::History { messages, .. } = b.call(C2S::History { channel_id: text, before: None, limit: 100 }).await? else { bail!("h") };
-        ensure!(messages.len() == 20 && messages.iter().all(|m| m.id != first_id));
+        ensure!(messages.iter().filter(|m| m.author_id != SYSTEM_USER).count() == 20 && messages.iter().all(|m| m.id != first_id));
         Ok(())
     });
     pass &= check!("owner creates channel; members are told", {
@@ -277,7 +313,7 @@ async fn main() -> Result<()> {
     pass &= check!("admin: owner can delete anyone's message", {
         let (mut o, mut m, _, text, _, _) = admin_setup(&url).await?;
         let t = now_us();
-        m.send(C2S::Send { channel_id: text, content: "spam".into(), nonce: 9, t_input: t, t_client_send: t, reply_to: None }).await?;
+        m.send(C2S::Send { channel_id: text, content: "spam".into(), nonce: 9, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
         let id = wait_for(&mut o, |e| if let S2C::Message(x) = e { Some(x.id) } else { None }).await?;
         ensure!(matches!(o.call(C2S::Delete { channel_id: text, message_id: id }).await?, S2C::Ok));
         Ok(())
@@ -285,11 +321,11 @@ async fn main() -> Result<()> {
     pass &= check!("admin: delete text channel (gone for sends and history)", {
         let (mut o, mut m, _, text, _, _) = admin_setup(&url).await?;
         let t = now_us();
-        m.send(C2S::Send { channel_id: text, content: "before".into(), nonce: 1, t_input: t, t_client_send: t, reply_to: None }).await?;
+        m.send(C2S::Send { channel_id: text, content: "before".into(), nonce: 1, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
         wait_for(&mut o, |e| matches!(e, S2C::Message(_)).then_some(())).await?;
         o.call(C2S::DeleteChannel { channel_id: text }).await?;
         wait_for(&mut m, |e| matches!(e, S2C::ChannelDeleted { channel_id, .. } if *channel_id == text).then_some(())).await?;
-        ensure!(m.call(C2S::Send { channel_id: text, content: "after".into(), nonce: 2, t_input: t, t_client_send: t, reply_to: None }).await.is_err(), "send into deleted channel");
+        ensure!(m.call(C2S::Send { channel_id: text, content: "after".into(), nonce: 2, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await.is_err(), "send into deleted channel");
         ensure!(m.call(C2S::History { channel_id: text, before: None, limit: 10 }).await.is_err(), "history of deleted channel");
         Ok(())
     });
@@ -309,8 +345,8 @@ async fn main() -> Result<()> {
         ensure!(r == RemovedReason::Kicked);
         wait_for(&mut o, |e| matches!(e, S2C::MemberLeft { user_id, .. } if *user_id == mid).then_some(())).await?;
         let t = now_us();
-        ensure!(m.call(C2S::Send { channel_id: text, content: "still here?".into(), nonce: 3, t_input: t, t_client_send: t, reply_to: None }).await.is_err(), "kicked user can send");
-        o.send(C2S::Send { channel_id: text, content: "secret".into(), nonce: 4, t_input: t, t_client_send: t, reply_to: None }).await?;
+        ensure!(m.call(C2S::Send { channel_id: text, content: "still here?".into(), nonce: 3, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await.is_err(), "kicked user can send");
+        o.send(C2S::Send { channel_id: text, content: "secret".into(), nonce: 4, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
         ensure!(quiet(&mut m, 400, |e| matches!(e, S2C::Message(_))).await, "kicked user still receives messages");
         ensure!(o.call(C2S::Kick { server_id: sid, user_id: mid }).await.is_err(), "double kick");
         Ok(())
@@ -353,8 +389,8 @@ async fn main() -> Result<()> {
         let mut newest = 0;
         for i in 0..3u64 {
             let t = now_us();
-            o.send(C2S::Send { channel_id: text, content: format!("r{i}"), nonce: 50 + i, t_input: t, t_client_send: t, reply_to: None }).await?;
-            newest = wait_for(&mut m, |e| if let S2C::Message(x) = e { Some(x.id) } else { None }).await?;
+            o.send(C2S::Send { channel_id: text, content: format!("r{i}"), nonce: 50 + i, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
+            newest = wait_for(&mut m, |e| if let S2C::Message(x) = e { (x.author_id != SYSTEM_USER).then_some(x.id) } else { None }).await?;
         }
         // Second device of the member sees the marker move.
         let mut m2 = Client::connect(&url).await?;
@@ -391,13 +427,13 @@ async fn main() -> Result<()> {
     pass &= check!("replies + reactions (broadcast, idempotent, in history, limits, ordering)", {
         let (mut o, mut m, _, text, _, _) = admin_setup(&url).await?;
         let t = now_us();
-        o.send(C2S::Send { channel_id: text, content: "root".into(), nonce: 70, t_input: t, t_client_send: t, reply_to: None }).await?;
+        o.send(C2S::Send { channel_id: text, content: "root".into(), nonce: 70, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
         let root = wait_for(&mut m, |e| if let S2C::Message(x) = e { (x.content == "root").then_some(x.id) } else { None }).await?;
-        m.send(C2S::Send { channel_id: text, content: "re".into(), nonce: 71, t_input: t, t_client_send: t, reply_to: Some(root) }).await?;
+        m.send(C2S::Send { channel_id: text, content: "re".into(), nonce: 71, t_input: t, t_client_send: t, reply_to: Some(root), files: vec![], gifs: vec![] }).await?;
         let rep = wait_for(&mut o, |e| if let S2C::Message(x) = e { (x.content == "re").then(|| x.clone()) } else { None }).await?;
         ensure!(rep.reply_to == Some(root), "reply_to not delivered");
         // React immediately after sending: the reaction must wait for the insert.
-        o.send(C2S::Send { channel_id: text, content: "fresh".into(), nonce: 72, t_input: t, t_client_send: t, reply_to: None }).await?;
+        o.send(C2S::Send { channel_id: text, content: "fresh".into(), nonce: 72, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
         let fresh = wait_for(&mut m, |e| if let S2C::Message(x) = e { (x.content == "fresh").then_some(x.id) } else { None }).await?;
         ensure!(matches!(m.call(C2S::React { channel_id: text, message_id: fresh, emoji: "🔥".into(), add: true }).await?, S2C::Ok), "react on fresh message");
         m.call(C2S::React { channel_id: text, message_id: root, emoji: "👍".into(), add: true }).await?;
@@ -449,6 +485,74 @@ async fn main() -> Result<()> {
         ensure!(prefs == j, "not persisted: {prefs}");
         ensure!(a1.call(C2S::SavePrefs { json: "[1,2]".into() }).await.is_err(), "non-object accepted");
         ensure!(a1.call(C2S::SavePrefs { json: format!("{{\"x\":\"{}\"}}", "a".repeat(MAX_PREFS_BYTES)) }).await.is_err(), "oversized accepted");
+        Ok(())
+    });
+    let mut fa = Client::connect(&url).await?;
+    let S2C::Authed { access_token: fa_access, .. } = fa.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("login") };
+    pass &= check!("attachments: upload, send without text, deliver, history, download, claim rules, delete removes file", {
+        let png: Vec<u8> = [&[0x89u8, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a][..], &[7u8; 200][..]].concat();
+        let auth = ("Authorization", format!("Bearer {fa_access}"));
+        let (st, _, _) = http(&url, "POST", "/files?name=pic.png&w=640&h=480", &[], &png).await?;
+        ensure!(st == 401, "upload without token: {st}");
+        let (st, _, _) = http(&url, "POST", "/files?name=empty", &[auth.clone()], &[]).await?;
+        ensure!(st == 400, "empty upload: {st}");
+        let (st, _, body) = http(&url, "POST", "/files?name=..%2Fpic.png&w=640&h=480", &[auth.clone()], &png).await?;
+        ensure!(st == 200, "upload: {st} {}", String::from_utf8_lossy(&body));
+        let att: Attachment = serde_json::from_slice(&body)?;
+        ensure!(att.mime == "image/png" && att.size == png.len() as u64 && (att.width, att.height) == (640, 480) && !att.name.contains('/'), "{att:?}");
+        let (_, _, body) = http(&url, "POST", "/files?name=page.html", &[auth.clone()], b"<html><script>alert(1)</script>").await?;
+        let html: Attachment = serde_json::from_slice(&body)?;
+        ensure!(html.mime == "application/octet-stream", "html sniffed as {}", html.mime);
+        let (_, head, _) = http(&url, "GET", &format!("/files/{}", html.id), &[], &[]).await?;
+        ensure!(head.to_ascii_lowercase().contains("content-disposition: attachment"), "html must download: {head}");
+
+        let S2C::ServerJoined(sv) = fa.call(C2S::CreateServer { name: "Files".into() }).await? else { bail!("server") };
+        let text = sv.channels.iter().find(|c| c.kind == ChannelKind::Text).unwrap().id;
+        let S2C::Invite { code, .. } = fa.call(C2S::CreateInvite { server_id: sv.id }).await? else { bail!("invite") };
+        let mut b = Client::connect(&url).await?;
+        b.signup("fil").await?;
+        b.call(C2S::JoinInvite { code }).await?;
+        // Someone else can't send my upload.
+        ensure!(b.call(C2S::Send { channel_id: text, content: String::new(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None, files: vec![att.id.clone()], gifs: vec![] }).await.is_err(), "foreign claim");
+        let t = now_us();
+        fa.send(C2S::Send { channel_id: text, content: String::new(), nonce: 5150, t_input: t, t_client_send: t, reply_to: None, files: vec![att.id.clone()], gifs: vec![] }).await?;
+        let got = wait_for(&mut b, |e| if let S2C::Message(m) = e { (m.channel_id == text && m.author_id != SYSTEM_USER).then(|| m.clone()) } else { None }).await?;
+        ensure!(got.content.is_empty() && got.attachments.len() == 1 && got.attachments[0].id == att.id, "{got:?}");
+        // Already sent: can't attach it again.
+        ensure!(fa.call(C2S::Send { channel_id: text, content: "again".into(), nonce: 5151, t_input: t, t_client_send: t, reply_to: None, files: vec![att.id.clone()], gifs: vec![] }).await.is_err(), "double claim");
+        ensure!(fa.call(C2S::Send { channel_id: text, content: String::new(), nonce: 5152, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await.is_err(), "empty message");
+        let (st, head, data) = http(&url, "GET", &format!("/files/{}", att.id), &[], &[]).await?;
+        ensure!(st == 200 && data == png && head.to_ascii_lowercase().contains("content-type: image/png"), "download {st}");
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let S2C::History { messages, .. } = b.call(C2S::History { channel_id: text, before: None, limit: 10 }).await? else { bail!("history") };
+        let h = messages.iter().find(|m| m.id == got.id).ok_or_else(|| anyhow::anyhow!("not in history"))?;
+        ensure!(h.attachments == got.attachments, "history attachments {:?}", h.attachments);
+        fa.call(C2S::Delete { channel_id: text, message_id: got.id }).await?;
+        let mut gone = false;
+        for _ in 0..20 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if http(&url, "GET", &format!("/files/{}", att.id), &[], &[]).await?.0 == 404 { gone = true; break; }
+        }
+        ensure!(gone, "file still served after delete");
+        Ok(())
+    });
+    pass &= check!("welcome message for new members (server-authored, in general, mentions them)", {
+        let (mut o, _m, _sid, text, _voice, mid) = admin_setup(&url).await?;
+        let w = wait_for(&mut o, |e| if let S2C::Message(m) = e { (m.author_id == SYSTEM_USER).then(|| m.clone()) } else { None }).await?;
+        ensure!(w.channel_id == text && mentions(&w.content) == vec![mid], "{w:?}");
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let S2C::History { messages, .. } = o.call(C2S::History { channel_id: text, before: None, limit: 10 }).await? else { bail!("history") };
+        ensure!(messages.iter().any(|m| m.id == w.id && m.author_id == SYSTEM_USER), "welcome not persisted");
+        Ok(())
+    });
+    pass &= check!("gifs: search answers (disabled without a key); unknown GIF ids rejected", {
+        match fa.call(C2S::GifSearch { query: "cat".into() }).await? {
+            S2C::Gifs { .. } => {}
+            o => bail!("{o:?}"),
+        }
+        let S2C::ServerJoined(sv) = fa.call(C2S::CreateServer { name: "Gifs".into() }).await? else { bail!("server") };
+        let text = sv.channels.iter().find(|c| c.kind == ChannelKind::Text).unwrap().id;
+        ensure!(fa.call(C2S::Send { channel_id: text, content: String::new(), nonce: 77, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec!["klipy:nope".into()] }).await.is_err());
         Ok(())
     });
     pass &= check!("logout revokes the refresh token", {
