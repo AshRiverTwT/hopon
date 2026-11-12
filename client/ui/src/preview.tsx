@@ -63,7 +63,7 @@ mockIPC((cmd, args) => {
   switch (cmd) {
     case "open_channel": return scene === "chat" || scene === "voice" ? hist : [];
     case "load_older": return { msgs: [], more: false };
-    case "get_config": return { url: "ws://127.0.0.1:18080/ws" };
+    case "get_config": return { url: "wss://hopon-chat.duckdns.org/ws" };
     case "audio_devices": return { processing: { aec: false, ns: true, agc: true }, inputs: [{ id: "a", name: "Headset Microphone (Arctis 7)" }], outputs: [{ id: "b", name: "Headset Earphone (Arctis 7)" }], input: "a", output: "b", aec: "Software", ns: "Software", agc: "Software" };
     case "perf_stats": return { rows: [{ name: "text: remote input->paint (synced)", count: 600, p50_ms: 21.3, p95_ms: 28.7, p99_ms: 33.1, max_ms: 40 }], startup: { processToPaintMs: 657, mainToPaintMs: 610, mainToConnectedMs: 2.5 }, clockOffsetMs: 0.1, bestRttMs: 0.4, rssMb: 41 };
     case "create_invite": return "hopon://invite/Kq7xN2pLmA";

@@ -41,7 +41,10 @@ pub fn run() {
                     cache::Cache::open_in_memory()?
                 }
             };
-            let default_url = std::env::var("HOPON_URL").unwrap_or_else(|_| "ws://127.0.0.1:8080/ws".into());
+            // Public server by default; HOPON_DEFAULT_URL at build time overrides it,
+            // HOPON_URL at run time overrides both. A URL picked at sign-in is kept.
+            let default_url = std::env::var("HOPON_URL")
+                .unwrap_or_else(|_| option_env!("HOPON_DEFAULT_URL").unwrap_or("wss://hopon-chat.duckdns.org/ws").into());
             let core = core::Core::new(cache, default_url);
             let _ = core.app.set(app.handle().clone());
             app.manage(core.clone());
