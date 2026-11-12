@@ -81,6 +81,8 @@ pub struct State {
     pub nonces: DashMap<(Id, u64), (hopon_shared::Message, i64)>,
     /// GIF id → (attachment, fetched at), from this server's own searches.
     pub gifs: DashMap<String, (hopon_shared::Attachment, std::time::Instant)>,
+    /// What each connected user is playing (cleared when they go offline).
+    pub activities: DashMap<Id, String>,
     next_conn: AtomicU64,
 }
 
@@ -112,6 +114,7 @@ impl State {
             http: reqwest::Client::new(),
             nonces: DashMap::new(),
             gifs: DashMap::new(),
+            activities: DashMap::new(),
             next_conn: AtomicU64::new(1),
         }
     }
@@ -147,7 +150,21 @@ impl State {
     }
 
     /// Tell every server the user is in about an online/offline change.
+    /// Tell the user's servers what they're playing ("" = nothing).
+    pub fn announce_activity(&self, user: Id, game: &str) {
+        let f = Bytes::from(hopon_shared::encode(&hopon_shared::ServerFrame {
+            req: 0,
+            msg: hopon_shared::S2C::Activity { user_id: user, game: game.to_owned() },
+        }));
+        for g in self.guilds.iter().filter(|g| g.is_member(user)) {
+            g.publish(f.clone());
+        }
+    }
+
     pub fn announce_presence(&self, user: Id, online: bool) {
+        if !online && self.activities.remove(&user).is_some() {
+            self.announce_activity(user, "");
+        }
         let f = Bytes::from(hopon_shared::encode(&hopon_shared::ServerFrame { req: 0, msg: hopon_shared::S2C::UserPresence { user_id: user, online } }));
         for g in self.guilds.iter().filter(|g| g.is_member(user)) {
             g.publish(f.clone());
@@ -295,7 +312,7 @@ impl State {
 
         let mut out: Vec<ServerInfo> = rows
             .into_iter()
-            .map(|(id, name, owner_id)| ServerInfo { id, name, owner_id, channels: vec![], members: vec![], reads: vec![], online: vec![] })
+            .map(|(id, name, owner_id)| ServerInfo { id, name, owner_id, channels: vec![], members: vec![], reads: vec![], online: vec![], activities: vec![] })
             .collect();
         let idx: HashMap<i64, usize> = out.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
         for (id, server_id, name, kind, topic) in chans {
@@ -309,6 +326,9 @@ impl State {
             out[idx[&server_id]].channels.push(c);
         }
         for (sid, id, name, av) in mems {
+            if let Some(g) = self.activities.get(&id) {
+                out[idx[&sid]].activities.push((id, g.clone()));
+            }
             if self.is_online(id) {
                 out[idx[&sid]].online.push(id);
             }

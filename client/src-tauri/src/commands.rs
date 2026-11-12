@@ -338,6 +338,19 @@ pub async fn voice_ptt(core: C<'_>, enabled: bool, key_code: u32) -> Res<()> {
     Ok(())
 }
 
+/// Settings → "Show what I'm playing".
+#[tauri::command]
+pub fn activity_sharing(core: C<'_>, enabled: bool) {
+    crate::activity::Activity::set_enabled(core.inner().clone(), enabled);
+}
+
+/// One person's voice volume, 0.0 – 2.0 (1.0 = normal).
+#[tauri::command]
+pub async fn voice_volume(core: C<'_>, user_id: String, volume: f64) -> Res<()> {
+    core.voice.set_volume(user_id, volume).await;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn audio_processing(core: C<'_>, aec: bool, ns: bool, agc: bool) {
     core.voice.set_processing(aec, ns, agc);

@@ -11,7 +11,7 @@ pub type Id = i64;
 /// Bumped on every wire-incompatible change. Sent as `?v=` on the WebSocket
 /// URL; the server answers HTTP 426 to any other version before any
 /// MessagePack is exchanged, so old and new builds fail loudly, not silently.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Append the protocol version to a chat URL (`ws://host:port/ws`).
 pub fn versioned_url(url: &str) -> String {
@@ -78,7 +78,12 @@ pub struct ServerInfo {
     pub reads: Vec<(Id, Id)>,
     /// Members currently connected.
     pub online: Vec<Id>,
+    /// What members are playing right now (user, game name).
+    pub activities: Vec<(Id, String)>,
 }
+
+/// Longest game name accepted for an activity.
+pub const MAX_ACTIVITY_CHARS: usize = 48;
 
 /// Latency stamps (Unix µs). Client stamps are in the sender's clock, server
 /// stamps in the server's clock. Receivers add their own receive/render stamps.
@@ -214,6 +219,8 @@ pub enum C2S {
     GifSearch { query: String },
     /// A fresh access token for HTTP calls (file uploads).
     AccessToken,
+    /// "I'm playing <game>" (empty = nothing). Shown to people who share a server.
+    SetActivity { game: String },
     /// Add (`add = true`) or remove your reaction. Idempotent.
     React { channel_id: Id, message_id: Id, emoji: String, add: bool },
     Edit { channel_id: Id, message_id: Id, content: String },
@@ -317,6 +324,8 @@ pub enum S2C {
     ChannelDeleted { server_id: Id, channel_id: Id },
     MemberLeft { server_id: Id, user_id: Id, reason: RemovedReason },
     AccessToken { token: String },
+    /// A member started/stopped playing (`game` empty = stopped).
+    Activity { user_id: Id, game: String },
     /// GIF search results. `enabled = false`: this server has no GIF provider.
     Gifs { enabled: bool, results: Vec<Gif> },
     Avatar {

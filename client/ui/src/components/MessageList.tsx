@@ -4,7 +4,7 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { deleteMessage, editMessage, isOwner, jumpTo, loadOlder, maybeMarkRead, s, set, toggleReaction, userName } from "../store";
 import { findId } from "../merge";
-import { decodeMentions, mentionsUser, preview } from "../rich";
+import { decodeMentions, jumboEmoji, mentionsUser, preview } from "../rich";
 import Rich from "./Rich";
 import { EmojiPicker } from "./EmojiPicker";
 import { showsHeader } from "../merge";
@@ -16,7 +16,7 @@ import { fitBox } from "../media";
 import { SYSTEM_USER } from "../types";
 
 const OVERSCAN = 800; // px above and below the viewport
-const EST_HEADER = 82;
+const EST_HEADER = 70;
 const EST_QUOTE = 22;
 const EST_DAY = 44;
 const EST_DIVIDER = 28;
@@ -105,13 +105,20 @@ export default function MessageList() {
   onMount(() => {
     // Heights depend on the width: when it changes, re-measure from scratch
     // (stale heights put rows far off-screen, e.g. after a narrow window).
+    // Deferred until the width settles (the games slide changes it every frame).
     let lastW = el.clientWidth;
+    let settle = 0;
     const ro = new ResizeObserver(() => {
       setViewH(el.clientHeight);
       const w = el.clientWidth;
-      if (w !== lastW && w >= MIN_MEASURE_W) { lastW = w; setHeights(new Map()); bumpEpoch((n) => n + 1); }
+      if (w !== lastW && w >= MIN_MEASURE_W) {
+        lastW = w;
+        clearTimeout(settle);
+        settle = window.setTimeout(() => { setHeights(new Map()); bumpEpoch((n) => n + 1); if (atBottom) pin(); }, 120);
+      }
       if (atBottom) pin();
     });
+    onCleanup(() => clearTimeout(settle));
     ro.observe(el);
     onCleanup(() => ro.disconnect());
   });
@@ -230,14 +237,14 @@ function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean;
       </Show>
       <Show when={p.header}>
         <div class="meta">
-          <Avatar id={p.m.authorId} size={32} />
+          <Avatar id={p.m.authorId} size={40} class="gutter-av" />
           <span class="author">{userName(p.m.authorId)}</span>
           <span class="time" title={new Date(p.m.ts).toLocaleString()}>{fmtTime(p.m.ts)}</span>
         </div>
       </Show>
       <Show when={s.editing === p.m.id} fallback={
         <Show when={parseGameResult(p.m.content)} fallback={
-        <div class="body">
+        <div class="body" classList={{ jumbo: !p.m.attachments.length && jumboEmoji(p.m.content) }}>
           <Show when={p.m.content}><Rich text={p.m.content} /></Show>
           <Show when={p.m.editedAt}><span class="edited"> · edited</span></Show>
           <Show when={p.m.state === 3}><span class="err"> · Not sent</span></Show>

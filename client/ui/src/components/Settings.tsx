@@ -3,7 +3,7 @@
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { call } from "../ipc";
 import { s, toast } from "../store";
-import { applyScale, prefs, SCALES, setPrefs } from "../prefs";
+import { applyOverlayKeys, applyScale, prefs, SCALES, setPrefs } from "../prefs";
 import { ACTIONS, comboLabel, comboOf, RESERVED, type Action } from "../hotkeys";
 import { toAvatarBytes } from "./Avatar";
 
@@ -70,7 +70,7 @@ export default function Settings(p: { close: () => void }) {
     if (other) { hk[other] = ""; toast(`${comboLabel(combo)} moved from "${ACTIONS.find((x) => x.id === other)?.label}"`); }
     hk[a] = combo;
     setPrefs({ hotkeys: hk });
-    if (a === "overlay" || other === "overlay") call("overlay_hotkey", { combo: hk.overlay }).catch(err);
+    if ([a, other].some((x) => x === "overlay" || x === "overlayType")) applyOverlayKeys(prefs);
   };
   const setProc = (k: "aec" | "ns" | "agc") => {
     setPrefs({ [k]: !prefs[k] });
@@ -82,6 +82,7 @@ export default function Settings(p: { close: () => void }) {
       { label: "Picture", value: () => (s.user?.avatarV ? "Change" : "Upload"), step: () => fileInput.click() },
       { label: "Remove picture", value: () => (s.user?.avatarV ? "Remove" : "—"), step: (d) => { if (d === 0 && s.user?.avatarV) call("set_avatar", { data: [] }).catch(err); } },
       { label: "Name", value: () => s.user?.name ?? "", step: () => {} },
+      { label: "Show what I'm playing", value: () => onOff(prefs.showActivity), step: () => { setPrefs({ showActivity: !prefs.showActivity }); call("activity_sharing", { enabled: prefs.showActivity }).catch(err); } },
     ] },
     { name: "Audio", opts: [
       { label: "Microphone", value: () => deviceName(true), step: (d) => cycleDevice(true, d) },

@@ -21,19 +21,23 @@ export interface Prefs {
   scale: number;
   /** action → key combo ("Ctrl+Alt+ArrowDown"); "" = unbound. */
   hotkeys: Record<Action, string>;
+  /** Tell others which game you're playing. */
+  showActivity: boolean;
+  /** user id → voice volume in percent (0–200; missing = 100). */
+  userVolumes: Record<string, number>;
 }
 
 export const DEFAULT_PREFS: Prefs = {
   sounds: true, ptt: false, pttKey: 0, aec: true, ns: true, agc: true,
   game: "wordle", recentEmoji: [], lastServer: null, lastChannel: {},
-  scale: 1, hotkeys: { ...DEFAULT_HOTKEYS },
+  scale: 1, hotkeys: { ...DEFAULT_HOTKEYS }, showActivity: true, userVolumes: {},
 };
 
 export const SCALES = [0.8, 0.9, 1, 1.1, 1.25, 1.4, 1.5];
 
 /** Defaults + saved values; nested maps merge per key so new actions get defaults. */
 function withDefaults(p: Partial<Prefs>): Prefs {
-  return { ...DEFAULT_PREFS, ...p, hotkeys: { ...DEFAULT_HOTKEYS, ...(p.hotkeys ?? {}) }, lastChannel: { ...(p.lastChannel ?? {}) } };
+  return { ...DEFAULT_PREFS, ...p, hotkeys: { ...DEFAULT_HOTKEYS, ...(p.hotkeys ?? {}) }, lastChannel: { ...(p.lastChannel ?? {}) }, userVolumes: { ...(p.userVolumes ?? {}) } };
 }
 
 const CACHE_KEY = "prefs";
@@ -68,7 +72,13 @@ function applyToCore(p: Prefs) {
   call("audio_processing", { aec: p.aec, ns: p.ns, agc: p.agc }).catch(() => {});
   call("voice_ptt", { enabled: p.ptt, keyCode: p.pttKey }).catch(() => {});
   applyScale(p.scale);
-  call("overlay_hotkey", { combo: p.hotkeys.overlay ?? "" }).catch(() => {});
+  applyOverlayKeys(p);
+  call("activity_sharing", { enabled: p.showActivity }).catch(() => {});
+  for (const [userId, v] of Object.entries(p.userVolumes)) call("voice_volume", { userId, volume: v / 100 }).catch(() => {});
+}
+
+export function applyOverlayKeys(p: Prefs) {
+  call("overlay_hotkey", { combo: p.hotkeys.overlay ?? "", typeCombo: p.hotkeys.overlayType ?? "" }).catch(() => {});
 }
 
 /** Zoom the whole window (games view follows via its bounds). */

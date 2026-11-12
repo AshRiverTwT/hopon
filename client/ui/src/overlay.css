@@ -78,3 +78,4 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ov-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ov-voice li.muted .ov-name { color: var(--cream-55); }
 .ov-state { font-size: 11px; color: var(--cream-35); }
+.ov-input.typing { border-color: var(--hot); }

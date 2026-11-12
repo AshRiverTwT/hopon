@@ -1,4 +1,5 @@
 #![cfg_attr(not(feature = "voice"), allow(dead_code))]
+mod activity;
 mod cache;
 mod commands;
 mod core;
@@ -113,6 +114,8 @@ pub fn run() {
             commands::voice_mute,
             commands::voice_deafen,
             commands::voice_ptt,
+            commands::voice_volume,
+            commands::activity_sharing,
             commands::audio_processing,
             commands::audio_devices,
             commands::audio_set_device,
@@ -125,6 +128,7 @@ pub fn run() {
             games::open_url,
             overlay::overlay_hotkey,
             overlay::overlay_hide,
+            overlay::overlay_typing,
             overlay::overlay_context,
             commands::perf_painted,
             commands::perf_stats,

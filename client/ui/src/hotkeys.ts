@@ -5,7 +5,7 @@ export type Action =
   | "nextChannel" | "prevChannel" | "nextUnread" | "prevUnread"
   | "nextServer" | "prevServer"
   | "toggleMute" | "toggleDeafen" | "toggleGames" | "focusComposer"
-  | "zoomIn" | "zoomOut" | "zoomReset" | "overlay";
+  | "zoomIn" | "zoomOut" | "zoomReset" | "overlay" | "overlayType";
 
 export const ACTIONS: { id: Action; label: string }[] = [
   { id: "nextChannel", label: "Next channel" },
@@ -21,7 +21,8 @@ export const ACTIONS: { id: Action; label: string }[] = [
   { id: "zoomIn", label: "Zoom in" },
   { id: "zoomOut", label: "Zoom out" },
   { id: "zoomReset", label: "Reset zoom" },
-  { id: "overlay", label: "In-game overlay (works in games)" },
+  { id: "overlay", label: "In-game overlay: show / hide (works in games)" },
+  { id: "overlayType", label: "In-game overlay: type a message" },
 ];
 
 export const DEFAULT_HOTKEYS: Record<Action, string> = {
@@ -39,6 +40,7 @@ export const DEFAULT_HOTKEYS: Record<Action, string> = {
   zoomOut: "Ctrl+Minus",
   zoomReset: "Ctrl+Digit0",
   overlay: "Alt+Backquote",
+  overlayType: "Ctrl+Backquote",
 };
 
 const MODS = new Set(["ControlLeft", "ControlRight", "AltLeft", "AltRight", "ShiftLeft", "ShiftRight", "MetaLeft", "MetaRight"]);

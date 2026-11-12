@@ -147,3 +147,15 @@ export function preview(src: string, nameOf: (id: string) => string, max = 120):
     .trim();
   return flat.length > max ? flat.slice(0, max - 1) + "…" : flat;
 }
+
+const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Emoji_Modifier}|‍|️|⃣|\s)+$/u;
+const HAS_EMOJI = /\p{Extended_Pictographic}|\p{Regional_Indicator}/u;
+
+/** Message is only emoji (1–27 of them, no text): shown at 200 %. */
+export function jumboEmoji(text: string): boolean {
+  const t = text.trim();
+  // Digits, #, * are emoji components too: plain text must never qualify.
+  if (!t || t.length > 300 || /[0-9#*A-Za-z]/.test(t) || !EMOJI_ONLY.test(t) || !HAS_EMOJI.test(t)) return false;
+  const n = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(t.replace(/\s+/g, ""))].length;
+  return n <= 27;
+}

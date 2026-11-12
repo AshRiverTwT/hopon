@@ -16,6 +16,7 @@ import Settings from "./components/Settings";
 import PerfOverlay from "./components/PerfOverlay";
 import { AudioToggles, Status } from "./components/Corners";
 import GamesPanel from "./components/GamesPanel";
+import PeopleRail from "./components/PeopleRail";
 import { ServerSettingsSheet } from "./components/ServerSettings";
 import { InviteSheet, MembersSheet, NewChannelSheet, ServersSheet } from "./components/Sheets";
 
@@ -160,7 +161,7 @@ export default function App() {
                   </main>
                 </Match>
               </Switch>
-              <Show when={games()}><GamesPanel close={() => setGames(false)} /></Show>
+              <Show when={games()} fallback={<PeopleRail />}><GamesPanel close={() => setGames(false)} /></Show>
             </Show>
             <footer class="bottombar">
               <AudioToggles />

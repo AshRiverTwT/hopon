@@ -560,6 +560,29 @@ async fn main() -> Result<()> {
         ensure!(fa.call(C2S::Send { channel_id: text, content: String::new(), nonce: 77, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec!["klipy:nope".into()] }).await.is_err());
         Ok(())
     });
+    pass &= check!("activity: playing status relayed to co-members, in the snapshot, cleared", {
+        let (mut o, mut m, sid, _text, _voice, mid) = admin_setup(&url).await?;
+        let _ = wait_for(&mut o, |e| if let S2C::Message(x) = e { (x.author_id == SYSTEM_USER).then_some(()) } else { None }).await;
+        m.call(C2S::SetActivity { game: "VALORANT".into() }).await?;
+        let (u, g) = wait_for(&mut o, |e| if let S2C::Activity { user_id, game } = e { Some((*user_id, game.clone())) } else { None }).await?;
+        ensure!(u == mid && g == "VALORANT", "{u} {g}");
+        // Same value again: no event.
+        m.call(C2S::SetActivity { game: "VALORANT".into() }).await?;
+        ensure!(quiet(&mut o, 300, |e| matches!(e, S2C::Activity { .. })).await, "duplicate activity re-sent");
+        // Someone joining later sees it in their server snapshot.
+        let S2C::Invite { code, .. } = o.call(C2S::CreateInvite { server_id: sid }).await? else { bail!("invite") };
+        let mut c = Client::connect(&url).await?;
+        c.signup("act").await?;
+        let S2C::ServerJoined(sv) = c.call(C2S::JoinInvite { code }).await? else { bail!("join") };
+        ensure!(sv.activities.contains(&(mid, "VALORANT".to_string())), "snapshot {:?}", sv.activities);
+        m.call(C2S::SetActivity { game: "x".repeat(200) }).await?;
+        let g2 = wait_for(&mut o, |e| if let S2C::Activity { game, .. } = e { Some(game.clone()) } else { None }).await?;
+        ensure!(g2.chars().count() == MAX_ACTIVITY_CHARS, "not capped: {}", g2.len());
+        m.call(C2S::SetActivity { game: String::new() }).await?;
+        let g3 = wait_for(&mut o, |e| if let S2C::Activity { game, .. } = e { Some(game.clone()) } else { None }).await?;
+        ensure!(g3.is_empty(), "not cleared");
+        Ok(())
+    });
     pass &= check!("logout revokes the refresh token", {
         let mut c = Client::connect(&url).await?;
         let S2C::Authed { refresh_token, .. } = c.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("login") };

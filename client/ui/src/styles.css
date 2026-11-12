@@ -28,6 +28,8 @@
   --hot: #ff1b50;
   --gutter: 28px;
   --dial: 300px;
+  --rail: clamp(150px, 10vw, 240px);
+  --games: clamp(340px, 30vw, 440px);
   color-scheme: dark;
   font: 400 15px/1.5 "Inter Tight", "Segoe UI", system-ui, sans-serif;
   font-feature-settings: "ss01", "cv11";
@@ -108,9 +110,11 @@ label.check input { accent-color: var(--hot); width: 15px; height: 15px; }
 .frame {
   height: 100%;
   display: grid;
-  grid-template-columns: var(--dial) minmax(0, 1fr);
-  grid-template-rows: 76px minmax(0, 1fr) 76px;
-  grid-template-areas: "top top" "dial main" "bottom bottom";
+  grid-template-columns: var(--dial) minmax(0, 1fr) var(--rail);
+  grid-template-rows: 76px minmax(0, 1fr) 64px;
+  grid-template-areas: "top top top" "dial main rail" "bottom bottom bottom";
+  /* Games open: the chat slides left as the right column widens. */
+  transition: grid-template-columns 0.3s cubic-bezier(.2,.7,.2,1);
 }
 .topbar {
   grid-area: top; display: flex; align-items: center; gap: 16px;
@@ -120,7 +124,7 @@ label.check input { accent-color: var(--hot); width: 15px; height: 15px; }
 .topbar-right { margin-left: auto; display: flex; gap: 6px; }
 .bottombar {
   grid-area: bottom; display: flex; align-items: flex-end; justify-content: space-between;
-  padding: 0 var(--gutter) 22px;
+  padding: 0 var(--gutter) 16px;
 }
 
 /* ---------- rotary dial ---------- */
@@ -149,25 +153,30 @@ label.check input { accent-color: var(--hot); width: 15px; height: 15px; }
 /* ---------- main column ---------- */
 .main {
   grid-area: main; min-width: 0; display: flex; flex-direction: column;
-  padding: 8px var(--gutter) 0 0;
+  padding: 8px 20px 0 0;
 }
-.head { padding: 4px 0 18px; border-bottom: 1px solid var(--cream-10); max-width: 900px; }
+.head { padding: 4px 0 18px; border-bottom: 1px solid var(--cream-10); }
 .head .eyebrow { margin-bottom: 10px; }
 .empty-state { grid-column: 1 / -1; grid-row: 2; padding: 40px var(--gutter); display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 18px; }
 .empty-state .title { font-size: clamp(40px, 8vw, 110px); white-space: normal; }
 
 /* messages: an editorial column, no avatars */
-.messages { flex: 1; overflow-y: auto; overflow-anchor: none; contain: strict; max-width: 900px; scrollbar-width: thin; scrollbar-color: var(--cream-20) transparent; }
+.messages { flex: 1; overflow-y: auto; overflow-anchor: none; contain: strict; scrollbar-width: thin; scrollbar-color: var(--cream-20) transparent; }
 .messages::-webkit-scrollbar { width: 6px; }
 .messages::-webkit-scrollbar-thumb { background: var(--cream-20); border-radius: 3px; }
 .channel-start { position: absolute; top: -34px; left: 12px; }
 .msg {
-  position: relative; padding: 3px 120px 3px 12px; border-radius: 4px;
+  position: relative; padding: 3px 120px 3px 64px; border-radius: 4px;
   white-space: pre-wrap; overflow-wrap: anywhere; contain: layout style;
 }
 .msg.first { padding-top: 20px; }
 .msg:hover { background: var(--cream-05); }
-.meta { display: flex; gap: 10px; align-items: center; height: 32px; margin-bottom: 2px; }
+.meta { position: relative; display: flex; gap: 10px; align-items: baseline; height: 22px; margin-bottom: 0; }
+/* Avatar sits in the left gutter of its group; text never runs under it. */
+.meta .gutter-av { position: absolute; left: -52px; top: 2px; width: 40px; height: 40px; }
+.msg.first .body { min-height: 24px; }
+.msg .day-sep, .msg .new-sep { margin-left: -52px; }
+.body.jumbo { font-size: 32px; line-height: 1.25; }
 .author { font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #fff; }
 .time { font-size: 12px; color: var(--cream-55); font-variant-numeric: tabular-nums; }
 .body { font-size: 16px; line-height: 1.5; color: var(--cream); }
@@ -178,7 +187,7 @@ label.check input { accent-color: var(--hot); width: 15px; height: 15px; }
 .msg:hover .actions, .actions.open { display: flex; }
 textarea.edit { width: 100%; resize: none; background: transparent; border: 0; border-bottom: 1px solid var(--cream); outline: none; padding: 4px 0; color: var(--cream); }
 
-.composer { padding: 14px 0 0; max-width: 900px; }
+.composer { padding: 18px 0 0; }
 .typing { height: 18px; padding: 2px 12px 0; font-size: 12px; color: var(--cream-55); }
 .composer textarea {
   width: 100%; resize: none; background: transparent; border: 0; outline: none;
@@ -188,7 +197,7 @@ textarea.edit { width: 100%; resize: none; background: transparent; border: 0; b
 .composer textarea::placeholder { color: var(--cream-35); }
 
 /* voice stage */
-.stage { display: flex; flex-direction: column; gap: 28px; max-width: 900px; overflow-y: auto; }
+.stage { display: flex; flex-direction: column; gap: 28px; overflow-y: auto; }
 .stage .index { border-top: 0; }
 .people .index-name { gap: 14px; }
 .people .speaking .index-name { color: var(--cream); }
@@ -316,7 +325,7 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 
 /* ---------- games panel ---------- */
 .frame.with-games {
-  grid-template-columns: var(--dial) minmax(0, 1fr) clamp(340px, 30vw, 440px);
+  grid-template-columns: var(--dial) minmax(0, 1fr) var(--games);
   grid-template-areas: "top top top" "dial main games" "bottom bottom bottom";
 }
 .frame.with-games .empty-state { grid-column: 1 / 3; }
@@ -514,3 +523,26 @@ video.media { background: #000; }
 .sys { display: flex; align-items: baseline; gap: 10px; color: var(--cream-80); }
 .sys-mark { color: var(--hot); font-weight: 700; }
 .sys .time { margin-left: 4px; font-size: 12px; color: var(--cream-35); }
+
+/* ---------- people rail ---------- */
+.rail { grid-area: rail; min-width: 0; overflow-y: auto; padding: 14px 16px 0 6px; scrollbar-width: none; }
+.rail-head { margin: 0 0 10px 6px; }
+.rail ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.rail li { display: flex; align-items: center; gap: 10px; padding: 5px 6px; border-radius: 6px; min-width: 0; }
+.rail li:hover { background: var(--cream-05); }
+.rail li.off { opacity: 0.42; }
+.rail-av { position: relative; flex: none; display: inline-flex; }
+.rail li.speaking .avatar { outline: 2px solid var(--hot); outline-offset: 1px; }
+.rail-dot { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border-radius: 50%; background: #3fbf6f; border: 2px solid var(--ink); }
+.rail-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.rail-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--cream); }
+.rail-sub { font-size: 11.5px; color: var(--cream-55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rail-sub.game { color: var(--hot); white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* ---------- voice volume ---------- */
+.index-meta { display: inline-flex; align-items: center; gap: 14px; }
+.vol { display: inline-flex; align-items: center; gap: 8px; }
+.vol input[type=range] { -webkit-appearance: none; appearance: none; width: 130px; height: 4px; border-radius: 2px; cursor: pointer;
+  background: linear-gradient(90deg, var(--hot) var(--pct), var(--cream-20) var(--pct)); }
+.vol input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--cream); border: 0; }
+.vol-n { width: 40px; font-size: 12px; color: var(--cream-55); font-variant-numeric: tabular-nums; text-align: right; }

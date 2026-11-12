@@ -94,6 +94,7 @@ pub struct Core {
     reconnect: Notify,
     pub voice: crate::voice::Voice,
     pub games: crate::games::Games,
+    pub activity: crate::activity::Activity,
     /// Set once in `setup`.
     pub app: std::sync::OnceLock<tauri::AppHandle>,
 }
@@ -116,6 +117,7 @@ impl Core {
             reconnect: Notify::new(),
             voice: crate::voice::Voice::new(),
             games: crate::games::Games::new(),
+            activity: crate::activity::Activity::new(),
             app: std::sync::OnceLock::new(),
         })
     }
@@ -394,6 +396,7 @@ impl Core {
             self.clone().refresh_latest(ch);
         }
         self.voice.on_reconnect(self.clone());
+        crate::activity::Activity::resend(self.clone());
     }
 
     /// Fetch the latest page from the server and merge into the UI.
@@ -455,6 +458,16 @@ impl Core {
                 }
                 let ev = self.session_snapshot();
                 self.emit(ev);
+                crate::activity::Activity::start(self.clone());
+            }
+            S2C::Activity { user_id, game } => {
+                for sv in self.store.lock().servers.iter_mut() {
+                    sv.activities.retain(|(u, _)| u != user_id);
+                    if !game.is_empty() && sv.members.iter().any(|m| m.id == *user_id) {
+                        sv.activities.push((*user_id, game.clone()));
+                    }
+                }
+                self.emit(UiEvent::Activity { user_id: sid(*user_id), game: game.clone() });
             }
             S2C::Message(m) => {
                 let t_emit = now_us();
@@ -699,6 +712,7 @@ impl Core {
             }
             S2C::LoggedOut => {
                 *self.store.lock() = Store::default();
+                self.activity.current.lock().clear();
                 self.cache.kv_set("refresh", None);
                 let ev = self.session_snapshot();
                 self.emit(ev);

@@ -471,6 +471,19 @@ impl Session {
                 }
                 Ok(())
             }
+            C2S::SetActivity { game } => {
+                let game: String = game.trim().chars().filter(|c| !c.is_control()).take(MAX_ACTIVITY_CHARS).collect();
+                let changed = if game.is_empty() {
+                    self.st.activities.remove(&uid).is_some()
+                } else {
+                    self.st.activities.insert(uid, game.clone()).as_deref() != Some(game.as_str())
+                };
+                if changed {
+                    self.st.announce_activity(uid, &game);
+                }
+                self.send(req, S2C::Ok).await;
+                Ok(())
+            }
             C2S::AccessToken => {
                 let token = self.st.keys.access_token(uid, name);
                 self.send(req, S2C::AccessToken { token }).await;

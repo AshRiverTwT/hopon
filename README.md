@@ -63,7 +63,8 @@ results/     raw benchmark output (JSON lines)
   narrow for games and chat side by side.
 - **In-game overlay** (default **Alt+`**): a small chat for the channel you
   have open, plus who's in your voice room (glowing while they talk), over
-  your game. Press it again or Esc to go back to the game. Works over
+  your game. It never takes focus by itself; **Ctrl+`** (or a click) types,
+  Enter/Esc hands focus back to the game. Works over
   windowed and borderless games; exclusive-fullscreen games and games run as
   administrator can't be drawn over.
 - **Hotkeys** (Settings → Hotkeys, all rebindable): next/previous channel
@@ -71,6 +72,13 @@ results/     raw benchmark output (JSON lines)
   (Ctrl+Alt+↓/↑), mute (Ctrl+Shift+M), deafen (Ctrl+Shift+D), games
   (Ctrl+G), message box (Ctrl+T), zoom (Ctrl + / − / 0), overlay.
 - **Scale** (Settings → Display): 80–150 %.
+- **People column** on the right with **"Playing <game>"** for a fixed list
+  of popular games (read from running program names only: no game process
+  is opened, hooked or injected, so it's safe with anti-cheat). Can be
+  turned off in Settings → Profile.
+- **Per-person voice volume** 0–200 % (in the voice room). This uses one
+  WebRTC call LiveKit's Rust SDK doesn't expose, added via the patched
+  crates in `vendor/` (see `vendor/README.md`).
 
 **Not in this version:** per-user voice volume, message search.
 

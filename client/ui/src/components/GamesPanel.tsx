@@ -25,7 +25,10 @@ export default function GamesPanel(p: { close: () => void }) {
   createEffect(on(() => s.selServer, (id) => { if (id) call("games_server", { serverId: id }).catch(() => {}); }, { defer: true }));
   createEffect(on(() => prefs.scale, () => requestAnimationFrame(() => call("games_bounds", rect()).catch(() => {})), { defer: true }));
   onMount(() => {
-    requestAnimationFrame(() => open(game()));
+    // The column slides open first; the native game view (drawn on top of the
+    // page, positioned over IPC) appears once it has settled.
+    const t = window.setTimeout(() => open(game()), 340);
+    onCleanup(() => clearTimeout(t));
     let raf = 0;
     const ro = new ResizeObserver(() => {
       cancelAnimationFrame(raf);

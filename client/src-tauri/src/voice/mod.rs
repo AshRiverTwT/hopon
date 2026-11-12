@@ -57,7 +57,15 @@ pub struct Voice {
     prefs: Mutex<Prefs>,
     /// Pre-fetched grants: channel → (url, token, fetched_at_s).
     grants: Mutex<HashMap<Id, (String, String, i64)>>,
+    /// Per-person playout volume (user id → gain, 1.0 = unchanged, max 2.0).
+    volumes: Mutex<HashMap<String, f64>>,
     pub ptt: Ptt,
+}
+
+fn apply_volume(track: &RemoteTrack, v: f64) {
+    if let RemoteTrack::Audio(a) = track {
+        a.rtc_track().set_volume(v);
+    }
 }
 
 #[derive(Serialize)]
@@ -102,6 +110,7 @@ impl Voice {
             audio: Mutex::new(None),
             prefs: Mutex::new(Prefs::new()),
             grants: Mutex::new(HashMap::new()),
+            volumes: Mutex::new(HashMap::new()),
             ptt: Ptt::new(),
         }
     }
@@ -249,7 +258,11 @@ impl Voice {
                 let mut first_track = true;
                 while let Some(ev) = events.recv().await {
                     match ev {
-                        RoomEvent::TrackSubscribed { publication, .. } => {
+                        RoomEvent::TrackSubscribed { publication, track, participant } => {
+                            let v = core.voice.volumes.lock().get(participant.identity().as_str()).copied();
+                            if let Some(v) = v {
+                                apply_volume(&track, v);
+                            }
                             if first_track {
                                 first_track = false;
                                 core.perf.rec(H::VoiceRemoteSubscribed, now_us() - t_click);
@@ -357,6 +370,25 @@ impl Voice {
             }
         }
         self.apply_transmit(core, true).await;
+    }
+
+    /// Volume for one person (0.0 – 2.0). Remembered for later joins and
+    /// applied to whatever of theirs is playing now.
+    pub async fn set_volume(&self, user: String, v: f64) {
+        let v = v.clamp(0.0, 2.0);
+        self.volumes.lock().insert(user.clone(), v);
+        if let Some(a) = self.active.lock().await.as_ref() {
+            for (_, part) in a.room.remote_participants() {
+                if part.identity().as_str() != user {
+                    continue;
+                }
+                for (_, publication) in part.track_publications() {
+                    if let Some(t) = publication.track() {
+                        apply_volume(&t, v);
+                    }
+                }
+            }
+        }
     }
 
     pub async fn set_ptt(&self, core: &Arc<Core>, enabled: bool, vk: u32) {

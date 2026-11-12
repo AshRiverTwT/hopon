@@ -2,6 +2,43 @@
 
 **Download the latest:** [HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe)
 
+## HopOn 0.3.0
+
+**Update the app and the server together** (new protocol again: a 0.2 app
+shows *Update needed* on a 0.3 server).
+
+### New
+
+- **People column.** Everyone in the server on the right, online first, with
+  **"Playing VALORANT"** (or whatever game they're in) under their name. It
+  makes room for the games panel when you open it.
+- **Per-person volume, 0–200 %.** In a voice room, each person has a slider
+  (double-click resets to 100 %). Remembered per person on your account.
+- **Show what I'm playing** can be switched off in Settings → Profile.
+
+### Changed
+
+- **Overlay no longer takes focus from the game**, so fullscreen games
+  don't minimize when it appears. To type, press **Ctrl+`** (or click the
+  box); Enter sends and Esc cancels, and both put you straight back in the
+  game. **Alt+`** still shows/hides it.
+- **Chat uses the full width** (small margin on the right). Opening Games
+  slides the chat left; closing slides it back.
+- **Avatars sit in their own column**: messages line up with the name and
+  never run under the picture.
+- **Emoji-only messages show at 200 %.**
+- The message box sits a little lower.
+
+### Known issues
+
+- Overlay and fullscreen: it's shown over **borderless / windowed
+  fullscreen** games. A game in true exclusive fullscreen may not show it,
+  and typing (which needs focus) will minimize such a game. In VALORANT,
+  use *Windowed Fullscreen* (Settings → Video → Display Mode).
+- "Playing …" recognises a fixed list of popular games (VALORANT, League,
+  CS2, Fortnite, Apex, Overwatch 2, Marvel Rivals, Rocket League, Dota 2,
+  GTA V, Minecraft (Bedrock), Roblox, and more), not every game.
+
 ## HopOn 0.2.0
 
 **Update the app and the server together.** 0.2.0 uses a new protocol: a

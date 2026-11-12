@@ -3,7 +3,7 @@ resolver = "2"
 members = ["shared", "server", "bench", "client/src-tauri"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 
@@ -31,3 +31,9 @@ panic = "abort"
 # Fast iteration for dev builds of heavy deps.
 [profile.dev.package."*"]
 opt-level = 2
+
+# Per-person voice volume needs one call LiveKit's SDK doesn't expose yet
+# (see vendor/README.md).
+[patch.crates-io]
+webrtc-sys = { path = "vendor/webrtc-sys" }
+libwebrtc = { path = "vendor/libwebrtc" }

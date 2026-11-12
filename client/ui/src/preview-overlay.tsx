@@ -5,7 +5,7 @@ import type { Msg, Server } from "./types";
 const names = ["ash", "mira", "jun", "tobias", "nell"];
 const members = names.map((n, i) => ({ id: String(1001 + i), name: n, avatarV: 1 }));
 const server: Server = {
-  id: "9001", name: "Night Shift", ownerId: "1001", members, reads: {}, online: ["1001", "1002", "1003"],
+  id: "9001", name: "Night Shift", ownerId: "1001", members, reads: {}, online: ["1001", "1002", "1003"], activities: {},
   channels: [{ id: "7001", serverId: "9001", name: "general", voice: false, topic: "", lastId: "0" }, { id: "7101", serverId: "9001", name: "Lounge", voice: true, topic: "", lastId: "0" }],
 };
 const t = Date.now();

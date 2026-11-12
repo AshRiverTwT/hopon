@@ -10,7 +10,7 @@ const names = ["ash", "mira", "jun", "tobias", "nell", "kaito", "rosa", "ezra"];
 const members = names.map((n, i) => ({ id: String(1001 + i), name: n, avatarV: i % 3 === 2 ? 0 : 1 }));
 const server: Server = {
   id: "9001", name: "Night Shift", ownerId: new URLSearchParams(location.search).has("member") ? "1002" : "1001", members,
-  reads: { "7003": "1", "7001": "10001997" }, online: ["1001", "1002", "1003", "1005"],
+  reads: { "7003": "1", "7001": "10001997" }, online: ["1001", "1002", "1003", "1005"], activities: { "1002": "VALORANT", "1005": "Counter-Strike 2" },
   channels: [
     { id: "7001", serverId: "9001", name: "general", voice: false, topic: "Anything goes. Be kind.", lastId: "0" },
     { id: "7002", serverId: "9001", name: "design-crit", voice: false, topic: "", lastId: "0" },
@@ -50,6 +50,8 @@ hist.push({ id: "10002003", channelId: "7001", authorId: "1004", content: "", ed
   attachments: [{ id: "BBBBBBBBBBBBBBBBBBBBBB", name: "patch-notes-0.2.pdf", mime: "application/pdf", size: 1288490, width: 0, height: 0, url: "", preview: "" }] });
 hist.push({ id: "10002004", channelId: "7001", authorId: "1002", content: "", editedAt: null, ts: Date.now() - 30000, nonce: "", state: 2, replyTo: null, reactions: [],
   attachments: [{ id: "klipy:1", name: "cat dance", mime: "image/gif", size: 0, width: 320, height: 240, url: "https://media.example/cat.gif", preview: "" }] });
+hist.push({ id: "10002005", channelId: "7001", authorId: me.id, content: "😄", editedAt: null, ts: Date.now() - 20000, nonce: "", state: 2, replyTo: null, reactions: [], attachments: [] });
+hist.push({ id: "10002006", channelId: "7001", authorId: me.id, content: "hi", editedAt: null, ts: Date.now() - 19000, nonce: "", state: 2, replyTo: null, reactions: [], attachments: [] });
 hist.push({ id: "p1", channelId: "7001", authorId: me.id, content: "this one is still sending", editedAt: null, ts: Date.now(), nonce: "1", state: 0, replyTo: null, reactions: [], attachments: [] });
 hist.push({ id: "p2", channelId: "7001", authorId: me.id, content: "and this one failed", editedAt: null, ts: Date.now(), nonce: "2", state: 3, replyTo: null, reactions: [], attachments: [] });
 

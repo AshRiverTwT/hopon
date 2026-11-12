@@ -266,6 +266,12 @@ function apply(e: UiEvent, painted: string[]) {
     case "userPresence":
       set("online", e.userId, e.online);
       break;
+    case "activity":
+      s.servers.forEach((sv, i) => {
+        if (!sv.members.some((m) => m.id === e.userId)) return;
+        set("servers", i, "activities", produce((a: Record<string, string>) => { if (e.game) a[e.userId] = e.game; else delete a[e.userId]; }));
+      });
+      break;
     case "serverRemoved": {
       const name = s.servers.find((x) => x.id === e.serverId)?.name ?? "the server";
       set("servers", (l) => l.filter((x) => x.id !== e.serverId));

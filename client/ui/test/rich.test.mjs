@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-const { parse, encodeMentions, decodeMentions, preview, mentionsUser } = await import("../src/rich.ts");
+const { parse, encodeMentions, decodeMentions, preview, mentionsUser, jumboEmoji } = await import("../src/rich.ts");
 
 const flat = (nodes) => nodes.map((n) => (n.t === "text" ? n.v : n.t === "link" ? `[${n.v}]` : n.t === "mention" ? `@${n.id}` : n.t === "code" ? `\`${n.v}\`` : n.t === "pre" ? `<pre>${n.v}</pre>` : `<${n.t}>${flat(n.c)}</${n.t}>`)).join("");
 
@@ -66,4 +66,19 @@ test("emoji search", async () => {
   const all = CATEGORIES.flatMap((c) => c.list.map((x) => x.e));
   assert.equal(new Set(all).size, all.length - (all.length - new Set(all).size), "parsed");
   assert.ok(all.length > 300, `only ${all.length}`);
+});
+
+test("jumbo emoji: emoji-only messages", () => {
+  assert.equal(jumboEmoji("😄"), true);
+  assert.equal(jumboEmoji("  🔥🔥 "), true);
+  assert.equal(jumboEmoji("👍🏽"), true, "skin tone");
+  assert.equal(jumboEmoji("👨‍👩‍👧‍👦"), true, "ZWJ family");
+  assert.equal(jumboEmoji("🇮🇳"), true, "flag");
+  assert.equal(jumboEmoji("❤️"), true, "variation selector");
+  assert.equal(jumboEmoji("hi 😄"), false);
+  assert.equal(jumboEmoji("123"), false, "digits are emoji components but not emoji");
+  assert.equal(jumboEmoji("#"), false);
+  assert.equal(jumboEmoji(""), false);
+  assert.equal(jumboEmoji("😄".repeat(28)), false, "too many");
+  assert.equal(jumboEmoji("😄".repeat(27)), true);
 });

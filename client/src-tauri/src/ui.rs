@@ -52,6 +52,8 @@ pub struct UiServer {
     /// channel id → last read message id.
     pub reads: std::collections::HashMap<String, String>,
     pub online: Vec<String>,
+    /// user → game they're playing.
+    pub activities: std::collections::HashMap<String, String>,
 }
 impl From<&ServerInfo> for UiServer {
     fn from(s: &ServerInfo) -> Self {
@@ -63,6 +65,7 @@ impl From<&ServerInfo> for UiServer {
             members: s.members.iter().map(Into::into).collect(),
             reads: s.reads.iter().map(|(c, r)| (sid(*c), sid(*r))).collect(),
             online: s.online.iter().map(|u| sid(*u)).collect(),
+            activities: s.activities.iter().map(|(u, g)| (sid(*u), g.clone())).collect(),
         }
     }
 }
@@ -149,6 +152,8 @@ pub enum UiEvent {
     /// A message in this channel mentions you.
     Mentioned { channel_id: String },
     UserPresence { user_id: String, online: bool },
+    /// A member started/stopped playing ("" = stopped).
+    Activity { user_id: String, game: String },
     /// New or updated messages (merge by `id`, replacing pending by `nonce`).
     Messages { channel_id: String, msgs: Vec<UiMsg> },
     MsgState { channel_id: String, nonce: String, id: String, state: u8 },

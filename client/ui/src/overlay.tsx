@@ -1,12 +1,17 @@
 // In-game overlay page (its own window, created on the hotkey and destroyed
 // when hidden). Mini chat for the channel open in the main window, plus who's
-// in your voice room; a speaker's square glows. Esc returns to the game.
+// in your voice room; a speaker's square glows.
+//
+// It appears without taking focus, so the game keeps running fullscreen.
+// Typing is explicit: the "type" hotkey or clicking the box takes focus;
+// Enter sends and Esc cancels, both handing focus back to the game.
 //
 // Deliberately does NOT run the main store's event handling (that would
 // replay chimes, open channels and apply prefs a second time). It only
 // borrows the store's user/server lists so names and avatars resolve.
 import { render } from "solid-js/web";
-import { createMemo, For, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { listen } from "@tauri-apps/api/event";
 import { createStore, reconcile } from "solid-js/store";
 import { call, now, randomNonce, subscribe } from "./ipc";
 import { set as setMain, userName } from "./store";
@@ -81,6 +86,9 @@ function Overlay() {
   const voiceName = createMemo(() => o.servers.flatMap((sv) => sv.channels).find((c) => c.id === o.voiceCh)?.name);
   const inVoice = createMemo(() => Object.values(o.presence).filter((p) => p.channelId && p.channelId === o.voiceCh));
   const close = (refocus: boolean) => call("overlay_hide", { refocus }).catch(() => {});
+  const [typing, setTyping] = createSignal(false);
+  const startTyping = () => { if (!typing()) call("overlay_typing", { on: true }).catch(() => {}); };
+  const stopTyping = () => { if (typing()) { setTyping(false); call("overlay_typing", { on: false }).catch(() => {}); } };
 
   const send = () => {
     const ch = o.channelId;
@@ -89,6 +97,7 @@ function Overlay() {
     if (!ch || !text) return;
     call("send_message", { channelId: ch, content: text, nonce: randomNonce(), tInputMs: now(), replyTo: null }).catch(() => {});
     ta.value = "";
+    stopTyping();
   };
 
   onMount(() => {
@@ -97,17 +106,21 @@ function Overlay() {
       set({ channelId: c.channelId, msgs: c.msgs.slice(-KEEP) });
       requestAnimationFrame(() => (list.scrollTop = list.scrollHeight));
     }).catch(() => {});
-    ta.focus();
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); close(true); } };
-    // Clicked another window (e.g. back into the game with the mouse): go away.
-    let focused = false;
-    const onFocus = () => (focused = true);
-    const onBlur = () => setTimeout(() => { if (focused && !document.hasFocus()) close(false); }, 120);
+    const un = listen<boolean>("overlay-typing", (e) => {
+      setTyping(e.payload);
+      if (e.payload) requestAnimationFrame(() => { window.focus(); ta.focus(); });
+      else ta.blur();
+    });
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      if (typing()) stopTyping(); else close(true);
+    };
+    // Clicked back into the game while typing: stop typing (overlay stays up).
+    const onBlur = () => setTimeout(() => { if (typing() && !document.hasFocus()) stopTyping(); }, 120);
     window.addEventListener("keydown", key);
-    window.addEventListener("focus", onFocus);
     window.addEventListener("blur", onBlur);
-    if (document.hasFocus()) focused = true;
-    onCleanup(() => { window.removeEventListener("keydown", key); window.removeEventListener("focus", onFocus); window.removeEventListener("blur", onBlur); });
+    onCleanup(() => { un.then((f) => f()); window.removeEventListener("keydown", key); window.removeEventListener("blur", onBlur); });
   });
 
   // Stick to the newest message.
@@ -120,7 +133,7 @@ function Overlay() {
           <span class="ov-mark">H</span>
           <span class="ov-title">{channel() ? `# ${channel()!.c.name}` : "No channel open"}</span>
           <span class="ov-sub">{channel()?.sv.name}</span>
-          <span class="ov-hint">{comboLabel(prefs.hotkeys.overlay)} or Esc to return</span>
+          <span class="ov-hint">{typing() ? "Enter to send · Esc to cancel" : `${comboLabel(prefs.hotkeys.overlayType)} to type · ${comboLabel(prefs.hotkeys.overlay)} to hide`}</span>
         </header>
         <div class="ov-msgs" ref={list}>
           <For each={o.msgs}>
@@ -140,8 +153,9 @@ function Overlay() {
             }}
           </For>
         </div>
-        <textarea ref={ta} class="ov-input" rows={1} maxLength={4000} placeholder={channel() ? `Message #${channel()!.c.name}` : ""}
-          disabled={!channel()} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } }} />
+        <textarea ref={ta} class="ov-input" classList={{ typing: typing() }} rows={1} maxLength={4000}
+          placeholder={channel() ? (typing() ? `Message #${channel()!.c.name}` : `Press ${comboLabel(prefs.hotkeys.overlayType)} or click to type`) : ""}
+          disabled={!channel()} onMouseDown={startTyping} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } }} />
       </section>
       <Show when={o.voiceCh}>
         <aside class="ov-voice">

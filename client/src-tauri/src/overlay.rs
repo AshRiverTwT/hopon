@@ -1,6 +1,11 @@
 //! In-game overlay: a global hotkey shows a small always-on-top window in the
 //! bottom-right of the monitor the game is on (mini chat + who's in voice).
-//! Pressing it again closes it and gives focus back to the game.
+//!
+//! It is shown WITHOUT taking focus (no activation, WS_EX_NOACTIVATE): the game
+//! keeps keyboard and mouse, so fullscreen games don't minimize. Typing is a
+//! separate step (the "type" hotkey, or clicking the message box), which does
+//! take focus; Enter/Esc hands focus back to the game. The main hotkey again
+//! closes the overlay.
 //!
 //! - The hotkey uses RegisterHotKey on its own thread (Windows tells us about
 //!   that one combination; no keystrokes are observed), which also gives us
@@ -13,7 +18,7 @@
 use crate::core::{Core, Res};
 use crate::ui::UiMsg;
 use std::sync::Arc;
-use tauri::{Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
 
 const LABEL: &str = "overlay";
 /// Logical size of the overlay window.
@@ -63,18 +68,47 @@ fn show(app: &tauri::AppHandle) -> Res<()> {
         .skip_taskbar(true)
         .resizable(false)
         .visible(false)
-        .focused(true)
+        .focused(false)
+        .focusable(false)
         .build()
         .map_err(|e| e.to_string())?;
     win.set_size(PhysicalSize::new(w, h)).map_err(|e| e.to_string())?;
     win.set_position(PhysicalPosition::new(x, y)).map_err(|e| e.to_string())?;
+    // Shown without activation: the game keeps focus.
     win.show().map_err(|e| e.to_string())?;
-    let _ = win.set_focus();
+    platform::type_hotkey(true);
+    Ok(())
+}
+
+/// Enter or leave typing mode. Entering takes focus (a game in exclusive
+/// fullscreen may minimize then); leaving hands focus back to the game.
+fn set_typing(app: &tauri::AppHandle, on: bool) {
+    let Some(win) = app.get_webview_window(LABEL) else { return };
+    if on {
+        let _ = win.set_focusable(true);
+        let _ = win.set_focus();
+        let _ = win.emit("overlay-typing", true);
+    } else {
+        let _ = win.emit("overlay-typing", false);
+        let _ = win.set_focusable(false);
+        platform::focus(*PREV_FOREGROUND.lock());
+    }
+}
+
+/// The "type in overlay" hotkey (only registered while the overlay is up).
+pub fn type_pressed(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move { set_typing(&app, true) });
+}
+
+#[tauri::command]
+pub async fn overlay_typing(app: tauri::AppHandle, on: bool) -> Res<()> {
+    set_typing(&app, on);
     Ok(())
 }
 
 /// `refocus`: give focus back to the game (not when the user clicked elsewhere).
 fn hide(app: &tauri::AppHandle, refocus: bool) {
+    platform::type_hotkey(false);
     if let Some(core) = app.try_state::<Arc<Core>>() {
         core.detach_ui(LABEL);
     }
@@ -87,10 +121,10 @@ fn hide(app: &tauri::AppHandle, refocus: bool) {
     }
 }
 
-/// Combo changed in Settings ("" disables the overlay).
+/// Combos changed in Settings ("" disables the overlay / typing key).
 #[tauri::command]
-pub fn overlay_hotkey(app: tauri::AppHandle, combo: String) -> Res<()> {
-    platform::set_hotkey(app, &combo)
+pub fn overlay_hotkey(app: tauri::AppHandle, combo: String, type_combo: Option<String>) -> Res<()> {
+    platform::set_hotkey(app, &combo, type_combo.as_deref().unwrap_or(""))
 }
 
 /// Close from inside the overlay: Esc (`refocus`: back to the game) or the
@@ -193,16 +227,28 @@ mod platform {
     };
 
     const HOTKEY_ID: i32 = 0x484f; // "HO"
+    const TYPE_ID: i32 = 0x4854; // "HT"
     const WM_REREGISTER: u32 = WM_APP + 7;
+    const WM_TYPE_ON: u32 = WM_APP + 8;
+    const WM_TYPE_OFF: u32 = WM_APP + 9;
 
     struct Hot {
         thread: u32,
         combo: Mutex<String>,
+        type_combo: Mutex<String>,
         app: Mutex<Option<tauri::AppHandle>>,
     }
     static HOT: OnceLock<Hot> = OnceLock::new();
 
-    pub fn set_hotkey(app: tauri::AppHandle, combo: &str) -> Res<()> {
+    /// The typing key only exists while the overlay is up, so it never
+    /// steals that combination from other apps the rest of the time.
+    pub fn type_hotkey(on: bool) {
+        if let Some(h) = HOT.get() {
+            unsafe { PostThreadMessageW(h.thread, if on { WM_TYPE_ON } else { WM_TYPE_OFF }, 0, 0) };
+        }
+    }
+
+    pub fn set_hotkey(app: tauri::AppHandle, combo: &str, type_combo: &str) -> Res<()> {
         if !combo.is_empty() && parse_combo(combo).is_none() {
             return Err("that key can't be used for the overlay".into());
         }
@@ -212,10 +258,11 @@ mod platform {
                 .name("hopon-hotkey".into())
                 .spawn(move || run(tx))
                 .expect("hotkey thread");
-            Hot { thread: rx.recv().unwrap_or(0), combo: Mutex::new(String::new()), app: Mutex::new(None) }
+            Hot { thread: rx.recv().unwrap_or(0), combo: Mutex::new(String::new()), type_combo: Mutex::new(String::new()), app: Mutex::new(None) }
         });
         *hot.app.lock() = Some(app);
         *hot.combo.lock() = combo.to_owned();
+        *hot.type_combo.lock() = type_combo.to_owned();
         unsafe { PostThreadMessageW(hot.thread, WM_REREGISTER, 0, 0) };
         Ok(())
     }
@@ -227,6 +274,7 @@ mod platform {
             windows_sys::Win32::UI::WindowsAndMessaging::PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, 0);
             let _ = tx.send(GetCurrentThreadId());
             let mut registered = false;
+            let mut type_registered = false;
             while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
                 let Some(hot) = HOT.get() else { continue };
                 match msg.message {
@@ -243,9 +291,27 @@ mod platform {
                             }
                         }
                     }
+                    WM_TYPE_ON => {
+                        if !type_registered {
+                            if let Some((mods, vk)) = parse_combo(&hot.type_combo.lock().clone()) {
+                                type_registered = RegisterHotKey(std::ptr::null_mut(), TYPE_ID, mods | MOD_NOREPEAT, vk) != 0;
+                            }
+                        }
+                    }
+                    WM_TYPE_OFF => {
+                        if type_registered {
+                            UnregisterHotKey(std::ptr::null_mut(), TYPE_ID);
+                            type_registered = false;
+                        }
+                    }
                     WM_HOTKEY if msg.wParam as i32 == HOTKEY_ID => {
                         if let Some(app) = hot.app.lock().clone() {
                             super::toggle(app);
+                        }
+                    }
+                    WM_HOTKEY if msg.wParam as i32 == TYPE_ID => {
+                        if let Some(app) = hot.app.lock().clone() {
+                            super::type_pressed(app);
                         }
                     }
                     _ => {}
@@ -285,9 +351,10 @@ mod platform {
 #[cfg(not(windows))]
 mod platform {
     use crate::core::Res;
-    pub fn set_hotkey(_app: tauri::AppHandle, _combo: &str) -> Res<()> {
+    pub fn set_hotkey(_app: tauri::AppHandle, _combo: &str, _type_combo: &str) -> Res<()> {
         Ok(())
     }
+    pub fn type_hotkey(_on: bool) {}
     pub fn foreground() -> isize {
         0
     }
