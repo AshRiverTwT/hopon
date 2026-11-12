@@ -1,6 +1,8 @@
 // Voice room view: who is here, who is speaking, join / leave.
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { attachLocalPreview, QUALITIES, screen, setScreen, startShare, stopShare, unwatch, watch, type Quality } from "../screen";
+import { createSignal, For, Show } from "solid-js";
+import { attachLocalPreview, QUALITIES, screen, SELF, setFullscreen, setScreen, startShare, stopShare, viewerCount, watch, type Quality } from "../screen";
+import { StreamTiles, Viewers } from "./Streams";
+import { FullIcon, PipIcon } from "./icons";
 import { call } from "../ipc";
 import { currentServer, s, toast, userName } from "../store";
 import { Avatar } from "./Avatar";
@@ -23,30 +25,11 @@ function VolumeSlider(p: { userId: string }) {
   );
 }
 
-/** One stream you're watching (big, with fullscreen). */
-function StreamTile(p: { userId: string }) {
-  let v!: HTMLVideoElement;
-  onMount(() => watch(p.userId, v));
-  onCleanup(() => unwatch(p.userId));
-  return (
-    <figure class="stream">
-      <video ref={v} autoplay playsinline />
-      <Show when={!screen.live[p.userId]}><div class="stream-wait muted">Connecting to {userName(p.userId)}'s stream…</div></Show>
-      <figcaption>
-        <span class="live-badge">LIVE</span> {userName(p.userId)}
-        <span class="stream-actions">
-          <button class="link" onClick={() => v.requestFullscreen?.().catch(() => {})}>Fullscreen</button>
-          <button class="link" onClick={() => unwatch(p.userId)}>Stop watching</button>
-        </span>
-      </figcaption>
-    </figure>
-  );
-}
-
 function ShareControls() {
   const [quality, setQuality] = createSignal<Quality>("1080p60");
   const [audio, setAudio] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
+  const [bigPreview, setBigPreview] = createSignal(false);
   let preview: HTMLVideoElement | undefined;
   const start = async () => {
     setBusy(true);
@@ -71,10 +54,17 @@ function ShareControls() {
       }>
         <div class="share-row">
           <span class="live-badge">LIVE</span>
-          <span>You're sharing your screen</span>
+          <span>You're sharing your screen{screen.sharingAudio ? " and sound" : ""}</span>
+          <Show when={s.user}><Viewers userId={s.user!.id} /></Show>
           <button class="pill" onClick={() => stopShare()}>Stop sharing</button>
         </div>
-        <video class="share-preview" ref={(el) => { preview = el; attachLocalPreview(el); }} autoplay playsinline muted />
+        <div class="share-preview" classList={{ big: bigPreview() }}>
+          <video ref={(el) => { preview = el; attachLocalPreview(el); }} autoplay playsinline muted onDblClick={() => setFullscreen(SELF)} />
+          <div class="preview-actions">
+            <button class="icon-btn" title={bigPreview() ? "Smaller preview" : "Bigger preview"} aria-label="Preview size" onClick={() => setBigPreview((v) => !v)}><PipIcon /></button>
+            <button class="icon-btn" title="View your screen fullscreen" aria-label="Fullscreen" onClick={() => setFullscreen(SELF)}><FullIcon /></button>
+          </div>
+        </div>
       </Show>
     </div>
   );
@@ -87,8 +77,7 @@ export default function Stage() {
   const join = () => { openAudio(); return call("voice_join", { channelId: s.stage }); };
   const joinNow = () => join().catch((e) => toast(String(e)));
   const leave = () => call("voice_leave").catch((e) => toast(String(e)));
-  // Adds a tile; the tile itself subscribes when it mounts.
-  const setWatching = (u: string) => setScreen("watching", (w) => (w.includes(u) ? w : [...w, u]));
+  const sharing = (u: string) => screen.shares.some((x) => x.userId === u) || (u === s.user?.id && screen.sharing);
   return (
     <section class="stage">
       <header class="head">
@@ -103,11 +92,11 @@ export default function Stage() {
                 <Avatar id={p.userId} size={40} class={s.speaking.includes(p.userId) ? "speaking" : ""} />
                 {userName(p.userId)}
                 <Show when={s.speaking.includes(p.userId)}><span class="live-dot" /></Show>
-                <Show when={screen.shares.some((x) => x.userId === p.userId) || (p.userId === s.user?.id && screen.sharing)}><span class="live-badge">LIVE</span></Show>
+                <Show when={sharing(p.userId)}><span class="live-badge">LIVE</span><Show when={viewerCount(p.userId)}><Viewers userId={p.userId} /></Show></Show>
               </span>
               <span class="index-meta">
                 <Show when={joined() && screen.shares.some((x) => x.userId === p.userId) && !screen.watching.includes(p.userId)}>
-                  <button class="pill" onClick={() => setWatching(p.userId)}>Watch</button>
+                  <button class="pill" onClick={() => watch(p.userId)}>Watch</button>
                 </Show>
                 {[p.muted && "Mic off", p.deafened && "Sound off"].filter(Boolean).join(" · ")}
                 <Show when={joined() && p.userId !== s.user?.id}><VolumeSlider userId={p.userId} /></Show>
@@ -117,7 +106,10 @@ export default function Stage() {
         </For>
       </ol>
       <Show when={joined()}>
-        <For each={screen.watching}>{(u) => <StreamTile userId={u} />}</For>
+        <StreamTiles />
+        <Show when={screen.popped && screen.watching.length}>
+          <p class="muted small">Playing in the mini player. <button class="link inline" onClick={() => setScreen("popped", false)}>Put it back here</button></p>
+        </Show>
         <ShareControls />
       </Show>
       <div class="stage-actions">

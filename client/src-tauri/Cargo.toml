@@ -40,6 +40,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 livekit = { version = "0.10", optional = true, features = ["rustls-tls-native-roots"] }
 
 [target.'cfg(windows)'.dependencies]
+# Message notifications (Windows toasts); the same crate Tauri's notification plugin uses.
+tauri-winrt-notification = "0.7"
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
   "Win32_Security_Cryptography",

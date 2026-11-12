@@ -7,6 +7,7 @@ import { chime, closeAudio } from "./sounds";
 import { encodeMentions } from "./rich";
 import { applyPrefs, prefs, resetPrefs, setPrefs } from "./prefs";
 import { loadMediaBase } from "./media";
+import { clearBanners, onMessages } from "./notify";
 
 /** The open channel holds at most this many messages in the DOM model. */
 const OPEN_CAP = 5000;
@@ -166,7 +167,18 @@ export function toast(m: string) {
 
 let queue: UiEvent[] = [];
 let scheduled = false;
+const notifyCtx = {
+  get me() { return s.user?.id ?? null; },
+  get openChannel() { return s.stage ? null : s.selChannel; },
+  channelName: (id: string) => s.servers.flatMap((x) => x.channels).find((c) => c.id === id)?.name ?? "channel",
+  serverName: (id: string) => s.servers.find((x) => x.channels.some((c) => c.id === id))?.name ?? "",
+  userName: (id: string) => userName(id),
+};
+
 export function onEvent(e: UiEvent) {
+  // Notifications are decided on arrival: the frame queue below doesn't run
+  // while the window is hidden (tray), and that's exactly when they matter.
+  if (e.t === "messages") onMessages(e.channelId, e.msgs, notifyCtx);
   queue.push(e);
   if (!scheduled) {
     scheduled = true;
@@ -357,6 +369,13 @@ function apply(e: UiEvent, painted: string[]) {
     case "speaking":
       set("speaking", e.userIds);
       break;
+    case "openChannel": {
+      // A Windows notification was clicked.
+      const id = e.channelId;
+      const sv = s.servers.find((x) => x.channels.some((c) => c.id === id));
+      if (sv) queueMicrotask(() => { if (s.selServer !== sv.id) selectServer(sv.id); if (s.selChannel !== id || s.stage) void selectChannel(id); });
+      break;
+    }
     case "error":
       toast(e.message);
       break;
@@ -380,6 +399,7 @@ export async function selectChannel(id: string) {
   batch(() => {
     set({ selChannel: id, stage: null, msgs: [], more: true, loadingOlder: false, editing: null, replyTo: null, jump: null, dividerAfter: s.reads[id] ?? null });
     set("mentions", id, 0);
+    clearBanners(id);
     const sv = s.servers.find((x) => x.channels.some((c) => c.id === id));
     if (sv && prefs.lastChannel[sv.id] !== id) setPrefs({ lastChannel: { ...prefs.lastChannel, [sv.id]: id } });
   });

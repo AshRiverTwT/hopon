@@ -164,6 +164,8 @@ pub enum UiEvent {
     Voice { channel_id: Option<String>, state: &'static str, muted: bool, deafened: bool, detail: Option<String> },
     /// Users currently speaking in the joined voice channel.
     Speaking { user_ids: Vec<String> },
+    /// A notification was clicked: show this channel.
+    OpenChannel { channel_id: String },
     #[allow(dead_code)]
     Error { message: String },
 }

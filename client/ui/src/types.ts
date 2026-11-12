@@ -43,6 +43,7 @@ export type UiEvent =
   | { t: "presence"; serverId: string; presence: Presence }
   | { t: "voice"; channelId: string | null; state: string; muted: boolean; deafened: boolean; detail: string | null }
   | { t: "speaking"; userIds: string[] }
+  | { t: "openChannel"; channelId: string }
   | { t: "error"; message: string };
 
 /** Compare decimal ID strings without BigInt allocation. */

@@ -6,6 +6,7 @@ mod core;
 mod games;
 mod overlay;
 mod guard;
+mod notify;
 mod perf;
 mod secure;
 mod sys;
@@ -122,6 +123,8 @@ pub fn run() {
             commands::activity_sharing,
             commands::screen_grant,
             tray::close_to_tray,
+            notify::notify,
+            notify::set_fullscreen,
             update::update_check,
             update::update_install,
             commands::audio_processing,

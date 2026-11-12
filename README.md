@@ -39,6 +39,9 @@ results/     raw benchmark output (JSON lines)
   separators and "jump to latest".
 - Online/offline presence. The app remembers your last server and channel.
 - Mentions flash the taskbar when the window is in the background.
+- Notifications: in-app banners for other channels, Windows notifications
+  while HopOn is in the background or tray (click opens the channel). Per
+  channel (bell by the name): all messages, only @mentions, or nothing.
 
 **Voice**
 - Join and leave, mute and deafen, device selection, push-to-talk.
@@ -76,8 +79,10 @@ results/     raw benchmark output (JSON lines)
   of popular games (read from running program names only: no game process
   is opened, hooked or injected, so it's safe with anti-cheat). Can be
   turned off in Settings → Profile.
-- **Screen share** at 1080p60 or 720p60 from the voice room, with Watch /
-  fullscreen for viewers. It runs in the webview with LiveKit's JS SDK
+- **Screen share** at 1080p60 or 720p60 from the voice room, with Watch,
+  fullscreen, a floating mini player that follows you out of the room, a
+  stream volume slider and a viewer count. Stream sound is stereo Opus at
+  192 kb/s with voice processing off. It runs in the webview with LiveKit's JS SDK
   (WebView2's hardware H.264), on its own connection (`<user>:screen`,
   screen sources only); the native voice connection subscribes to
   microphones only. Loaded on first use (155 KB gzipped).

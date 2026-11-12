@@ -27,19 +27,40 @@ export interface Prefs {
   userVolumes: Record<string, number>;
   /** Close button hides to the tray instead of quitting. */
   closeToTray: boolean;
+  /** Windows notifications while HopOn is in the background or in the tray. */
+  systemNotify: boolean;
+  /** In-app banners for messages in other channels while HopOn is open. */
+  appNotify: boolean;
+  /** Notification sound for banners / system notifications. */
+  notifySound: boolean;
+  /** channel id → what notifies (missing = "all" for text channels). */
+  channelNotify: Record<string, NotifyLevel>;
+  /** user id → screen-share audio volume in percent (0–100; missing = 100). */
+  streamVolumes: Record<string, number>;
+  /** Watched streams keep playing in a floating mini player when you leave the voice room. */
+  autoPip: boolean;
 }
+
+export type NotifyLevel = "all" | "mentions" | "none";
+export const NOTIFY_LEVELS: { id: NotifyLevel; label: string }[] = [
+  { id: "all", label: "All messages" },
+  { id: "mentions", label: "Only @mentions" },
+  { id: "none", label: "Nothing" },
+];
 
 export const DEFAULT_PREFS: Prefs = {
   sounds: true, ptt: false, pttKey: 0, aec: true, ns: true, agc: true,
   game: "wordle", recentEmoji: [], lastServer: null, lastChannel: {},
   scale: 1, hotkeys: { ...DEFAULT_HOTKEYS }, showActivity: true, userVolumes: {}, closeToTray: true,
+  systemNotify: true, appNotify: true, notifySound: true, channelNotify: {}, streamVolumes: {}, autoPip: true,
 };
 
 export const SCALES = [0.8, 0.9, 1, 1.1, 1.25, 1.4, 1.5];
 
 /** Defaults + saved values; nested maps merge per key so new actions get defaults. */
 function withDefaults(p: Partial<Prefs>): Prefs {
-  return { ...DEFAULT_PREFS, ...p, hotkeys: { ...DEFAULT_HOTKEYS, ...(p.hotkeys ?? {}) }, lastChannel: { ...(p.lastChannel ?? {}) }, userVolumes: { ...(p.userVolumes ?? {}) } };
+  return { ...DEFAULT_PREFS, ...p, hotkeys: { ...DEFAULT_HOTKEYS, ...(p.hotkeys ?? {}) }, lastChannel: { ...(p.lastChannel ?? {}) }, userVolumes: { ...(p.userVolumes ?? {}) },
+    channelNotify: { ...(p.channelNotify ?? {}) }, streamVolumes: { ...(p.streamVolumes ?? {}) } };
 }
 
 const CACHE_KEY = "prefs";

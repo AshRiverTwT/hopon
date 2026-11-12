@@ -1,15 +1,22 @@
 // Rotary channel dial. Channels sit on an arc around the server monogram; the
 // item under the cursor is in the pill. Wheel / arrow keys turn the dial, and
 // it settles on (selects) the channel under the cursor after a short pause.
-import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { currentServer, isUnread, s, selectChannel, showStage } from "../store";
 import type { Channel } from "../types";
 import { VoiceGlyph } from "./icons";
 
 const STEP_DEG = 11;
 const RADIUS = 300;
-const CENTER_X = -150;
 const VISIBLE = 6;
+
+/** The selected pill starts just right of the server monogram (measured, so
+ *  any initials fit) and the pills narrow with the column: nothing overlaps
+ *  or runs off the edge in a small window. */
+function geometry(w: number, monoRight: number) {
+  const x0 = Math.max(monoRight + 12, Math.min(150, w * 0.4));
+  return { centerX: x0 - RADIUS, maxW: Math.max(72, w - x0 - 8) };
+}
 
 type Item = { kind: "ch"; ch: Channel } | { kind: "new"; voice: boolean };
 
@@ -31,6 +38,17 @@ export default function Dial(p: { onNewChannel: (voice: boolean) => void; onServ
     return i < 0 ? 0 : i;
   };
   const [pos, setPos] = createSignal(0);
+  const [box, setBox] = createSignal({ w: 300, mono: 110 });
+  let nav!: HTMLElement;
+  let mono!: HTMLButtonElement;
+  onMount(() => {
+    const measure = () => setBox({ w: nav.clientWidth, mono: mono.offsetLeft + mono.offsetWidth });
+    const ro = new ResizeObserver(measure);
+    ro.observe(nav);
+    ro.observe(mono);
+    onCleanup(() => ro.disconnect());
+  });
+  const geo = createMemo(() => geometry(box().w, box().mono));
   createEffect(on(selectedIndex, (i) => setPos(i)));
 
   let settle = 0;
@@ -67,20 +85,21 @@ export default function Dial(p: { onNewChannel: (voice: boolean) => void; onServ
   const monogram = () => (sv()?.name ?? "").split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 3).toUpperCase() || "—";
 
   return (
-    <nav class="dial" onWheel={onWheel} onKeyDown={onKey} tabIndex={0} role="listbox" aria-label="Channels">
-      <button class="monogram display" title="Switch server" onClick={p.onServers}>{monogram()}</button>
+    <nav ref={nav} class="dial" onWheel={onWheel} onKeyDown={onKey} tabIndex={0} role="listbox" aria-label="Channels">
+      <button ref={mono} class="monogram display" title="Switch server" onClick={p.onServers}>{monogram()}</button>
       <For each={items()}>
         {(it, i) => {
           const off = () => i() - pos();
           const theta = () => off() * STEP_DEG;
           const style = () => {
             const r = (theta() * Math.PI) / 180;
-            const x = CENTER_X + RADIUS * Math.cos(r);
+            const x = geo().centerX + RADIUS * Math.cos(r);
             const y = RADIUS * Math.sin(r);
             return {
               transform: `translate(${x}px, calc(${y}px - 50%)) rotate(${theta()}deg)`,
               opacity: String(Math.max(0, 1 - Math.abs(off()) * 0.17)),
               visibility: Math.abs(off()) > VISIBLE ? "hidden" : "visible",
+              "max-width": `${geo().maxW}px`,
             } as const;
           };
           const label = () => {

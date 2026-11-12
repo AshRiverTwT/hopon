@@ -16,7 +16,7 @@ export default function PeopleRail() {
   const onlineCount = () => people().filter((p) => p.online).length;
   return (
     <aside class="rail" aria-label="People">
-      <div class="eyebrow rail-head">Online · {onlineCount()}</div>
+      <div class="eyebrow rail-head" title={`${onlineCount()} online`}><span class="rail-label">Online · </span>{onlineCount()}</div>
       <ul>
         <For each={people()}>
           {(p) => (

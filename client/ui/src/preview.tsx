@@ -97,7 +97,8 @@ onEvent({ t: "conn", state: "online", rttMs: 0.4 });
 onEvent({ t: "session", user, servers, voice });
 if (scene === "voice") {
   onEvent({ t: "voice", channelId: "7101", state: "connected", muted: false, deafened: false, detail: null });
-  import("./screen").then((m) => m.setScreen({ connected: true, shares: [{ userId: "1002", identity: "1002:screen" }] }));
+  import("./screen").then((m) => m.setScreen({ connected: true, shares: [{ userId: "1002", identity: "1002:screen", hasAudio: true }],
+    ...(new URLSearchParams(location.search).has("watch") ? { watching: ["1002"], live: { "1002": true }, viewers: { "1002": ["1001", "1004"] } } : {}) }));
   onEvent({ t: "speaking", userIds: ["1002"] });
 }
 if (scene === "chat") onEvent({ t: "messages", channelId: "7003", msgs: [{ ...hist[5], id: "99999999", channelId: "7003", authorId: "1003" }] });

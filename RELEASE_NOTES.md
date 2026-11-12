@@ -2,6 +2,48 @@
 
 **Download the latest:** [HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe)
 
+## HopOn 0.5.0
+
+**Update the server too** for viewer counts on screen shares (everything
+else works on a 0.4 server; the protocol is unchanged).
+
+### New
+
+- **Notifications.** Messages in other channels pop up as a small banner in
+  the top right (click to jump to the message). While HopOn is in the
+  background or in the tray you get **Windows notifications** instead; click
+  one to open the channel. Settings → Notifications switches Windows
+  notifications, in-app notifications and the notification sound on or off.
+- **Per-channel notifications.** The bell next to a channel's name: *All
+  messages*, *Only @mentions* or *Nothing*. Follows your account.
+- **Screen share mini player.** Leave the voice room (open a text channel,
+  switch servers) and the stream you're watching keeps playing in a floating
+  player you can drag and resize. Click it to go back to the room. The
+  **picture-in-picture** button pops it out by hand. Settings → Display →
+  *Mini player* turns the automatic one off.
+- **Fullscreen** for streams: the button (or double-click the picture) fills
+  the whole screen; Esc leaves. Your own stream's preview has it too, plus a
+  bigger-preview toggle.
+- **Stream volume** slider (0–100 %, remembered per person) when a stream
+  includes sound.
+- **Viewer count**: an eye with the number of people watching, next to LIVE,
+  on the stream and for your own stream (hover for names).
+
+### Better
+
+- **Screen share sound**: stereo at 192 kb/s with voice processing off, so
+  music and game audio come through clean (it was mono speech quality).
+
+### Fixed
+
+- Small or scaled windows: names and times no longer wrap over each other,
+  the channel dial, people column and top bar shrink to fit, and the chat
+  keeps a readable width.
+- Coming back to the voice room shows the stream straight away (no need to
+  press Watch again). Leaving the room no longer leaves you hearing a stream
+  you can't see.
+- The stream's control bar (Fullscreen, Stop watching) was cut off.
+
 ## HopOn 0.4.2
 
 - **One-click updates.** When a new version is out, an **Update to …**

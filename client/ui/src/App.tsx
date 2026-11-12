@@ -19,6 +19,8 @@ import GamesPanel from "./components/GamesPanel";
 import PeopleRail from "./components/PeopleRail";
 import { connectScreens, disconnectScreens } from "./screen";
 import UpdatePrompt from "./components/UpdatePrompt";
+import { FullStream, MiniPlayer } from "./components/Streams";
+import { Banners, ChannelBell } from "./components/Banners";
 import { installUpdate, startUpdateChecks, upd } from "./update";
 import { ServerSettingsSheet } from "./components/ServerSettings";
 import { InviteSheet, MembersSheet, NewChannelSheet, ServersSheet } from "./components/Sheets";
@@ -72,7 +74,7 @@ export default function App() {
   // Screen-share connection follows voice: up while connected, gone after.
   createEffect(() => {
     const ch = s.voice.channelId;
-    if (ch && s.voice.state === "connected") connectScreens(ch).catch((e) => toast(`Screen share unavailable: ${e}`));
+    if (ch && s.voice.state === "connected" && s.user) connectScreens(ch, s.user.id).catch((e) => toast(`Screen share unavailable: ${e}`));
     else if (!ch) void disconnectScreens();
   });
   onMount(() => {
@@ -137,12 +139,12 @@ export default function App() {
         <Show when={s.user} fallback={<Login />}>
           <div class="frame" classList={{ "with-games": games() && !!currentServer() }}>
             <header class="topbar">
-              <span class="wordmark"><span class="mark" aria-hidden="true">H</span>HopOn</span>
-              <button class="pill ghost" onClick={() => setSheet({ k: "servers" })}>{currentServer()?.name ?? "Servers"}</button>
+              <span class="wordmark"><span class="mark" aria-hidden="true">H</span><span class="wordmark-text">HopOn</span></span>
+              <button class="pill ghost" title={currentServer()?.name} onClick={() => setSheet({ k: "servers" })}>{currentServer()?.name ?? "Servers"}</button>
               <div class="topbar-right">
                 <Show when={currentServer()}>
                   <button class="pill ghost" onClick={() => setSheet({ k: "members" })}>People {currentServer()!.members.filter((m) => s.online[m.id]).length}/{currentServer()!.members.length}</button>
-                  <Show when={isOwner()}><button class="pill ghost" onClick={() => setSheet({ k: "server" })}>Server settings</button></Show>
+                  <Show when={isOwner()}><button class="pill ghost" onClick={() => setSheet({ k: "server" })}>Server<span class="long"> settings</span></button></Show>
                   <button class="pill ghost" onClick={invite}>Invite</button>
                   <button class="pill ghost" classList={{ active: games() }} onClick={() => setGames((v) => !v)}>Games</button>
                 </Show>
@@ -167,7 +169,10 @@ export default function App() {
                 <Match when={s.selChannel}>
                   <main class="main">
                     <header class="head">
-                      <h1 class="display title" title={channel()?.name}>{channel()?.name}</h1>
+                      <div class="head-row">
+                        <h1 class="display title" title={channel()?.name}>{channel()?.name}</h1>
+                        <ChannelBell channelId={s.selChannel!} />
+                      </div>
                       <Show when={channel()?.topic}><p class="topic">{channel()!.topic}</p></Show>
                     </header>
                     <MessageList />
@@ -177,7 +182,7 @@ export default function App() {
               </Switch>
               <Show when={games()} fallback={<PeopleRail />}><GamesPanel close={() => setGames(false)} /></Show>
             </Show>
-            <footer class="foot-l"><AudioToggles /></footer>
+            <footer class="foot-l"><Status compact /><AudioToggles /></footer>
             <footer class="foot-r"><Status /></footer>
           </div>
           <Switch>
@@ -190,6 +195,7 @@ export default function App() {
           </Switch>
         </Show>
       </Show>
+      <Show when={s.user}><MiniPlayer /><FullStream /><Banners /></Show>
       <Show when={perf()}><PerfOverlay close={() => setPerf(false)} /></Show>
       <UpdatePrompt />
       <Show when={dropping()}><div class="drop-hint"><span class="display">Drop to attach</span></div></Show>

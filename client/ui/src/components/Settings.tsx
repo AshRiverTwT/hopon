@@ -90,6 +90,12 @@ export default function Settings(p: { close: () => void }) {
       { label: "Output", value: () => deviceName(false), step: (d) => cycleDevice(false, d) },
       { label: "Join / leave sounds", value: () => onOff(prefs.sounds), step: () => setPrefs({ sounds: !prefs.sounds }) },
     ] },
+    { name: "Notifications", opts: [
+      { label: "Windows notifications · when HopOn is in the background or tray", value: () => onOff(prefs.systemNotify), step: () => setPrefs({ systemNotify: !prefs.systemNotify }) },
+      { label: "In-app notifications · messages in other channels", value: () => onOff(prefs.appNotify), step: () => setPrefs({ appNotify: !prefs.appNotify }) },
+      { label: "Notification sound", value: () => onOff(prefs.notifySound), step: () => setPrefs({ notifySound: !prefs.notifySound }) },
+      { label: "Per channel · bell next to the channel name", value: () => "All · @ · Off", step: () => {} },
+    ] },
     { name: "Voice", opts: [
       { label: "Echo cancellation · off for headsets", value: () => onOff(prefs.aec), step: () => setProc("aec") },
       { label: "Noise suppression", value: () => onOff(prefs.ns), step: () => setProc("ns") },
@@ -102,6 +108,7 @@ export default function Settings(p: { close: () => void }) {
     ] },
     { name: "Display", opts: [
       { label: "Close button · hides to the tray", value: () => (prefs.closeToTray ? "Tray" : "Quit"), step: () => { setPrefs({ closeToTray: !prefs.closeToTray }); call("close_to_tray", { enabled: prefs.closeToTray }).catch(err); } },
+      { label: "Mini player · streams follow you out of the voice room", value: () => onOff(prefs.autoPip), step: () => setPrefs({ autoPip: !prefs.autoPip }) },
       { label: "Scale · Ctrl + / Ctrl − / Ctrl 0", value: () => `${Math.round(prefs.scale * 100)}%`, step: (d) => stepScale(d) },
     ] },
     { name: "Hotkeys", opts: ACTIONS.map((a) => ({
