@@ -32,9 +32,6 @@ export default function Login() {
         <input class="line big" placeholder="Username" autofocus autocomplete="username" value={user()} onInput={(e) => setUser(e.currentTarget.value)} />
         <input class="line big" placeholder="Password" type="password" autocomplete="current-password" value={pw()} onInput={(e) => setPw(e.currentTarget.value)} />
         <Show when={err()}><p class="err">{err()}</p></Show>
-        <Show when={s.conn.state === "incompatible"}>
-          <p class="err">This app and the server are different versions. Update both from the same kit.</p>
-        </Show>
         <div class="field-row">
           <button class="pill solid" type="submit" disabled={busy() || !user() || !pw()}>Log in</button>
           <button class="pill" type="button" disabled={busy() || !user() || pw().length < 8} onClick={() => submit(true)}>Create account</button>

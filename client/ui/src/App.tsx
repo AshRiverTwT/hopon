@@ -18,6 +18,8 @@ import { AudioToggles, Status } from "./components/Corners";
 import GamesPanel from "./components/GamesPanel";
 import PeopleRail from "./components/PeopleRail";
 import { connectScreens, disconnectScreens } from "./screen";
+import UpdatePrompt from "./components/UpdatePrompt";
+import { installUpdate, startUpdateChecks, upd } from "./update";
 import { ServerSettingsSheet } from "./components/ServerSettings";
 import { InviteSheet, MembersSheet, NewChannelSheet, ServersSheet } from "./components/Sheets";
 
@@ -74,6 +76,7 @@ export default function App() {
     else if (!ch) void disconnectScreens();
   });
   onMount(() => {
+    startUpdateChecks();
     call<{ testOpenGames?: boolean }>("get_config").then((c) => c?.testOpenGames && setGames(true)).catch(() => {});
     const k = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.code === "KeyP") { e.preventDefault(); setPerf((v) => !v); return; }
@@ -143,6 +146,11 @@ export default function App() {
                   <button class="pill ghost" onClick={invite}>Invite</button>
                   <button class="pill ghost" classList={{ active: games() }} onClick={() => setGames((v) => !v)}>Games</button>
                 </Show>
+                <Show when={upd.available}>
+                  <button class="pill update-pill" disabled={upd.installing} title={`Update to HopOn ${upd.latest} (installs and reopens)`} onClick={() => installUpdate()}>
+                    {upd.installing ? "Updating…" : `Update to ${upd.latest}`}
+                  </button>
+                </Show>
                 <button class="pill" onClick={() => setSheet({ k: "settings" })}>Settings</button>
               </div>
             </header>
@@ -183,6 +191,7 @@ export default function App() {
         </Show>
       </Show>
       <Show when={perf()}><PerfOverlay close={() => setPerf(false)} /></Show>
+      <UpdatePrompt />
       <Show when={dropping()}><div class="drop-hint"><span class="display">Drop to attach</span></div></Show>
       <Show when={s.toast}><div class="toast">{s.toast}</div></Show>
     </>

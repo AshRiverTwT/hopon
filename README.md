@@ -82,6 +82,11 @@ results/     raw benchmark output (JSON lines)
   screen sources only); the native voice connection subscribes to
   microphones only. Loaded on first use (155 KB gzipped).
 - **Close to tray** (Settings → Display).
+- **Updates**: the app reads `latest.json` on the downloads branch (version,
+  installer URL, SHA-256, notes; written by `scripts/publish-downloads.sh`).
+  A top-bar button installs newer versions; a version mismatch with the
+  server prompts it. The installer is verified, then run in passive mode and
+  HopOn reopens.
 - **Emoji** render with Twemoji (bundled colour font, 476 KB, loaded only
   when an emoji is on screen). Twemoji graphics © Twitter, Inc. and other
   contributors, CC-BY 4.0; font OFL-1.1 (`client/ui/src/fonts/TWEMOJI-FONT-LICENSE.txt`).

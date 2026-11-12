@@ -78,6 +78,7 @@ mockIPC((cmd, args) => {
     case "create_invite": return "hopon://invite/Kq7xN2pLmA";
     case "avatar": return fakeAvatar(String((args as { userId: string }).userId));
     case "screen_grant": return new Promise(() => {}); // never connects in the preview
+    case "update_check": return { current: "0.4.2", latest: "0.4.3", available: true, notes: "" };
     case "gif_search": return { enabled: true, results: Array.from({ length: 12 }, (_, i) => ({ id: `klipy:${i}`, title: `gif ${i}`, preview: `https://media.example/g${i}.gif`, width: 320, height: 200 + (i % 3) * 60 })) };
     case "upload_file": return { id: "CCCCCCCCCCCCCCCCCCCCCC", name: "screenshot.png", mime: "image/png", size: 91234, width: 1280, height: 720, url: "", preview: "" };
     default: return null;

@@ -10,6 +10,7 @@ mod perf;
 mod secure;
 mod sys;
 mod tray;
+mod update;
 mod ui;
 #[cfg(feature = "voice")]
 mod voice;
@@ -121,6 +122,8 @@ pub fn run() {
             commands::activity_sharing,
             commands::screen_grant,
             tray::close_to_tray,
+            update::update_check,
+            update::update_install,
             commands::audio_processing,
             commands::audio_devices,
             commands::audio_set_device,

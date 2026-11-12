@@ -27,6 +27,20 @@ git worktree add -q --detach "$wt" origin/downloads
 rm -f "$wt"/HopOn_*_x64-setup.exe
 cp dist/hopon-windows-kit.zip "$wt/"
 cp "$SETUP" "$wt/HopOn-setup.exe"
+# What in-app updates read: version, installer URL, SHA-256, release notes.
+python3 - "$VER" "$SETUP" "$wt/latest.json" <<'PY'
+import hashlib, json, re, sys
+ver, setup, out = sys.argv[1:4]
+sha = hashlib.sha256(open(setup, "rb").read()).hexdigest()
+notes = ""
+try:
+    text = open("RELEASE_NOTES.md", encoding="utf-8").read()
+    m = re.search(r"^## HopOn " + re.escape(ver) + r"\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+    notes = (m.group(1).strip() if m else "")[:2000]
+except OSError:
+    pass
+json.dump({"version": ver, "url": "https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe", "sha256": sha, "notes": notes}, open(out, "w"), indent=2)
+PY
 mkdir -p "$wt/screens"
 shots=""
 for f in "$@"; do cp "$f" "$wt/screens/"; shots="$shots![$(basename "$f" .png)](screens/$(basename "$f"))"$'\n'; done

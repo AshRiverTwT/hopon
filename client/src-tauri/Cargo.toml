@@ -25,6 +25,7 @@ futures-util.workspace = true
 anyhow.workspace = true
 parking_lot.workspace = true
 base64 = "0.22"
+sha2 = "0.10"
 # File uploads (already in the graph through the LiveKit SDK).
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json"] }
 # TLS for wss:// (chat). Must name a crypto provider explicitly: the copy

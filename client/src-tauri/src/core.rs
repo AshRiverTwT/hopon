@@ -779,6 +779,11 @@ impl Core {
         Ok(())
     }
 
+    /// Shared HTTP client (uploads, update checks).
+    pub fn http(&self) -> &reqwest::Client {
+        &self.http
+    }
+
     /// HTTP base of the chat server (`wss://h/ws` → `https://h`).
     pub fn http_base(&self) -> String {
         http_base(&self.url.lock())

@@ -6,6 +6,7 @@ import { s, toast } from "../store";
 import { applyOverlayKeys, applyScale, prefs, SCALES, setPrefs } from "../prefs";
 import { ACTIONS, comboLabel, comboOf, RESERVED, type Action } from "../hotkeys";
 import { toAvatarBytes } from "./Avatar";
+import { checkUpdate, installUpdate, upd } from "../update";
 
 interface Devices {
   processing: { aec: boolean; ns: boolean; agc: boolean };
@@ -110,6 +111,8 @@ export default function Settings(p: { close: () => void }) {
     })) },
     { name: "Account", opts: [
       { label: "Version", value: () => `HopOn ${__APP_VERSION__}`, step: () => {} },
+      { label: "Updates", value: () => (upd.installing ? "Updating…" : upd.available ? `Install ${upd.latest}` : upd.checked ? (upd.error ? "Check again" : "Up to date") : "Check now"),
+        step: (d) => { if (d !== 0) return; if (upd.available) void installUpdate(); else void checkUpdate().then((a) => !a && !upd.error && toast("You're on the latest version")); } },
       { label: "Server", value: () => cfg()?.url ?? "", step: () => {} },
       { label: "Emoji artwork", value: () => "Twemoji · CC-BY 4.0", step: (d) => { if (d === 0) call("open_url", { url: "https://github.com/jdecked/twemoji" }).catch(() => {}); } },
       { label: "Session", value: () => "Log out", step: (d) => { if (d === 0) { call("logout").catch(err); p.close(); } } },

@@ -576,3 +576,11 @@ video.media { background: #000; }
 /* Status corner is narrow (rail width): pieces wrap as whole units. */
 .foot-r .status { flex-wrap: wrap; justify-content: flex-end; row-gap: 2px; text-align: right; }
 .foot-r .status > * { white-space: nowrap; }
+
+/* ---------- updates ---------- */
+.update-pill { background: var(--hot); color: #fff; }
+.update-pill:hover:not(:disabled) { background: #ff3d69; }
+.update-gate { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; background: rgba(12, 12, 12, 0.86); }
+.update-card { width: min(520px, calc(100vw - 48px)); padding: 32px 34px; border-radius: 12px; background: var(--ink-2); border: 1px solid var(--cream-10);
+  display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+.update-card h2 { font-size: 40px; margin: 0; }

@@ -2,6 +2,14 @@
 
 **Download the latest:** [HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe)
 
+## HopOn 0.4.2
+
+- **One-click updates.** When a new version is out, an **Update to …**
+  button appears in the top bar (also Settings → Account → Updates). If the
+  server needs a newer app, HopOn asks you to update and does it for you:
+  downloads, checks the file, installs and reopens.
+- Same protocol as 0.4.0: no server update needed.
+
 ## HopOn 0.4.1
 
 - Settings → Account shows the app version.

@@ -1805,7 +1805,7 @@ dependencies = [
 
 [[package]]
 name = "hopon-bench"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -1822,7 +1822,7 @@ dependencies = [
 
 [[package]]
 name = "hopon-client"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1835,6 +1835,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tokio",
@@ -1846,7 +1847,7 @@ dependencies = [
 
 [[package]]
 name = "hopon-server"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1874,7 +1875,7 @@ dependencies = [
 
 [[package]]
 name = "hopon-shared"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "hdrhistogram",
  "rmp-serde",
