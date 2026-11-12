@@ -4,7 +4,7 @@
 #   1. Install PostgreSQL 16 once:  winget install PostgreSQL.PostgreSQL.16
 #      (remember the password you set for the "postgres" user)
 #   2. powershell -ExecutionPolicy Bypass -File start-local.ps1 -PgPassword YOURPASS [-PgPort 5432]
-#   3. Install HopOn_0.1.0_x64-setup.exe; on the login screen set Server to
+#   3. Install HopOn-setup.exe; on the login screen set Server to
 #      ws://127.0.0.1:18080/ws, sign up,
 #      then run measure-windows.ps1 for cold start / idle RAM / idle CPU.
 #

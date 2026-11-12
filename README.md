@@ -5,8 +5,8 @@ Rust everywhere: Tauri 2 client (Rust core, thin SolidJS UI), Axum/Tokio
 server, PostgreSQL, LiveKit SFU for voice. Latency is the primary design
 constraint, and every stage is instrumented.
 
-**Download:** [HopOn_0.1.0_x64-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn_0.1.0_x64-setup.exe)
-(9.9 MB, Windows 10/11). It connects to the public server
+**Download:** [HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe)
+(latest version, ~10 MB, Windows 10/11). It connects to the public server
 (`wss://hopon-chat.duckdns.org/ws`) out of the box. What's new:
 [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
@@ -27,6 +27,12 @@ results/     raw benchmark output (JSON lines)
 - Messages: send, edit and delete your own; replies with jump-to-message;
   emoji reactions; @mentions with autocomplete; typing indicator.
 - Emoji picker at the end of the message bar; reactions use the same picker.
+- Files, images and videos: attach with **+**, paste, or drop anywhere on the
+  window (up to 10 per message, 25 MB each by default). Images and GIFs show
+  inline, videos play inline, other files download.
+- GIFs: the **GIF** button searches KLIPY (trending first); GIFs play as
+  silent loops only while on screen.
+- New members get a random welcome message in general.
 - Formatting: `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``, code
   blocks, and clickable http(s) links.
 - Unread markers that survive restarts, a "new messages" divider, day
@@ -51,11 +57,22 @@ results/     raw benchmark output (JSON lines)
 - Remove members, revoke all invites, and delete anyone's message.
 - Members leave a server from the People panel.
 
-**Extras:** a games panel (Wordle, Minute Cryptic, Krillion) that posts
-your result to general, as often as you like.
+**Extras**
+- A games panel (Wordle, Minute Cryptic, Krillion) that posts your result to
+  general, as often as you like. It closes itself if the window gets too
+  narrow for games and chat side by side.
+- **In-game overlay** (default **Alt+`**): a small chat for the channel you
+  have open, plus who's in your voice room (glowing while they talk), over
+  your game. Press it again or Esc to go back to the game. Works over
+  windowed and borderless games; exclusive-fullscreen games and games run as
+  administrator can't be drawn over.
+- **Hotkeys** (Settings → Hotkeys, all rebindable): next/previous channel
+  (Alt+↓/↑), next/previous unread (Alt+Shift+↓/↑), next/previous server
+  (Ctrl+Alt+↓/↑), mute (Ctrl+Shift+M), deafen (Ctrl+Shift+D), games
+  (Ctrl+G), message box (Ctrl+T), zoom (Ctrl + / − / 0), overlay.
+- **Scale** (Settings → Display): 80–150 %.
 
-**Not in this version:** image and file attachments, per-user voice
-volume, message search.
+**Not in this version:** per-user voice volume, message search.
 
 **Protocol versions:** client and server must match. A mismatched app shows
 "Update needed" (the server answers HTTP 426), so update both from the same
@@ -303,6 +320,17 @@ Environment variables:
 | `HOPON_DB_POOL` | CPU count |
 | `HOPON_SEND_RATE` | 10 messages/s per connection, burst 3× |
 | `HOPON_NODE_ID` | 1 |
+| `HOPON_FILES_DIR` | `./files` (compose: a named volume at `/data/files`) |
+| `HOPON_MAX_UPLOAD_MB` | 25 (per file) |
+| `HOPON_USER_QUOTA_MB` | 1024 (per user, all their files) |
+| `HOPON_MIN_FREE_MB` | 2048: uploads are refused rather than eat into this much free disk |
+| `KLIPY_API_KEY` | none: GIF search off (free key at klipy.com/developers) |
+
+Uploads go over plain HTTP (`POST /files`, then the message references them),
+never through the chat socket, so a big upload can't delay anyone's messages.
+Files are served from `GET /files/{id}` (128-bit random ids). Uploads that
+are never sent are deleted after a day; deleting a message, channel or server
+deletes its files.
 
 ### Production (one region)
 
@@ -343,7 +371,7 @@ scripts/build-windows.sh
 
 It produces:
 
-- `target/x86_64-pc-windows-msvc/release/bundle/nsis/HopOn_0.1.0_x64-setup.exe`
+- `target/x86_64-pc-windows-msvc/release/bundle/nsis/HopOn_<version>_x64-setup.exe`
 - `voice_loopback.exe`, `msg_rtt.exe`, `smoke.exe` and `e2e_feed.exe` in the
   same `release/` directory.
 

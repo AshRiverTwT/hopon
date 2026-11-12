@@ -9,7 +9,7 @@ HopOn - local Windows test kit
    Prints: 20 functional checks, text round trip p50/p95/p99, voice network
    path p50/p95/p99. Chat server: ws://127.0.0.1:18080/ws
 
-3. App: run HopOn_0.1.0_x64-setup.exe. On the login screen open "Server",
+3. App: run HopOn-setup.exe. On the login screen open "Server",
    set ws://127.0.0.1:18080/ws, sign up. Ctrl+Shift+P = latency overlay.
 
 4. Cold start / idle RAM / idle CPU (app closed first):

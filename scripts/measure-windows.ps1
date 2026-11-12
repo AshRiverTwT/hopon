@@ -17,7 +17,7 @@ if (-not $Exe) {
   $Exe = Get-ChildItem "$env:LOCALAPPDATA", "$env:ProgramFiles" -Filter "hopon*.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -notmatch "setup|uninstall" } | Select-Object -First 1 -ExpandProperty FullName
 }
-if (-not $Exe -or -not (Test-Path $Exe)) { throw "HopOn is not installed (run HopOn_0.1.0_x64-setup.exe) or pass -Exe path\to\HopOn.exe" }
+if (-not $Exe -or -not (Test-Path $Exe)) { throw "HopOn is not installed (run HopOn-setup.exe) or pass -Exe path\to\HopOn.exe" }
 Write-Host "app: $Exe"
 
 function Get-Tree([int]$RootId) {

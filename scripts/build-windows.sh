@@ -11,4 +11,6 @@ LLVM_BIN=${LLVM_BIN:-/usr/lib/llvm-19/bin}
 (cd client/ui && pnpm install --frozen-lockfile)
 (cd client/src-tauri && ../ui/node_modules/.bin/tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc)
 cargo xwin build --release --target x86_64-pc-windows-msvc -p hopon-bench --features voice
+# The local test kit's server must match the app's protocol version.
+cargo xwin build --release --target x86_64-pc-windows-msvc -p hopon-server
 scripts/size-report.sh

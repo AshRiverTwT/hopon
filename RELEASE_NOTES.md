@@ -1,13 +1,54 @@
-# HopOn 0.1.0
+# HopOn release notes
+
+**Download the latest:** [HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe)
+
+## HopOn 0.2.0
+
+**Update the app and the server together.** 0.2.0 uses a new protocol: a
+0.1 app shows *Update needed* on a 0.2 server, and the other way round.
+
+### New
+
+- **Files, images and videos.** Attach with **+**, paste, or drag files
+  anywhere onto the window. Up to 10 per message, 25 MB each. Images, GIFs
+  and videos show in the chat; click one to see it full size. Other files
+  download.
+- **GIFs.** The **GIF** button next to emoji searches KLIPY, with trending
+  GIFs first. Click to send. (The server needs a free KLIPY key.)
+- **In-game overlay.** Press **Alt+`** in a game: a small chat for your open
+  channel appears bottom-right, with your voice room beside it (whoever is
+  talking glows). Type and press Enter to send. Press **Alt+`** again (or Esc)
+  to go straight back to your game.
+- **Hotkeys.** Switch channels (Alt+↓/↑), jump to unread channels
+  (Alt+Shift+↓/↑), switch servers (Ctrl+Alt+↓/↑), mute (Ctrl+Shift+M),
+  deafen (Ctrl+Shift+D), games (Ctrl+G), message box (Ctrl+T), zoom
+  (Ctrl + / − / 0). Every one can be changed in Settings → Hotkeys.
+- **Scale.** Settings → Display → Scale, 80 % to 150 %.
+- **Welcome messages.** New members get a random welcome in general.
+
+### Fixed
+
+- With the games panel open in a smaller window, the chat disappeared, and
+  stayed gone after maximizing again. The chat now always comes back, and
+  the games panel closes itself when the window is too narrow for both.
+
+### Known issues
+
+- The overlay can't draw over games in **exclusive fullscreen** or games
+  **run as administrator**. Use borderless/windowed fullscreen.
+- If another app already uses Alt+`, pick a different overlay key in
+  Settings → Hotkeys.
+- GIF search shows "not set up" until the server owner adds a KLIPY key.
+
+## HopOn 0.1.0
 
 The first release of HopOn: a fast, light chat and voice app for Windows,
 built in Rust.
 
-**Download:** [HopOn_0.1.0_x64-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn_0.1.0_x64-setup.exe) (9.9 MB).
 It connects to the public server by default: install, create an account,
 done.
 
-## Highlights
+### Highlights
 
 - **Fast.** Messages reach other people in 0.43 ms (p95) on the server side;
   the rest is your internet connection. Cold start in 657 ms.
@@ -17,7 +58,7 @@ done.
 - **Games beside the chat.** Play Wordle, Minute Cryptic or Krillion in the
   side panel and share your result to #general, as often as you like.
 
-## Features
+### Features
 
 **Chat**
 - Servers with text channels (with topics) and voice rooms; invite links.
@@ -48,7 +89,7 @@ done.
 - Native Rust core; one copy runs at a time; crash reports are saved to
   `%LOCALAPPDATA%\app.hopon.desktop\crash.log`.
 
-## Known issues
+### Known issues
 
 - **"Windows protected your PC" warning:** the installer isn't code-signed yet.
   Click *More info → Run anyway*.
@@ -62,6 +103,6 @@ done.
 - Uses Windows' built-in WebView2 for its interface; the installer adds it if
   it's missing.
 
-## Not in this version
+### Not in this version
 
 Image and file attachments, per-person voice volume, message search.
