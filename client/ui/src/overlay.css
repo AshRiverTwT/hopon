@@ -1,0 +1,80 @@
+/* In-game overlay: transparent window, two floating panels (chat + voice). */
+@font-face {
+  font-family: "Archivo";
+  src: url("./fonts/archivo-wdth.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: block;
+}
+@font-face {
+  font-family: "Inter Tight";
+  src: url("./fonts/inter-tight.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-display: block;
+}
+:root {
+  --ink: #161515;
+  --cream: #f3f1e2;
+  --cream-80: rgba(243, 241, 226, 0.8);
+  --cream-55: rgba(243, 241, 226, 0.55);
+  --cream-35: rgba(243, 241, 226, 0.35);
+  --cream-10: rgba(243, 241, 226, 0.1);
+  --cream-05: rgba(243, 241, 226, 0.05);
+  --hot: #ff1b50;
+  color-scheme: dark;
+  font: 400 14px/1.45 "Inter Tight", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; height: 100%; background: transparent; color: var(--cream); overflow: hidden; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+.ov { height: 100%; display: flex; gap: 12px; align-items: flex-end; justify-content: flex-end; padding: 6px; }
+.ov-chat, .ov-voice {
+  background: rgba(22, 21, 21, 0.9); border: 1px solid var(--cream-10); border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); backdrop-filter: blur(6px);
+}
+.ov-chat { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; }
+.ov-head { display: flex; align-items: baseline; gap: 10px; padding: 12px 14px 8px; border-bottom: 1px solid var(--cream-10); }
+.ov-mark { align-self: center; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 4px; background: var(--hot);
+  font-family: "Archivo", sans-serif; font-weight: 900; font-stretch: 125%; font-size: 12px; }
+.ov-title { font-family: "Archivo", sans-serif; font-weight: 800; font-stretch: 75%; text-transform: uppercase; font-size: 18px; letter-spacing: 0.01em; }
+.ov-sub { color: var(--cream-55); font-size: 12px; }
+.ov-hint { margin-left: auto; color: var(--cream-35); font-size: 11px; white-space: nowrap; }
+.ov-msgs { flex: 1; overflow-y: auto; padding: 8px 14px; scrollbar-width: thin; scrollbar-color: var(--cream-10) transparent; }
+.ov-msg { padding-top: 6px; }
+.ov-msg.cont { padding-top: 1px; }
+.ov-msg.sys { color: var(--cream-80); }
+.ov-msg.sys .ov-body::before { content: "→ "; color: var(--hot); font-weight: 700; }
+.ov-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 1px; }
+.ov-meta img, .ov-meta .avatar { border-radius: 3px; }
+.ov-body { padding-left: 28px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.ov-body .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.ov-body .media, .ov-body video { max-width: 220px !important; max-height: 130px !important; width: auto !important; height: auto !important; border-radius: 6px; display: block; }
+.ov-body .media-btn { padding: 0; border-radius: 6px; overflow: hidden; }
+.ov-body .gif-tag { display: none; }
+.ov-body .file-card { display: inline-flex; gap: 8px; align-items: center; padding: 6px 10px; border-radius: 6px; background: var(--cream-05); border: 1px solid var(--cream-10); }
+.ov-body .file-icon { font-size: 10px; font-weight: 800; color: var(--cream-55); }
+.ov-body .file-meta { display: flex; flex-direction: column; text-align: left; }
+.ov-body .muted { color: var(--cream-55); }
+.ov-body .small { font-size: 11px; }
+.ov-body .mention { color: var(--hot); }
+.ov-body code { font-family: Consolas, monospace; background: var(--cream-10); padding: 0 4px; border-radius: 3px; }
+.ov-body a, .ov-body .link { color: var(--hot); text-decoration: underline; }
+.ov-input {
+  margin: 0 10px 10px; padding: 9px 12px; resize: none; outline: none; border-radius: 8px;
+  background: var(--cream-05); border: 1px solid var(--cream-10); color: var(--cream); font: inherit;
+}
+.ov-input:focus { border-color: var(--cream-35); }
+
+.ov-voice { width: 210px; flex: none; align-self: stretch; padding: 12px 10px; display: flex; flex-direction: column; gap: 10px; }
+.ov-vhead { display: flex; align-items: center; gap: 8px; font-family: "Archivo", sans-serif; font-weight: 800; font-stretch: 75%; text-transform: uppercase; font-size: 15px; padding: 0 4px; }
+.ov-live { width: 8px; height: 8px; border-radius: 50%; background: var(--hot); }
+.ov-voice ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+.ov-voice li { display: flex; align-items: center; gap: 10px; padding: 5px 6px; border-radius: 8px; }
+.ov-av { display: block; width: 34px; height: 34px; border-radius: 6px; transition: box-shadow 0.12s; }
+.ov-voice li.speaking .ov-av { box-shadow: 0 0 0 2px var(--hot), 0 0 16px 3px rgba(255, 27, 80, 0.65); }
+.ov-voice li.speaking .ov-name { color: #fff; }
+.ov-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-voice li.muted .ov-name { color: var(--cream-55); }
+.ov-state { font-size: 11px; color: var(--cream-35); }

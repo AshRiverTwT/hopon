@@ -3,6 +3,7 @@ mod cache;
 mod commands;
 mod core;
 mod games;
+mod overlay;
 mod guard;
 mod perf;
 mod secure;
@@ -122,6 +123,9 @@ pub fn run() {
             games::games_close,
             games::games_open_external,
             games::open_url,
+            overlay::overlay_hotkey,
+            overlay::overlay_hide,
+            overlay::overlay_context,
             commands::perf_painted,
             commands::perf_stats,
             commands::perf_reset,

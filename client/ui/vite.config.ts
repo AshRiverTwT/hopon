@@ -12,5 +12,7 @@ export default defineConfig({
     modulePreload: false,
     sourcemap: false,
     reportCompressedSize: true,
+    // Main window + the in-game overlay (its own small page).
+    rollupOptions: { input: { main: "index.html", overlay: "overlay.html" } },
   },
 });
