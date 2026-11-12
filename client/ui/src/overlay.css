@@ -1,4 +1,15 @@
 /* In-game overlay: transparent window, two floating panels (chat + voice). */
+/* Emoji: Twemoji (the set Discord uses), as a colour font. unicode-range keeps
+   letters, digits, (c) (R) TM in the text font, and the file only loads when an
+   emoji is on screen. Graphics CC-BY 4.0 (fonts/TWEMOJI-FONT-LICENSE.txt). */
+@font-face {
+  font-family: "Twemoji";
+  src: url("./fonts/twemoji.woff2") format("woff2");
+  font-display: swap;
+  unicode-range: U+203C, U+2049, U+2139, U+2194-21AA, U+231A-23FF, U+24C2, U+25AA-25FE,
+    U+2600-27BF, U+2934-2935, U+2B05-2B55, U+3030, U+303D, U+3297, U+3299, U+200D, U+20E3,
+    U+FE0F, U+1F000-1FAFF, U+E0020-E007F;
+}
 @font-face {
   font-family: "Archivo";
   src: url("./fonts/archivo-wdth.woff2") format("woff2-variations");
@@ -22,7 +33,7 @@
   --cream-05: rgba(243, 241, 226, 0.05);
   --hot: #ff1b50;
   color-scheme: dark;
-  font: 400 14px/1.45 "Inter Tight", "Segoe UI", system-ui, sans-serif;
+  font: 400 14px/1.45 "Twemoji", "Inter Tight", "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 * { box-sizing: border-box; }

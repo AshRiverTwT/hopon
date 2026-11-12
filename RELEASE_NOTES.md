@@ -20,6 +20,8 @@
   overlay and hotkeys keep working. Click the tray icon to open it again,
   right-click → *Quit HopOn* to exit. Settings → Display switches it off.
 - **"Playing ARC Raiders"** is now recognised (THE FINALS already was).
+- **Discord-style emoji everywhere** (Twemoji): messages, reactions, the
+  picker and the overlay look the same on every PC.
 
 ### Changed
 

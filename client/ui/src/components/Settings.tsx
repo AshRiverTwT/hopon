@@ -110,6 +110,7 @@ export default function Settings(p: { close: () => void }) {
     })) },
     { name: "Account", opts: [
       { label: "Server", value: () => cfg()?.url ?? "", step: () => {} },
+      { label: "Emoji artwork", value: () => "Twemoji · CC-BY 4.0", step: (d) => { if (d === 0) call("open_url", { url: "https://github.com/jdecked/twemoji" }).catch(() => {}); } },
       { label: "Session", value: () => "Log out", step: (d) => { if (d === 0) { call("logout").catch(err); p.close(); } } },
     ] },
   ]);

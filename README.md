@@ -82,6 +82,9 @@ results/     raw benchmark output (JSON lines)
   screen sources only); the native voice connection subscribes to
   microphones only. Loaded on first use (155 KB gzipped).
 - **Close to tray** (Settings → Display).
+- **Emoji** render with Twemoji (bundled colour font, 476 KB, loaded only
+  when an emoji is on screen). Twemoji graphics © Twitter, Inc. and other
+  contributors, CC-BY 4.0; font OFL-1.1 (`client/ui/src/fonts/TWEMOJI-FONT-LICENSE.txt`).
 - **Per-person voice volume** 0–200 % (in the voice room). This uses one
   WebRTC call LiveKit's Rust SDK doesn't expose, added via the patched
   crates in `vendor/` (see `vendor/README.md`).

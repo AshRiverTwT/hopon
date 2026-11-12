@@ -1,6 +1,17 @@
 /* HopOn — warm black, cream type, one hot accent. Flat colour only: no blur,
    no shadows, no infinite animations (idle CPU/RAM budget). */
 
+/* Emoji: Twemoji (the set Discord uses), as a colour font. unicode-range keeps
+   letters, digits, (c) (R) TM in the text font, and the file only loads when an
+   emoji is on screen. Graphics CC-BY 4.0 (fonts/TWEMOJI-FONT-LICENSE.txt). */
+@font-face {
+  font-family: "Twemoji";
+  src: url("./fonts/twemoji.woff2") format("woff2");
+  font-display: swap;
+  unicode-range: U+203C, U+2049, U+2139, U+2194-21AA, U+231A-23FF, U+24C2, U+25AA-25FE,
+    U+2600-27BF, U+2934-2935, U+2B05-2B55, U+3030, U+303D, U+3297, U+3299, U+200D, U+20E3,
+    U+FE0F, U+1F000-1FAFF, U+E0020-E007F;
+}
 @font-face {
   font-family: "Archivo";
   src: url("./fonts/archivo-wdth.woff2") format("woff2-variations");
@@ -31,7 +42,7 @@
   --rail: clamp(150px, 10vw, 240px);
   --games: clamp(340px, 30vw, 440px);
   color-scheme: dark;
-  font: 400 15px/1.5 "Inter Tight", "Segoe UI", system-ui, sans-serif;
+  font: 400 15px/1.5 "Twemoji", "Inter Tight", "Segoe UI", system-ui, sans-serif;
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
 }
