@@ -6,3 +6,6 @@ client/ui/dist/
 results/*.tmp
 /hopon.bundle
 /dist
+
+# Uploads stored by a local dev server (HOPON_FILES_DIR defaults to ./files)
+/files/
