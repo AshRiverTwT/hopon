@@ -312,7 +312,7 @@ impl Core {
         if native_hidden {
             self.ui_suspended.store(true, Ordering::Release);
         }
-        if self.ui_suspended.load(Ordering::Acquire)
+        let overlay_only = self.ui_suspended.load(Ordering::Acquire)
             && !matches!(
                 &ev,
                 UiEvent::Conn { .. }
@@ -329,19 +329,38 @@ impl Core {
                     | UiEvent::UserUpdated { .. }
                     | UiEvent::OpenChannel { .. }
                     | UiEvent::Error { .. }
-            )
-        {
+            );
+        if overlay_only && !self.overlay_needs_event(&ev) {
             return;
         }
         let mut ui = self.ui.lock();
         let mut main_ok = false;
         ui.0.retain(|(label, ch)| {
+            if overlay_only && label != "overlay" {
+                return true;
+            }
             let ok = ch.send(ev.clone()).is_ok();
             main_ok |= ok && label == "main";
             ok
         });
-        if !main_ok && ui.1.len() < 512 {
+        if !overlay_only && !main_ok && ui.1.len() < 512 {
             ui.1.push(ev);
+        }
+    }
+
+    /// Keep the in-game overlay live while the main window is suspended.
+    fn overlay_needs_event(&self, ev: &UiEvent) -> bool {
+        let channel = self.store.lock().open_channel.map(sid);
+        match ev {
+            UiEvent::Messages { channel_id, .. }
+            | UiEvent::Edited { channel_id, .. }
+            | UiEvent::Deleted { channel_id, .. }
+            | UiEvent::Reaction { channel_id, .. }
+            | UiEvent::Typing { channel_id, .. } => {
+                channel.as_deref() == Some(channel_id.as_str())
+            }
+            UiEvent::Presence { .. } | UiEvent::Voice { .. } | UiEvent::Speaking { .. } => true,
+            _ => false,
         }
     }
 
