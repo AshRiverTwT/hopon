@@ -35,16 +35,23 @@ function history(n: number): Msg[] {
     if (i % 3 === 0) author = (author + 1 + (i % 5)) % names.length;
     ts += 20_000 + ((i * 7919) % 90_000);
     out.push({ id: String(10_000_000 + i), channelId: "7001", authorId: members[author].id, content: lines[(i * 31) % lines.length],
-      editedAt: i % 97 === 0 ? ts : null, ts, nonce: "", state: 2, replyTo: null, reactions: [] });
+      editedAt: i % 97 === 0 ? ts : null, ts, nonce: "", state: 2, replyTo: null, reactions: [], attachments: [] });
   }
   return out;
 }
 const hist = history(2000);
-hist.push({ id: "10001998", channelId: "7001", authorId: "1003", content: "new build is up: https://github.com/AshRiverTwT/hopon — try **voice** with `echo off` on headsets", editedAt: null, ts: Date.now() - 120000, nonce: "", state: 2, replyTo: null, reactions: [{ emoji: "🔥", users: ["1001", "1002", "1004"] }, { emoji: "👀", users: ["1005"] }] });
-hist.push({ id: "10001999", channelId: "7001", authorId: "1002", content: "<@1001> nice, the dial is _so_ smooth now", editedAt: null, ts: Date.now() - 90000, nonce: "", state: 2, replyTo: "10001998", reactions: [{ emoji: "👍", users: ["1003"] }] });
-hist.push({ id: "10002000", channelId: "7001", authorId: "1002", content: "Wordle 1,234 3/6\n\n⬛🟨⬛⬛⬛\n🟩🟩⬛🟩⬛\n🟩🟩🟩🟩🟩", editedAt: null, ts: Date.now() - 60000, nonce: "", state: 2, replyTo: null, reactions: [] });
-hist.push({ id: "p1", channelId: "7001", authorId: me.id, content: "this one is still sending", editedAt: null, ts: Date.now(), nonce: "1", state: 0, replyTo: null, reactions: [] });
-hist.push({ id: "p2", channelId: "7001", authorId: me.id, content: "and this one failed", editedAt: null, ts: Date.now(), nonce: "2", state: 3, replyTo: null, reactions: [] });
+hist.push({ id: "10001998", channelId: "7001", authorId: "1003", content: "new build is up: https://github.com/AshRiverTwT/hopon — try **voice** with `echo off` on headsets", editedAt: null, ts: Date.now() - 120000, nonce: "", state: 2, replyTo: null, reactions: [{ emoji: "🔥", users: ["1001", "1002", "1004"] }, { emoji: "👀", users: ["1005"] }], attachments: [] });
+hist.push({ id: "10001999", channelId: "7001", authorId: "1002", content: "<@1001> nice, the dial is _so_ smooth now", editedAt: null, ts: Date.now() - 90000, nonce: "", state: 2, replyTo: "10001998", reactions: [{ emoji: "👍", users: ["1003"] }], attachments: [] });
+hist.push({ id: "10002000", channelId: "7001", authorId: "1002", content: "Wordle 1,234 3/6\n\n⬛🟨⬛⬛⬛\n🟩🟩⬛🟩⬛\n🟩🟩🟩🟩🟩", editedAt: null, ts: Date.now() - 60000, nonce: "", state: 2, replyTo: null, reactions: [], attachments: [] });
+hist.push({ id: "10002001", channelId: "7001", authorId: "0", content: "A wild <@1006> appeared!", editedAt: null, ts: Date.now() - 50000, nonce: "", state: 2, replyTo: null, reactions: [], attachments: [] });
+hist.push({ id: "10002002", channelId: "7001", authorId: "1004", content: "sunset from the roof", editedAt: null, ts: Date.now() - 40000, nonce: "", state: 2, replyTo: null, reactions: [{ emoji: "😍", users: ["1001", "1002"] }],
+  attachments: [{ id: "AAAAAAAAAAAAAAAAAAAAAA", name: "roof.jpg", mime: "image/jpeg", size: 482113, width: 1600, height: 1000, url: "", preview: "" }] });
+hist.push({ id: "10002003", channelId: "7001", authorId: "1004", content: "", editedAt: null, ts: Date.now() - 39000, nonce: "", state: 2, replyTo: null, reactions: [],
+  attachments: [{ id: "BBBBBBBBBBBBBBBBBBBBBB", name: "patch-notes-0.2.pdf", mime: "application/pdf", size: 1288490, width: 0, height: 0, url: "", preview: "" }] });
+hist.push({ id: "10002004", channelId: "7001", authorId: "1002", content: "", editedAt: null, ts: Date.now() - 30000, nonce: "", state: 2, replyTo: null, reactions: [],
+  attachments: [{ id: "klipy:1", name: "cat dance", mime: "image/gif", size: 0, width: 320, height: 240, url: "https://media.example/cat.gif", preview: "" }] });
+hist.push({ id: "p1", channelId: "7001", authorId: me.id, content: "this one is still sending", editedAt: null, ts: Date.now(), nonce: "1", state: 0, replyTo: null, reactions: [], attachments: [] });
+hist.push({ id: "p2", channelId: "7001", authorId: me.id, content: "and this one failed", editedAt: null, ts: Date.now(), nonce: "2", state: 3, replyTo: null, reactions: [], attachments: [] });
 
 function fakeAvatar(id: string): string {
   const c = document.createElement("canvas"); c.width = c.height = 64;
@@ -68,6 +75,8 @@ mockIPC((cmd, args) => {
     case "perf_stats": return { rows: [{ name: "text: remote input->paint (synced)", count: 600, p50_ms: 21.3, p95_ms: 28.7, p99_ms: 33.1, max_ms: 40 }], startup: { processToPaintMs: 657, mainToPaintMs: 610, mainToConnectedMs: 2.5 }, clockOffsetMs: 0.1, bestRttMs: 0.4, rssMb: 41 };
     case "create_invite": return "hopon://invite/Kq7xN2pLmA";
     case "avatar": return fakeAvatar(String((args as { userId: string }).userId));
+    case "gif_search": return { enabled: true, results: Array.from({ length: 12 }, (_, i) => ({ id: `klipy:${i}`, title: `gif ${i}`, preview: `https://media.example/g${i}.gif`, width: 320, height: 200 + (i % 3) * 60 })) };
+    case "upload_file": return { id: "CCCCCCCCCCCCCCCCCCCCCC", name: "screenshot.png", mime: "image/png", size: 91234, width: 1280, height: 720, url: "", preview: "" };
     default: return null;
   }
 });

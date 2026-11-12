@@ -296,6 +296,7 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 .cascade-cats button.focus { color: #fff; }
 .cascade-cats .chev { font-size: 0.6em; color: var(--cream-35); }
 .cascade-cats button.on .chev { color: var(--hot); }
+.cascade-opts { max-height: calc(100vh - 220px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--cream-20) transparent; padding-right: 8px; }
 .cascade-opts li { padding: 8px 0; border-left: 2px solid transparent; padding-left: 16px; }
 .cascade-opts li.focus { border-left-color: var(--hot); }
 .cascade-opts .cap { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--cream-55); margin-bottom: 2px; }
@@ -343,10 +344,7 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 .cell.g { background: #538d4e; } .cell.y { background: #b59f3b; } .cell.b { background: #4a7bd0; }
 .cell.o { background: #d9822b; } .cell.r { background: #c0392b; } .cell.p { background: #8e5cc4; } .cell.n { background: #7a5236; }
 .score-extra { font-size: 13px; color: var(--cream-55); overflow-wrap: anywhere; }
-@media (max-width: 1100px) {
-  .frame.with-games { grid-template-columns: var(--dial) 0 minmax(0, 1fr); }
-  .frame.with-games .main { visibility: hidden; }
-}
+/* Narrow windows close the games panel (App.tsx): chat is never hidden behind it. */
 
 /* ---------- server settings ---------- */
 .topic { margin: 10px 0 0; font-size: 15px; color: var(--cream-55); max-width: 70ch; }
@@ -454,3 +452,65 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 .emoji-btn:hover, .emoji-btn.on { color: var(--cream); background: var(--cream-10); }
 
 .leave-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 36px; padding-top: 18px; border-top: 1px solid rgba(255, 27, 80, 0.35); }
+
+/* ---------- attachments ---------- */
+.compose-row textarea { padding-left: 44px; padding-right: 96px; }
+.attach-btn { position: absolute; left: 6px; bottom: 7px; width: 32px; height: 32px; border-radius: 6px; display: grid; place-items: center; color: var(--cream-55); z-index: 1; }
+.attach-btn:hover { color: var(--cream); background: var(--cream-10); }
+.gif-btn { position: absolute; right: 46px; bottom: 11px; height: 24px; padding: 0 6px; border-radius: 5px; border: 1.5px solid currentColor; color: var(--cream-55);
+  font-family: "Archivo", sans-serif; font-stretch: 75%; font-weight: 800; font-size: 12px; letter-spacing: 0.04em; line-height: 1; }
+.gif-btn:hover, .gif-btn.on { color: var(--cream); }
+.gif-btn.on { border-color: var(--hot); }
+
+.pending-files { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.pending-files li { position: relative; display: grid; grid-template-columns: 44px minmax(0, 160px) auto; grid-template-rows: auto auto; column-gap: 10px; align-items: center;
+  padding: 6px 30px 6px 6px; border-radius: 6px; background: var(--cream-05); border: 1px solid var(--cream-10); }
+.pending-files li.busy { border-color: var(--cream-20); }
+.pending-files li.busy .pf-state { color: var(--cream-55); }
+.pending-files li.failed { border-color: var(--hot); }
+.pending-files li.failed .pf-state { color: var(--hot); }
+.pending-files img, .pf-icon { grid-row: 1 / 3; width: 44px; height: 44px; border-radius: 4px; object-fit: cover; }
+.pf-icon, .file-icon { display: grid; place-items: center; background: var(--cream-10); font-family: "Archivo", sans-serif; font-stretch: 75%; font-weight: 800; font-size: 11px; letter-spacing: 0.04em; color: var(--cream-80); }
+.pf-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-state { font-size: 12px; color: var(--cream-35); grid-column: 2; }
+.pf-x { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 4px; color: var(--cream-55); font-size: 16px; line-height: 1; }
+.pf-x:hover { background: var(--cream-10); color: var(--cream); }
+
+.attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; white-space: normal; }
+.media-btn { position: relative; display: block; padding: 0; border-radius: 6px; overflow: hidden; background: var(--cream-05); }
+.media { display: block; border-radius: 6px; object-fit: cover; background: var(--cream-05); }
+video.media { background: #000; }
+.gif-tag { position: absolute; left: 6px; bottom: 6px; padding: 1px 5px; border-radius: 3px; background: rgba(22, 21, 21, 0.75); font-family: "Archivo", sans-serif; font-stretch: 75%; font-weight: 800; font-size: 10px; letter-spacing: 0.06em; color: var(--cream-80); pointer-events: none; }
+.file-card { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; align-items: center; width: min(360px, 100%); padding: 10px 14px 10px 10px; border-radius: 6px;
+  background: var(--cream-05); border: 1px solid var(--cream-10); text-align: left; }
+.file-card:hover { border-color: var(--cream-35); }
+.file-icon { width: 44px; height: 44px; border-radius: 4px; }
+.file-meta { display: flex; flex-direction: column; min-width: 0; }
+.file-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--cream); }
+.small { font-size: 12px; }
+
+.lightbox { position: fixed; inset: 0; z-index: 60; background: rgba(10, 10, 10, 0.92); display: grid; place-items: center; padding: 48px 48px 96px; }
+.lightbox img, .lightbox video { max-width: 100%; max-height: calc(100vh - 160px); border-radius: 6px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6); }
+.lightbox-bar { position: fixed; left: 0; right: 0; bottom: 28px; display: flex; justify-content: center; align-items: center; gap: 10px; }
+.lightbox-name { color: var(--cream-55); font-size: 13px; max-width: 40vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 8px; }
+
+.drop-hint { position: fixed; inset: 12px; z-index: 55; border: 2px dashed var(--hot); border-radius: 14px; background: rgba(22, 21, 21, 0.82); display: grid; place-items: center; pointer-events: none; }
+.drop-hint .display { font-size: 64px; }
+
+/* ---------- GIF picker ---------- */
+.gif-picker { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 30; width: 400px; height: 440px; display: flex; flex-direction: column; gap: 8px; padding: 10px;
+  background: var(--ink-2); border: 1px solid var(--cream-10); border-radius: 8px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
+.gif-picker .line { width: 100%; }
+.gif-results { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--cream-20) transparent; }
+.gif-grid { columns: 2; column-gap: 6px; }
+.gif-cell { display: block; width: 100%; margin: 0 0 6px; padding: 0; border-radius: 4px; overflow: hidden; break-inside: avoid; background: var(--cream-05); }
+.gif-cell img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.gif-cell:hover { outline: 2px solid var(--hot); outline-offset: -2px; }
+.gif-note { padding: 24px 6px; }
+.gif-foot { text-align: right; }
+
+/* ---------- server messages (welcomes) ---------- */
+.msg.sys-row { padding-top: 10px; padding-bottom: 6px; }
+.sys { display: flex; align-items: baseline; gap: 10px; color: var(--cream-80); }
+.sys-mark { color: var(--hot); font-weight: 700; }
+.sys .time { margin-left: 4px; font-size: 12px; color: var(--cream-35); }

@@ -9,7 +9,13 @@ export interface Msg {
   state: number;
   replyTo: string | null;
   reactions: { emoji: string; users: string[] }[];
+  attachments: Attachment[];
 }
+/** `url` empty = served by the chat server at /files/{id} (see media.ts). */
+export interface Attachment { id: string; name: string; mime: string; size: number; width: number; height: number; url: string; preview: string }
+export interface Gif { id: string; title: string; preview: string; width: number; height: number }
+/** Author id of server-written messages (welcomes). */
+export const SYSTEM_USER = "0";
 export interface Presence { userId: string; channelId: string | null; muted: boolean; deafened: boolean }
 
 export type UiEvent =

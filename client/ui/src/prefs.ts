@@ -3,6 +3,7 @@
 // Device-specific settings (audio devices) are NOT here: they stay local.
 import { createStore } from "solid-js/store";
 import { call } from "./ipc";
+import { DEFAULT_HOTKEYS, type Action } from "./hotkeys";
 
 export interface Prefs {
   sounds: boolean;
@@ -16,17 +17,29 @@ export interface Prefs {
   lastServer: string | null;
   /** server id → last open channel id */
   lastChannel: Record<string, string>;
+  /** UI scale, 1 = 100 %. */
+  scale: number;
+  /** action → key combo ("Ctrl+Alt+ArrowDown"); "" = unbound. */
+  hotkeys: Record<Action, string>;
 }
 
 export const DEFAULT_PREFS: Prefs = {
   sounds: true, ptt: false, pttKey: 0, aec: true, ns: true, agc: true,
   game: "wordle", recentEmoji: [], lastServer: null, lastChannel: {},
+  scale: 1, hotkeys: { ...DEFAULT_HOTKEYS },
 };
+
+export const SCALES = [0.8, 0.9, 1, 1.1, 1.25, 1.4, 1.5];
+
+/** Defaults + saved values; nested maps merge per key so new actions get defaults. */
+function withDefaults(p: Partial<Prefs>): Prefs {
+  return { ...DEFAULT_PREFS, ...p, hotkeys: { ...DEFAULT_HOTKEYS, ...(p.hotkeys ?? {}) }, lastChannel: { ...(p.lastChannel ?? {}) } };
+}
 
 const CACHE_KEY = "prefs";
 
 function fromCache(): Prefs {
-  try { return { ...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(CACHE_KEY) ?? "{}") }; } catch { return { ...DEFAULT_PREFS }; }
+  try { return withDefaults(JSON.parse(localStorage.getItem(CACHE_KEY) ?? "{}")); } catch { return withDefaults({}); }
 }
 
 export const [prefs, setPrefsStore] = createStore<Prefs>(fromCache());
@@ -54,6 +67,13 @@ function legacyLocal(): Partial<Prefs> {
 function applyToCore(p: Prefs) {
   call("audio_processing", { aec: p.aec, ns: p.ns, agc: p.agc }).catch(() => {});
   call("voice_ptt", { enabled: p.ptt, keyCode: p.pttKey }).catch(() => {});
+  applyScale(p.scale);
+  call("overlay_hotkey", { combo: p.hotkeys.overlay ?? "" }).catch(() => {});
+}
+
+/** Zoom the whole window (games view follows via its bounds). */
+export function applyScale(scale: number) {
+  call("set_zoom", { scale }).catch(() => {});
 }
 
 /**
@@ -70,7 +90,7 @@ export function applyPrefs(json: string) {
   const fresh = Object.keys(incoming).length === 0;
   // A fresh account starts from defaults (never another account's cached
   // prefs), plus a one-time import of settings from older builds.
-  const merged: Prefs = fresh ? { ...DEFAULT_PREFS, ...legacyLocal() } : { ...DEFAULT_PREFS, ...incoming };
+  const merged: Prefs = fresh ? withDefaults(legacyLocal()) : withDefaults(incoming);
   setPrefsStore(merged);
   try { localStorage.setItem(CACHE_KEY, JSON.stringify(merged)); } catch {}
   loaded = true;
@@ -86,7 +106,7 @@ export function resetPrefs() {
   clearTimeout(saveTimer);
   loaded = false;
   lastIncoming = null;
-  setPrefsStore({ ...DEFAULT_PREFS });
+  setPrefsStore(withDefaults({}));
   try { localStorage.removeItem(CACHE_KEY); } catch {}
 }
 

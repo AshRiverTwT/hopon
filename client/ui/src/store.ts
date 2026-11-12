@@ -2,7 +2,7 @@ import { batch, createSignal } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import { call, markPainted, now, randomNonce } from "./ipc";
 import { findId, mergeMsgs, trimTop } from "./merge";
-import { cmpId, type Channel, type Msg, type Presence, type Server, type UiEvent, type User } from "./types";
+import { cmpId, SYSTEM_USER, type Attachment, type Channel, type Gif, type Msg, type Presence, type Server, type UiEvent, type User } from "./types";
 import { chime, closeAudio } from "./sounds";
 import { encodeMentions } from "./rich";
 import { applyPrefs, prefs, resetPrefs, setPrefs } from "./prefs";
@@ -46,6 +46,7 @@ export const [s, set] = createStore({
 });
 
 export const userName = (id: string) => {
+  if (id === SYSTEM_USER) return "HopOn";
   for (const sv of s.servers) for (const m of sv.members) if (m.id === id) return m.name;
   return "unknown";
 };
@@ -404,26 +405,56 @@ export async function loadOlder() {
   }
 }
 
-export function sendMessage(content: string) {
+/** Send text and/or uploaded files and/or a GIF. */
+export function sendMessage(content: string, files: Attachment[] = [], gifs: Gif[] = []) {
   const ch = s.selChannel;
   const me = s.user;
   const members = currentServer()?.members ?? [];
   const text = encodeMentions(content.trim(), members);
-  if (!ch || !me || !text) return;
+  if (!ch || !me || (!text && !files.length && !gifs.length)) return;
+  // Optimistic attachments: GIFs show their preview until the server copy lands.
+  const attachments: Attachment[] = [
+    ...files,
+    ...gifs.map((g) => ({ id: g.id, name: g.title, mime: "image/webp", size: 0, width: g.width, height: g.height, url: g.preview, preview: g.preview })),
+  ];
   const tInput = now();
   const nonce = randomNonce();
   const replyTo = s.replyTo?.id ?? null;
   set("replyTo", null);
   lastTypingSent = 0;
-  const pending: Msg = { id: "p" + nonce, channelId: ch, authorId: me.id, content: text, editedAt: null, ts: Date.now(), nonce, state: 0, replyTo, reactions: [] };
+  const pending: Msg = { id: "p" + nonce, channelId: ch, authorId: me.id, content: text, editedAt: null, ts: Date.now(), nonce, state: 0, replyTo, reactions: [], attachments };
   // Optimistic copy painted this frame; the core only transmits.
   set("msgs", s.msgs.length, pending);
   markPainted([pending.id]);
-  call("send_message", { channelId: ch, content: text, nonce, tInputMs: tInput, replyTo }).catch((err) => {
+  call("send_message", { channelId: ch, content: text, nonce, tInputMs: tInput, replyTo, files: files.map((f) => f.id), gifs: gifs.map((g) => g.id) }).catch((err) => {
     const i = s.msgs.findIndex((m) => m.id === pending.id);
     if (i >= 0) set("msgs", i, "state", 3);
     toast(String(err));
   });
+}
+
+// ---------- keyboard navigation ----------
+
+/** Move to the next/previous text channel (optionally only unread ones). */
+export function cycleChannel(dir: 1 | -1, unreadOnly = false) {
+  const sv = currentServer();
+  if (!sv) return;
+  const list = sv.channels.filter((c) => !c.voice);
+  if (!list.length) return;
+  const at = Math.max(0, list.findIndex((c) => c.id === s.selChannel));
+  for (let k = 1; k <= list.length; k++) {
+    const c = list[(at + dir * k + list.length * k) % list.length];
+    if (!unreadOnly || isUnread(c) || s.mentions[c.id]) {
+      if (c.id !== s.selChannel || s.stage) selectChannel(c.id);
+      return;
+    }
+  }
+}
+
+export function cycleServer(dir: 1 | -1) {
+  if (s.servers.length < 2) return;
+  const at = Math.max(0, s.servers.findIndex((x) => x.id === s.selServer));
+  selectServer(s.servers[(at + dir + s.servers.length) % s.servers.length].id);
 }
 
 export async function editMessage(id: string, content: string) {

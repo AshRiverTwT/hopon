@@ -21,17 +21,18 @@
       {
         "label": "main",
         "title": "HopOn",
-        "width": 1100,
-        "height": 720,
+        "width": 1280,
+        "height": 800,
         "minWidth": 720,
         "minHeight": 480,
         "visible": true,
         "backgroundColor": "#161515",
-        "theme": "Dark"
+        "theme": "Dark",
+        "dragDropEnabled": false
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; media-src 'self' blob: https: http:"
     }
   },
   "bundle": {

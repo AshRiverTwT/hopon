@@ -11,6 +11,9 @@ import { showsHeader } from "../merge";
 import { cmpId, type Msg } from "../types";
 import { Avatar } from "./Avatar";
 import { cellClass, GAMES, parseGameResult } from "../games";
+import Attachments from "./Attachments";
+import { fitBox } from "../media";
+import { SYSTEM_USER } from "../types";
 
 const OVERSCAN = 800; // px above and below the viewport
 const EST_HEADER = 82;
@@ -19,6 +22,11 @@ const EST_DAY = 44;
 const EST_DIVIDER = 28;
 const EST_REACTIONS = 34;
 const EST_LINE = 30;
+const EST_SYSTEM = 44;
+/** Below this the column is collapsed (e.g. games panel in a narrow window): don't measure. */
+const MIN_MEASURE_W = 240;
+/** Bumped when cached heights are dropped: mounted rows measure again. */
+const [measureEpoch, bumpEpoch] = createSignal(0);
 
 export default function MessageList() {
   let el!: HTMLDivElement;
@@ -43,7 +51,8 @@ export default function MessageList() {
     const offs = new Float64Array(list.length + 1);
     for (let i = 0; i < list.length; i++) {
       const m = list[i];
-      offs[i + 1] = offs[i] + (h.get(m.id) ?? ((startsGroup(list, i) ? EST_HEADER : EST_LINE) + (m.replyTo ? EST_QUOTE : 0) + (m.reactions.length ? EST_REACTIONS : 0)
+      offs[i + 1] = offs[i] + (h.get(m.id) ?? ((m.authorId === SYSTEM_USER ? EST_SYSTEM : (startsGroup(list, i) ? EST_HEADER : EST_LINE)) + (m.replyTo ? EST_QUOTE : 0) + (m.reactions.length ? EST_REACTIONS : 0)
+        + m.attachments.reduce((t, a) => t + fitBox(a.width, a.height).h + 10, 0)
         + (dayBreak(list, i) ? EST_DAY : 0) + (m.id === firstNew() ? EST_DIVIDER : 0)));
     }
     return offs;
@@ -70,6 +79,8 @@ export default function MessageList() {
   });
 
   const measure = (id: string, node: HTMLElement) => {
+    // A collapsed column would cache absurd heights (one character per line).
+    if (el.clientWidth < MIN_MEASURE_W) return;
     const h = node.offsetHeight;
     const map = heights();
     if (h && map.get(id) !== h) {
@@ -92,7 +103,15 @@ export default function MessageList() {
   };
 
   onMount(() => {
-    const ro = new ResizeObserver(() => { setViewH(el.clientHeight); if (atBottom) pin(); });
+    // Heights depend on the width: when it changes, re-measure from scratch
+    // (stale heights put rows far off-screen, e.g. after a narrow window).
+    let lastW = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      setViewH(el.clientHeight);
+      const w = el.clientWidth;
+      if (w !== lastW && w >= MIN_MEASURE_W) { lastW = w; setHeights(new Map()); bumpEpoch((n) => n + 1); }
+      if (atBottom) pin();
+    });
     ro.observe(el);
     onCleanup(() => ro.disconnect());
   });
@@ -176,7 +195,7 @@ function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean;
   const real = () => !p.m.id.startsWith("p");
   onMount(() => p.measure(p.m.id, node));
   createEffect(on(
-    () => [p.m.content, s.editing === p.m.id, p.header, p.day, p.newHere, p.m.replyTo, p.m.reactions.length, p.m.reactions.map((r) => r.users.length).join()],
+    () => [p.m.content, s.editing === p.m.id, p.header, p.day, p.newHere, p.m.replyTo, p.m.reactions.length, p.m.reactions.map((r) => r.users.length).join(), p.m.attachments.map((a) => a.id).join(), measureEpoch()],
     () => p.measure(p.m.id, node),
     { defer: true },
   ));
@@ -187,6 +206,15 @@ function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean;
   };
   const flash = () => s.jump === p.m.id;
   createEffect(() => { if (flash()) setTimeout(() => s.jump === p.m.id && set("jump", null), 1600); });
+  if (p.m.authorId === SYSTEM_USER) {
+    return (
+      <div ref={node} class="msg sys-row" classList={{ "mention-me": !!s.user && mentionsUser(p.m.content, s.user.id) }}>
+        <Show when={p.day}><div class="day-sep"><span>{p.day}</span></div></Show>
+        <Show when={p.newHere}><div class="new-sep"><span>New</span></div></Show>
+        <div class="sys"><span class="sys-mark" aria-hidden="true">→</span><Rich text={p.m.content} /><span class="time">{fmtTime(p.m.ts)}</span></div>
+      </div>
+    );
+  }
   return (
     <div ref={node} class="msg" onMouseEnter={() => setHover(true)} onMouseLeave={() => !picker() && setHover(false)}
       classList={{ first: p.header, pending: p.m.state === 0, failed: p.m.state === 3, "mention-me": !!s.user && mentionsUser(p.m.content, s.user.id), flash: flash() }}>
@@ -210,9 +238,10 @@ function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean;
       <Show when={s.editing === p.m.id} fallback={
         <Show when={parseGameResult(p.m.content)} fallback={
         <div class="body">
-          <Rich text={p.m.content} />
+          <Show when={p.m.content}><Rich text={p.m.content} /></Show>
           <Show when={p.m.editedAt}><span class="edited"> · edited</span></Show>
           <Show when={p.m.state === 3}><span class="err"> · Not sent</span></Show>
+          <Show when={p.m.attachments.length}><Attachments list={p.m.attachments} remeasure={() => p.measure(p.m.id, node)} /></Show>
         </div>
         }>
           {(r) => (

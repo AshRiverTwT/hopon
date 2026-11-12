@@ -3,7 +3,8 @@
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { call } from "../ipc";
 import { s, toast } from "../store";
-import { prefs, setPrefs } from "../prefs";
+import { applyScale, prefs, SCALES, setPrefs } from "../prefs";
+import { ACTIONS, comboLabel, comboOf, RESERVED, type Action } from "../hotkeys";
 import { toAvatarBytes } from "./Avatar";
 
 interface Devices {
@@ -33,7 +34,8 @@ export default function Settings(p: { close: () => void }) {
   const [cfg] = createResource(() => call<{ url: string }>("get_config"));
   const ptt = () => prefs.ptt;
   const pttKey = () => prefs.pttKey;
-  const [capturing, setCapturing] = createSignal(false);
+  /** Waiting for a key: "ptt" or a hotkey action. */
+  const [capturing, setCapturing] = createSignal<null | "ptt" | Action>(null);
   let fileInput!: HTMLInputElement;
 
   const savePtt = (en: boolean, k: number) => {
@@ -54,6 +56,21 @@ export default function Settings(p: { close: () => void }) {
     const d = devs(); if (!d) return "Unavailable";
     const id = input ? d.input : d.output;
     return (input ? d.inputs : d.outputs).find((x) => x.id === id)?.name ?? "System default";
+  };
+  const stepScale = (dir: number) => {
+    const i = Math.max(0, SCALES.indexOf(prefs.scale) < 0 ? SCALES.indexOf(1) : SCALES.indexOf(prefs.scale));
+    let j = i + (dir || 1);
+    if (dir === 0 && j >= SCALES.length) j = 0; // Enter cycles
+    setScale(SCALES[Math.min(SCALES.length - 1, Math.max(0, j))]);
+  };
+  const setScale = (v: number) => { setPrefs({ scale: v }); applyScale(v); };
+  const bindHotkey = (a: Action, combo: string) => {
+    const hk = { ...prefs.hotkeys };
+    const other = combo ? (Object.keys(hk) as Action[]).find((k) => k !== a && hk[k] === combo) : undefined;
+    if (other) { hk[other] = ""; toast(`${comboLabel(combo)} moved from "${ACTIONS.find((x) => x.id === other)?.label}"`); }
+    hk[a] = combo;
+    setPrefs({ hotkeys: hk });
+    if (a === "overlay" || other === "overlay") call("overlay_hotkey", { combo: hk.overlay }).catch(err);
   };
   const setProc = (k: "aec" | "ns" | "agc") => {
     setPrefs({ [k]: !prefs[k] });
@@ -78,9 +95,17 @@ export default function Settings(p: { close: () => void }) {
     ] },
     { name: "Controls", opts: [
       { label: "Push to talk", value: () => onOff(ptt()), step: () => savePtt(!ptt(), pttKey()) },
-      { label: "Talk key", value: () => (capturing() ? "Press a key" : pttKey() ? vkName(pttKey()) : "Not set"), step: (d) => { if (d === 0) setCapturing(true); } },
+      { label: "Talk key", value: () => (capturing() === "ptt" ? "Press a key" : pttKey() ? vkName(pttKey()) : "Not set"), step: (d) => { if (d === 0) setCapturing("ptt"); } },
       { label: "Latency overlay", value: () => "Ctrl+Shift+P", step: () => {} },
     ] },
+    { name: "Display", opts: [
+      { label: "Scale · Ctrl + / Ctrl − / Ctrl 0", value: () => `${Math.round(prefs.scale * 100)}%`, step: (d) => stepScale(d) },
+    ] },
+    { name: "Hotkeys", opts: ACTIONS.map((a) => ({
+      label: a.label,
+      value: () => (capturing() === a.id ? "Press keys · Del clears" : comboLabel(prefs.hotkeys[a.id] ?? "")),
+      step: (d: -1 | 0 | 1) => { if (d === 0) setCapturing(a.id); },
+    })) },
     { name: "Account", opts: [
       { label: "Server", value: () => cfg()?.url ?? "", step: () => {} },
       { label: "Session", value: () => "Log out", step: (d) => { if (d === 0) { call("logout").catch(err); p.close(); } } },
@@ -92,11 +117,23 @@ export default function Settings(p: { close: () => void }) {
   const current = () => cats()[cat()];
 
   const onKey = (e: KeyboardEvent) => {
-    if (capturing()) {
+    const cap = capturing();
+    if (cap === "ptt") {
       e.preventDefault(); e.stopPropagation();
-      setCapturing(false);
+      setCapturing(null);
       if (e.key !== "Escape") savePtt(true, e.keyCode); // keyCode = Windows virtual-key code
       return;
+    }
+    if (cap) {
+      e.preventDefault(); e.stopPropagation();
+      if (e.key === "Escape") return void setCapturing(null);
+      if (e.key === "Delete" || e.key === "Backspace") { setCapturing(null); return bindHotkey(cap, ""); }
+      const combo = comboOf(e);
+      if (!combo) return; // modifier alone: keep waiting
+      setCapturing(null);
+      if (RESERVED.has(combo)) return toast(`${comboLabel(combo)} is reserved`);
+      if (!e.ctrlKey && !e.altKey && !/^F\d+$/.test(e.code)) return toast("Use Ctrl or Alt (or an F-key) so typing isn't affected");
+      return bindHotkey(cap, combo);
     }
     if (e.key === "Escape") { if (opt() >= 0) { setOpt(-1); e.stopPropagation(); } else p.close(); return; }
     const n = opt() < 0 ? cats().length : current().opts.length;

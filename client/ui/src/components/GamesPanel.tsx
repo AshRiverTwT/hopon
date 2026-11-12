@@ -11,8 +11,10 @@ export default function GamesPanel(p: { close: () => void }) {
   const [game, setGame] = createSignal<GameId>((GAMES.some((g) => g.id === prefs.game) ? prefs.game : "wordle") as GameId);
   let host!: HTMLDivElement;
   const rect = () => {
+    // CSS px → window px: the page may be zoomed (Settings → Display → Scale).
     const r = host.getBoundingClientRect();
-    return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+    const k = prefs.scale || 1;
+    return { x: Math.round(r.left * k), y: Math.round(r.top * k), w: Math.round(r.width * k), h: Math.round(r.height * k) };
   };
   const open = (g: GameId) => {
     setGame(g);
@@ -21,6 +23,7 @@ export default function GamesPanel(p: { close: () => void }) {
   };
   // Results go to the server you are looking at.
   createEffect(on(() => s.selServer, (id) => { if (id) call("games_server", { serverId: id }).catch(() => {}); }, { defer: true }));
+  createEffect(on(() => prefs.scale, () => requestAnimationFrame(() => call("games_bounds", rect()).catch(() => {})), { defer: true }));
   onMount(() => {
     requestAnimationFrame(() => open(game()));
     let raf = 0;

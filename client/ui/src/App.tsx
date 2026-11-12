@@ -1,6 +1,12 @@
 import { Match, Show, Switch, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { call } from "./ipc";
-import { currentServer, isOwner, maybeMarkRead, s, toast } from "./store";
+import { currentServer, cycleChannel, cycleServer, isOwner, maybeMarkRead, s, toast } from "./store";
+import { comboOf, type Action } from "./hotkeys";
+import { applyScale, prefs, SCALES, setPrefs } from "./prefs";
+import { addFilesToComposer } from "./components/Composer";
+
+/** Games sit beside the chat; below this width there's no room for both. */
+const GAMES_MIN_WIDTH = 1000;
 import Login from "./components/Login";
 import MessageList from "./components/MessageList";
 import Composer from "./components/Composer";
@@ -18,7 +24,42 @@ type Sheet = null | { k: "servers" } | { k: "server" } | { k: "members" } | { k:
 export default function App() {
   const [perf, setPerf] = createSignal(false);
   const [sheet, setSheet] = createSignal<Sheet>(null);
-  const [games, setGames] = createSignal(false);
+  const [games, setGamesRaw] = createSignal(false);
+  const [dropping, setDropping] = createSignal(false);
+  const setGames = (v: boolean | ((x: boolean) => boolean)) => {
+    const next = typeof v === "function" ? v(games()) : v;
+    if (next && window.innerWidth < GAMES_MIN_WIDTH) {
+      toast("Make the window wider (or maximize it) to play games beside the chat");
+      return;
+    }
+    setGamesRaw(next);
+  };
+  const zoom = (dir: -1 | 0 | 1) => {
+    const i = Math.max(0, SCALES.indexOf(prefs.scale));
+    const v = dir === 0 ? 1 : SCALES[Math.min(SCALES.length - 1, Math.max(0, i + dir))];
+    setPrefs({ scale: v });
+    applyScale(v);
+    toast(`Zoom ${Math.round(v * 100)}%`);
+  };
+  const run = (a: Action) => {
+    const err = (e: unknown) => toast(String(e));
+    switch (a) {
+      case "nextChannel": return cycleChannel(1);
+      case "prevChannel": return cycleChannel(-1);
+      case "nextUnread": return cycleChannel(1, true);
+      case "prevUnread": return cycleChannel(-1, true);
+      case "nextServer": return cycleServer(1);
+      case "prevServer": return cycleServer(-1);
+      case "toggleMute": return void call("voice_mute", { muted: !s.voice.muted }).catch(err);
+      case "toggleDeafen": return void call("voice_deafen", { deafened: !s.voice.deafened }).catch(err);
+      case "toggleGames": return currentServer() && setGames((v) => !v);
+      case "focusComposer": return (document.querySelector(".composer textarea") as HTMLTextAreaElement | null)?.focus();
+      case "zoomIn": return zoom(1);
+      case "zoomOut": return zoom(-1);
+      case "zoomReset": return zoom(0);
+      case "overlay": return;
+    }
+  };
   // The game is a native view drawn above the page: hide it under sheets/overlays.
   createEffect(() => {
     if (!games()) return;
@@ -27,8 +68,44 @@ export default function App() {
   onMount(() => {
     call<{ testOpenGames?: boolean }>("get_config").then((c) => c?.testOpenGames && setGames(true)).catch(() => {});
     const k = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.code === "KeyP") { e.preventDefault(); setPerf((v) => !v); }
+      if (e.ctrlKey && e.shiftKey && e.code === "KeyP") { e.preventDefault(); setPerf((v) => !v); return; }
+      const combo = comboOf(e);
+      if (!combo || !s.user) return;
+      const hk = prefs.hotkeys;
+      const a = (Object.keys(hk) as Action[]).find((x) => x !== "overlay" && hk[x] === combo);
+      if (!a) return;
+      // Sheets (settings, etc.) own the keyboard, except for zoom.
+      if (sheet() && !a.startsWith("zoom")) return;
+      e.preventDefault();
+      run(a);
     };
+    // Games beside the chat need room: close them when the window gets narrow.
+    const onResize = () => {
+      if (games() && window.innerWidth < GAMES_MIN_WIDTH) {
+        setGamesRaw(false);
+        toast("Games closed: the window is too narrow for games and chat side by side");
+      }
+    };
+    // Files dropped anywhere on the window go to the message box.
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+    const over = (e: DragEvent) => { if (hasFiles(e) && s.selChannel && !s.stage) { e.preventDefault(); setDropping(true); } };
+    const leave = (e: DragEvent) => { if (!e.relatedTarget) setDropping(false); };
+    const dropped = (e: DragEvent) => {
+      setDropping(false);
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      if (s.selChannel && !s.stage) addFilesToComposer([...(e.dataTransfer?.files ?? [])]);
+    };
+    window.addEventListener("dragover", over);
+    window.addEventListener("dragleave", leave);
+    window.addEventListener("drop", dropped);
+    window.addEventListener("resize", onResize);
+    onCleanup(() => {
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("dragleave", leave);
+      window.removeEventListener("drop", dropped);
+      window.removeEventListener("resize", onResize);
+    });
     window.addEventListener("keydown", k);
     window.addEventListener("focus", maybeMarkRead);
     document.addEventListener("visibilitychange", maybeMarkRead);
@@ -101,6 +178,7 @@ export default function App() {
         </Show>
       </Show>
       <Show when={perf()}><PerfOverlay close={() => setPerf(false)} /></Show>
+      <Show when={dropping()}><div class="drop-hint"><span class="display">Drop to attach</span></div></Show>
       <Show when={s.toast}><div class="toast">{s.toast}</div></Show>
     </>
   );
