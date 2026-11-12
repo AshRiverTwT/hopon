@@ -61,7 +61,7 @@ EOF
   git commit -qm "Downloads at $rev
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01CcWXz7DJtjs9RpBCxmHEbN"
+Claude-Session: https://claude.ai/code/session_01CcWXzAm1Td6CAPRiwzZTSK"
   git push -q origin HEAD:downloads
 )
 git worktree remove --force "$wt"

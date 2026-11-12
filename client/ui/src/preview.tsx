@@ -5,6 +5,9 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import type { Msg, Server } from "./types";
 
 const scene = new URLSearchParams(location.search).get("s") ?? "chat";
+// ?lk=<token>&lkurl=ws://…: screen share against a real LiveKit server (tests).
+const lk = new URLSearchParams(location.search).get("lk");
+const lkUrl = new URLSearchParams(location.search).get("lkurl") ?? "ws://127.0.0.1:7880";
 const me = { id: "1001", name: "ash", avatarV: 1 };
 const names = ["ash", "mira", "jun", "tobias", "nell", "kaito", "rosa", "ezra"];
 const members = names.map((n, i) => ({ id: String(1001 + i), name: n, avatarV: i % 3 === 2 ? 0 : 1 }));
@@ -77,7 +80,7 @@ mockIPC((cmd, args) => {
     case "perf_stats": return { rows: [{ name: "text: remote input->paint (synced)", count: 600, p50_ms: 21.3, p95_ms: 28.7, p99_ms: 33.1, max_ms: 40 }], startup: { processToPaintMs: 657, mainToPaintMs: 610, mainToConnectedMs: 2.5 }, clockOffsetMs: 0.1, bestRttMs: 0.4, rssMb: 41 };
     case "create_invite": return "hopon://invite/Kq7xN2pLmA";
     case "avatar": return fakeAvatar(String((args as { userId: string }).userId));
-    case "screen_grant": return new Promise(() => {}); // never connects in the preview
+    case "screen_grant": return lk ? [lkUrl, lk] : new Promise(() => {}); // never connects in the preview (unless ?lk=)
     case "update_check": return { current: "0.4.2", latest: "0.4.3", available: true, notes: "" };
     case "gif_search": return { enabled: true, results: Array.from({ length: 12 }, (_, i) => ({ id: `klipy:${i}`, title: `gif ${i}`, preview: `https://media.example/g${i}.gif`, width: 320, height: 200 + (i % 3) * 60 })) };
     case "upload_file": return { id: "CCCCCCCCCCCCCCCCCCCCCC", name: "screenshot.png", mime: "image/png", size: 91234, width: 1280, height: 720, url: "", preview: "" };
@@ -97,7 +100,7 @@ onEvent({ t: "conn", state: "online", rttMs: 0.4 });
 onEvent({ t: "session", user, servers, voice });
 if (scene === "voice") {
   onEvent({ t: "voice", channelId: "7101", state: "connected", muted: false, deafened: false, detail: null });
-  import("./screen").then((m) => m.setScreen({ connected: true, shares: [{ userId: "1002", identity: "1002:screen", hasAudio: true }],
+  if (!lk) import("./screen").then((m) => m.setScreen({ connected: true, shares: [{ userId: "1002", identity: "1002:screen", hasAudio: true }],
     ...(new URLSearchParams(location.search).has("watch") ? { watching: ["1002"], live: { "1002": true }, viewers: { "1002": ["1001", "1004"] } } : {}) }));
   onEvent({ t: "speaking", userIds: ["1002"] });
 }

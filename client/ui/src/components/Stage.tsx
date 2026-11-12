@@ -33,7 +33,12 @@ function ShareControls() {
   let preview: HTMLVideoElement | undefined;
   const start = async () => {
     setBusy(true);
-    try { await startShare(quality(), audio()); queueMicrotask(() => preview && attachLocalPreview(preview)); }
+    try {
+      await startShare(quality(), audio());
+      queueMicrotask(() => preview && attachLocalPreview(preview));
+      // Windows only shares sound along with a whole screen, not a window.
+      if (audio() && !screen.sharingAudio) toast("Sharing without sound: Windows only includes audio when you share a whole screen.");
+    }
     catch (e) { const m = String(e); if (!/NotAllowed|Permission|denied|AbortError/i.test(m)) toast(m); }
     finally { setBusy(false); }
   };
@@ -48,7 +53,7 @@ function ShareControls() {
             </For>
           </div>
           <label class="check" title="Shares your computer's sound too. Voice chat may echo for viewers on speakers.">
-            <input type="checkbox" checked={audio()} onChange={(e) => setAudio(e.currentTarget.checked)} /> Include audio
+            <input type="checkbox" checked={audio()} onChange={(e) => setAudio(e.currentTarget.checked)} /> Include audio <span class="muted small">(whole screen only)</span>
           </label>
         </div>
       }>

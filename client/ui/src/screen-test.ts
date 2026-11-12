@@ -5,3 +5,4 @@ mockIPC((cmd) => (cmd === "screen_grant" ? [q.get("url"), q.get("token")] : null
 const screen = await import("./screen");
 (window as unknown as Record<string, unknown>).__screen = screen;
 (window as unknown as Record<string, unknown>).__ready = true;
+(window as unknown as Record<string, unknown>).__lk = await import("livekit-client");

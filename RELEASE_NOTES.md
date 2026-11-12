@@ -2,6 +2,24 @@
 
 **Download the latest:** [HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe)
 
+## HopOn 0.5.1
+
+App only: no server update needed.
+
+### Fixed
+
+- **Screen share went black** in fullscreen, in the mini player, and when you
+  came back to the voice room (until you pressed Stop watching and Watch
+  again). A stream now keeps its picture wherever you move it, even when
+  the shared screen isn't changing.
+- **Stream volume slider** is always there on a stream now (dimmed when the
+  stream has no sound). Sharing tip: Windows only includes sound when you
+  share a **whole screen**, not a single window; HopOn now tells you when
+  that happens.
+- **Chat text overlapping or vanishing** after switching channels (fixed
+  itself when you moved the mouse over it). Messages now stay laid out
+  correctly as pictures, GIFs and emoji load.
+
 ## HopOn 0.5.0
 
 **Update the server too** for viewer counts on screen shares (everything

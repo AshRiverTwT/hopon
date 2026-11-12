@@ -603,6 +603,8 @@ video.media { background: #000; }
 .stream-vol { gap: 4px; }
 .stream-vol input[type=range] { width: 90px; }
 .stream-vol .vol-n { width: 34px; }
+.stream-vol.silent { opacity: 0.45; }
+.stream-slot { display: contents; }
 .link.inline { display: inline; font-size: inherit; text-decoration: underline; }
 /* Status corner is narrow (rail width): pieces wrap as whole units. */
 .foot-r .status { flex-wrap: wrap; justify-content: flex-end; row-gap: 2px; text-align: right; }

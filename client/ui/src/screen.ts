@@ -5,9 +5,10 @@
 //
 // Watching is opt-in per stream (nothing is downloaded until you click Watch)
 // and is independent of what's on screen: the voice room tile, the floating
-// mini player and fullscreen are all just views that bind a <video> to a
-// stream you're already watching. Leaving the room view never drops the
-// stream, so coming back shows the picture straight away.
+// mini player and fullscreen are all just slots. Each watched stream has ONE
+// <video> element that moves into whichever slot is on top. A new element
+// would stay black until the sharer's screen changes (a still desktop sends
+// no new frames); moving the same element keeps the picture it has.
 //
 // The SDK is loaded on first use, so it costs nothing until you're in voice.
 import { createStore, produce } from "solid-js/store";
@@ -55,8 +56,16 @@ let room: Room | null = null;
 let connecting: Promise<void> | null = null;
 let local: LocalTrack[] = [];
 let myUser = "";
-/** Video elements showing each watched stream (several views may bind at once). */
-const views = new Map<string, Set<HTMLVideoElement>>();
+/** The one <video> per watched stream, and the slots that want it (last = on top). */
+const players = new Map<string, HTMLVideoElement>();
+const slots = new Map<string, HTMLElement[]>();
+/** Hidden parking spot while no slot shows a stream: still in the document
+ * (so it isn't paused and keeps its picture), not visible (so adaptive stream
+ * pauses the download). */
+let park: HTMLDivElement | null = null;
+/** Channel connectScreens is (being) connected to; set synchronously so
+ * overlapping calls don't open duplicate connections. */
+let target: string | null = null;
 const audios = new Map<string, RemoteAudioTrack>();
 
 const userOf = (identity: string) => identity.split(":")[0];
@@ -104,10 +113,40 @@ function publishWatching() {
   });
 }
 
+function playerFor(userId: string) {
+  let el = players.get(userId);
+  if (!el) {
+    el = document.createElement("video");
+    el.autoplay = true;
+    el.playsInline = true;
+    el.muted = true; // stream sound plays through its own element (volume control)
+    players.set(userId, el);
+    place(userId);
+  }
+  return el;
+}
+
+/** Put the stream's <video> in its top slot, or park it. */
+function place(userId: string) {
+  const el = players.get(userId);
+  if (!el) return;
+  const top = slots.get(userId)?.at(-1);
+  if (!park) {
+    park = document.createElement("div");
+    park.style.display = "none";
+    document.body.appendChild(park);
+  }
+  const into = top ?? park;
+  if (el.parentElement !== into) into.appendChild(el);
+  if (el.paused && el.srcObject) void el.play().catch(() => {});
+}
+
 function attach(track: RemoteTrack, identity: string) {
   const user = userOf(identity);
   if (track.kind === "video") {
-    for (const el of views.get(user) ?? []) track.attach(el);
+    if (!screen.watching.includes(user)) return;
+    track.attach(playerFor(user));
+    place(user);
     setScreen("live", user, true);
   } else {
     track.attach(); // stream audio plays through its own hidden element
@@ -118,7 +157,9 @@ function attach(track: RemoteTrack, identity: string) {
 }
 
 function dropViews(userId: string) {
-  views.delete(userId);
+  const el = players.get(userId);
+  if (el) { el.srcObject = null; el.remove(); }
+  players.delete(userId);
   audios.delete(userId);
   setScreen("live", produce((l) => void delete l[userId]));
 }
@@ -126,13 +167,15 @@ function dropViews(userId: string) {
 /** Join the voice room's screen connection (called when voice connects). */
 export async function connectScreens(channelId: string, me: string) {
   myUser = me;
-  if (screen.channelId === channelId && (room || connecting)) return connecting ?? undefined;
-  await disconnectScreens();
-  setScreen("channelId", channelId);
-  connecting = (async () => {
+  if (target === channelId) return connecting ?? undefined;
+  target = channelId;
+  const job = (async () => {
+    await disconnectRoom();
+    if (target !== channelId) return;
+    setScreen("channelId", channelId);
     lk ??= await import("livekit-client");
     const [url, token] = await call<[string, string]>("screen_grant", { channelId });
-    if (screen.channelId !== channelId) return;
+    if (target !== channelId) return;
     const r = new lk.Room({ adaptiveStream: true, dynacast: true });
     const E = lk.RoomEvent;
     r.on(E.TrackPublished, refresh).on(E.TrackUnpublished, refresh)
@@ -147,29 +190,45 @@ export async function connectScreens(channelId: string, me: string) {
       })
       .on(E.LocalTrackUnpublished, () => { if (!local.length) setScreen({ sharing: false, sharingAudio: false }); })
       .on(E.Disconnected, () => {
-        views.clear();
-        audios.clear();
-        if (screen.full) setFullscreen(null);
-        setScreen({ connected: false, sharing: false, sharingAudio: false, shares: [], watching: [], live: {}, viewers: {}, popped: false });
+        if (room !== r) return; // an old connection closing
+        room = null;
+        target = null; // let the next connectScreens reconnect
+        resetState(null);
       });
-    await r.connect(url, token, { autoSubscribe: false });
-    if (screen.channelId !== channelId) { await r.disconnect(); return; }
+    try {
+      await r.connect(url, token, { autoSubscribe: false });
+    } catch (e) {
+      if (target === channelId) target = null;
+      throw e;
+    }
+    if (target !== channelId) { await r.disconnect(); return; }
     room = r;
     setScreen("connected", true);
     refresh();
-  })().finally(() => (connecting = null));
-  return connecting;
+  })().finally(() => { if (connecting === job) connecting = null; });
+  connecting = job;
+  return job;
 }
 
-export async function disconnectScreens() {
+function resetState(channelId: string | null) {
+  for (const u of [...players.keys()]) dropViews(u);
+  audios.clear();
+  if (screen.full) setFullscreen(null);
+  setScreen({ channelId, connected: false, sharing: false, sharingAudio: false, shares: [], watching: [], live: {}, viewers: {}, popped: false });
+}
+
+async function disconnectRoom() {
   await stopShare();
   const r = room;
   room = null;
-  views.clear();
-  audios.clear();
-  if (screen.full) setFullscreen(null);
-  setScreen({ channelId: null, connected: false, sharing: false, sharingAudio: false, shares: [], watching: [], live: {}, viewers: {}, popped: false });
+  resetState(screen.channelId);
   await r?.disconnect().catch(() => {});
+}
+
+export async function disconnectScreens() {
+  target = null;
+  await disconnectRoom();
+  setScreen("channelId", null);
 }
 
 /** Pick a screen/window (the system picker) and stream it. */
@@ -268,19 +327,20 @@ function videoTrackOf(userId: string) {
   return p?.getTrackPublication(lk.Track.Source.ScreenShare)?.track ?? null;
 }
 
-/** A view (tile, mini player, fullscreen) shows a watched stream in `el`. */
-export function bindVideo(userId: string, el: HTMLVideoElement) {
-  if (userId === SELF) return attachLocalPreview(el);
-  let set = views.get(userId);
-  if (!set) views.set(userId, (set = new Set()));
-  set.add(el);
-  videoTrackOf(userId)?.attach(el);
+/** A view (tile, mini player, fullscreen) wants to show a watched stream in `slot`. */
+export function bindVideo(userId: string, slot: HTMLElement) {
+  const list = slots.get(userId) ?? [];
+  slots.set(userId, [...list.filter((x) => x !== slot), slot]);
+  const t = videoTrackOf(userId);
+  if (t && screen.watching.includes(userId) && !players.has(userId)) t.attach(playerFor(userId));
+  place(userId);
 }
 
-export function unbindVideo(userId: string, el: HTMLVideoElement) {
-  if (userId === SELF) { el.srcObject = null; return; }
-  views.get(userId)?.delete(el);
-  videoTrackOf(userId)?.detach(el);
+export function unbindVideo(userId: string, slot: HTMLElement) {
+  const list = (slots.get(userId) ?? []).filter((x) => x !== slot);
+  if (list.length) slots.set(userId, list);
+  else slots.delete(userId);
+  place(userId);
 }
 
 /** Stream sound, 0–100 %, remembered per person. */

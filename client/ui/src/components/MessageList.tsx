@@ -1,6 +1,7 @@
 // Windowed message list. Only rows intersecting the viewport (+ overscan) are
-// in the DOM; row heights are measured once after mount and cached by id, so
-// a 5000-message channel renders ~30 rows and scrolls at full frame rate.
+// in the DOM; row heights are cached by id and kept current by a
+// ResizeObserver on every mounted row (fonts, media, edits, reactions), so a
+// 5000-message channel renders ~30 rows and scrolls at full frame rate.
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { deleteMessage, editMessage, isOwner, jumpTo, loadOlder, maybeMarkRead, s, set, toggleReaction, userName } from "../store";
 import { findId } from "../merge";
@@ -89,6 +90,17 @@ export default function MessageList() {
     }
   };
 
+  // Every mounted row reports its height whenever it changes.
+  const rowRO = new ResizeObserver((entries) => {
+    for (const e of entries) {
+      const n = e.target as HTMLElement;
+      if (n.isConnected && n.dataset.id) measure(n.dataset.id, n);
+    }
+  });
+  onCleanup(() => rowRO.disconnect());
+  const observe = (n: HTMLElement) => rowRO.observe(n);
+  const unobserve = (n: HTMLElement) => rowRO.unobserve(n);
+
   // Scroll events caused by our own pinning must not clear `atBottom`: row
   // heights can grow between setting scrollTop and the event firing.
   let pinnedAt = -1;
@@ -136,7 +148,9 @@ export default function MessageList() {
       prevHeight = total;
     });
   }));
-  createEffect(on(() => s.selChannel, () => { atBottom = true; set("atBottom", true); setHeights(new Map()); }));
+  // New channel: drop cached heights, and have rows already on screen measure
+  // again (they may have mounted, and measured, before this ran).
+  createEffect(on(() => s.selChannel, () => { atBottom = true; set("atBottom", true); setHeights(new Map()); bumpEpoch((n) => n + 1); }));
   // Jump: scroll the target row into the middle of the viewport.
   createEffect(on(() => s.jump, (id) => {
     if (!id) return;
@@ -157,11 +171,14 @@ export default function MessageList() {
         <Show when={!s.more && s.msgs.length > 0}>
           <div class="channel-start eyebrow">Beginning of the channel</div>
         </Show>
-        <div style={{ transform: `translateY(${layout()[range()[0]]}px)` }}>
+        {/* Positioned with top, not transform: a moved transform layer holding
+            GIF videos could be left stale on screen in WebView2 (rows painted
+            over each other until hovered). */}
+        <div style={{ position: "absolute", left: 0, right: 0, top: `${layout()[range()[0]]}px` }}>
           <For each={visible()}>
             {(m, k) => {
               const i = () => range()[0] + k();
-              return <Row m={m} header={startsGroup(s.msgs, i())} day={dayBreak(s.msgs, i()) ? dayLabel(m.ts) : null} newHere={m.id === firstNew()} measure={measure} />;
+              return <Row m={m} header={startsGroup(s.msgs, i())} day={dayBreak(s.msgs, i()) ? dayLabel(m.ts) : null} newHere={m.id === firstNew()} measure={measure} observe={observe} unobserve={unobserve} />;
             }}
           </For>
         </div>
@@ -193,14 +210,16 @@ function fmtTime(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean; measure: (id: string, n: HTMLElement) => void }) {
+function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean; measure: (id: string, n: HTMLElement) => void;
+  observe: (n: HTMLElement) => void; unobserve: (n: HTMLElement) => void }) {
   let node!: HTMLDivElement;
   const mine = () => p.m.authorId === s.user?.id;
   const [picker, setPicker] = createSignal(false);
   // Actions are only built while hovered: most rows never need them.
   const [hover, setHover] = createSignal(false);
   const real = () => !p.m.id.startsWith("p");
-  onMount(() => p.measure(p.m.id, node));
+  onMount(() => { node.dataset.id = p.m.id; p.measure(p.m.id, node); p.observe(node); });
+  onCleanup(() => p.unobserve(node));
   createEffect(on(
     () => [p.m.content, s.editing === p.m.id, p.header, p.day, p.newHere, p.m.replyTo, p.m.reactions.length, p.m.reactions.map((r) => r.users.length).join(), p.m.attachments.map((a) => a.id).join(), measureEpoch()],
     () => p.measure(p.m.id, node),

@@ -3,16 +3,23 @@
 // and fullscreen. All three only bind a <video> to a stream that stays
 // subscribed (screen.ts), so switching between them is instant.
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { bindVideo, screen, SELF, setFullscreen, setScreen, setStreamVolume, streamVolume, unbindVideo, unwatch, viewerCount } from "../screen";
+import { attachLocalPreview, bindVideo, screen, SELF, setFullscreen, setScreen, setStreamVolume, streamVolume, unbindVideo, unwatch, viewerCount } from "../screen";
 import { s, showStage, userName } from "../store";
 import { prefs } from "../prefs";
 import { CloseIcon, DockIcon, EyeIcon, ExitFullIcon, FullIcon, PipIcon, SpeakerIcon } from "./icons";
 
 export function StreamVideo(p: { userId: string; onDblClick?: () => void }) {
-  let v!: HTMLVideoElement;
-  onMount(() => bindVideo(p.userId, v));
-  onCleanup(() => unbindVideo(p.userId, v));
-  return <video ref={v} autoplay playsinline muted={p.userId === SELF} onDblClick={p.onDblClick} />;
+  if (p.userId === SELF) {
+    let v!: HTMLVideoElement;
+    onMount(() => attachLocalPreview(v));
+    onCleanup(() => (v.srcObject = null));
+    return <video ref={v} autoplay playsinline muted onDblClick={p.onDblClick} />;
+  }
+  // A slot: the stream's own <video> (screen.ts) moves in while this view is on top.
+  let slot!: HTMLDivElement;
+  onMount(() => bindVideo(p.userId, slot));
+  onCleanup(() => unbindVideo(p.userId, slot));
+  return <div ref={slot} class="stream-slot" onDblClick={p.onDblClick} />;
 }
 
 /** Eye + number of people watching `userId`'s stream (names on hover). */
@@ -25,13 +32,14 @@ export function Viewers(p: { userId: string }) {
   );
 }
 
-/** Stream sound, 0–100 % (only when the stream has sound). */
+/** Stream sound, 0–100 %. Always there; dimmed while the stream has no sound. */
 export function StreamVolume(p: { userId: string }) {
-  const has = () => screen.shares.find((x) => x.userId === p.userId)?.hasAudio;
+  const has = () => !!screen.shares.find((x) => x.userId === p.userId)?.hasAudio;
   const v = () => streamVolume(p.userId);
   return (
-    <Show when={has()}>
-      <label class="vol stream-vol" title="Stream volume (double-click: 100 %)" onDblClick={() => setStreamVolume(p.userId, 100)}>
+    <Show when={p.userId}>
+      <label class="vol stream-vol" classList={{ silent: !has() }} onDblClick={() => setStreamVolume(p.userId, 100)}
+        title={has() ? "Stream volume (double-click: 100 %)" : `${userName(p.userId)}'s stream has no sound (they didn't share audio)`}>
         <button class="icon-btn" aria-label={v() ? "Mute stream" : "Unmute stream"} classList={{ off: !v() }}
           onClick={(e) => { e.preventDefault(); setStreamVolume(p.userId, v() ? 0 : 100); }}><SpeakerIcon /></button>
         <input type="range" min="0" max="100" step="1" value={v()} aria-label={`Stream volume for ${userName(p.userId)}`}
