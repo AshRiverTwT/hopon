@@ -9,6 +9,7 @@ mod guard;
 mod perf;
 mod secure;
 mod sys;
+mod tray;
 mod ui;
 #[cfg(feature = "voice")]
 mod voice;
@@ -32,7 +33,9 @@ pub fn run() {
         .init();
 
     tauri::Builder::default()
+        .on_window_event(tray::on_window_event)
         .setup(|app| {
+            tray::install(app)?;
             let dir = app.path().app_local_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             // The cache is disposable: never let it stop the app from starting.
@@ -116,6 +119,8 @@ pub fn run() {
             commands::voice_ptt,
             commands::voice_volume,
             commands::activity_sharing,
+            commands::screen_grant,
+            tray::close_to_tray,
             commands::audio_processing,
             commands::audio_devices,
             commands::audio_set_device,

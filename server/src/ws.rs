@@ -630,6 +630,16 @@ impl Session {
                 self.send(req, S2C::VoiceGrant { channel_id, url: self.st.cfg.livekit_url.clone(), token }).await;
                 Ok(())
             }
+            C2S::ScreenGrant { channel_id } => {
+                // Only people already in that voice room can share or watch.
+                let in_room = self.st.voice.lock().get(&uid).map(|e| e.channel_id) == Some(channel_id);
+                if !in_room {
+                    return Err((ErrorCode::Forbidden, "join the voice room first".into()));
+                }
+                let token = voice::screen_grant(&self.st.cfg.livekit_key, &self.st.cfg.livekit_secret, uid, name, channel_id);
+                self.send(req, S2C::VoiceGrant { channel_id, url: self.st.cfg.livekit_url.clone(), token }).await;
+                Ok(())
+            }
             C2S::VoiceState { channel_id, muted, deafened } => {
                 match channel_id {
                     None => self.leave_voice(uid),

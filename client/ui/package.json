@@ -1,7 +1,7 @@
 {
   "name": "hopon-ui",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.4",
+    "livekit-client": "2.22.4",
     "solid-js": "1.9.9"
   },
   "devDependencies": {

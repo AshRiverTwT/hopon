@@ -88,6 +88,24 @@ async fn http(ws_url: &str, method: &str, path: &str, headers: &[(&str, String)]
     Ok((status, head, body))
 }
 
+/// Payload of a JWT (no signature check: the SFU does that).
+fn jwt_claims(t: &str) -> Result<serde_json::Value> {
+    let p = t.split('.').nth(1).ok_or_else(|| anyhow::anyhow!("not a jwt"))?;
+    let mut b = p.replace('-', "+").replace('_', "/");
+    while b.len() % 4 != 0 { b.push('='); }
+    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = vec![];
+    let mut buf = 0u32;
+    let mut bits = 0;
+    for c in b.bytes().filter(|c| *c != b'=') {
+        let v = T.iter().position(|x| *x == c).ok_or_else(|| anyhow::anyhow!("bad base64"))? as u32;
+        buf = (buf << 6) | v;
+        bits += 6;
+        if bits >= 8 { bits -= 8; out.push((buf >> bits) as u8); buf &= (1 << bits) - 1; }
+    }
+    Ok(serde_json::from_slice(&out)?)
+}
+
 macro_rules! check {
     ($name:expr, $e:expr) => {{
         let r: Result<()> = async { $e }.await;
@@ -264,7 +282,15 @@ async fn main() -> Result<()> {
     pass &= check!("voice grant + presence (join, mute, leave on disconnect)", {
         ensure!(matches!(a.call(C2S::VoiceGrant { channel_id: voice }).await?, S2C::VoiceGrant { .. }));
         ensure!(a.call(C2S::VoiceGrant { channel_id: text }).await.is_err());
+        ensure!(a.call(C2S::ScreenGrant { channel_id: voice }).await.is_err(), "screen grant before joining voice");
         a.call(C2S::VoiceState { channel_id: Some(voice), muted: true, deafened: false }).await?;
+        // In the room: screen token with its own identity, screen sources only.
+        let S2C::VoiceGrant { token, .. } = a.call(C2S::ScreenGrant { channel_id: voice }).await? else { bail!("screen grant") };
+        let claims = jwt_claims(&token)?;
+        ensure!(claims["sub"].as_str().unwrap_or("").ends_with(":screen"), "identity {}", claims["sub"]);
+        ensure!(claims["video"]["canPublishSources"] == serde_json::json!(["screen_share", "screen_share_audio"]), "{}", claims["video"]);
+        let S2C::VoiceGrant { token, .. } = a.call(C2S::VoiceGrant { channel_id: voice }).await? else { bail!("voice grant") };
+        ensure!(jwt_claims(&token)?["video"]["canPublishSources"] == serde_json::json!(["microphone"]), "voice token not mic-only");
         loop { if let S2C::VoicePresence { channel_id, muted, .. } = next_msg(&mut b).await? { ensure!(channel_id == Some(voice) && muted); break; } }
         let mut c = Client::connect(&url).await?;
         c.call(C2S::Refresh { refresh_token: refresh.clone() }).await.map(|_| ()).ok();
@@ -386,6 +412,8 @@ async fn main() -> Result<()> {
         let mut m = Client::connect(&url).await?;
         let mu = m.signup("rmem").await?;
         m.call(C2S::JoinInvite { code }).await?;
+        // The server's welcome comes right after the join; let it land first.
+        wait_for(&mut m, |e| if let S2C::Message(x) = e { (x.author_id == SYSTEM_USER).then_some(()) } else { None }).await?;
         let mut newest = 0;
         for i in 0..3u64 {
             let t = now_us();

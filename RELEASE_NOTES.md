@@ -2,6 +2,30 @@
 
 **Download the latest:** [HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe)
 
+## HopOn 0.4.0
+
+**Update the app and the server together** (new protocol: a 0.3 app shows
+*Update needed* on a 0.4 server).
+
+### New
+
+- **Screen share, 1080p 60 fps or 720p 60 fps.** In a voice room: pick a
+  quality, press **Share screen**, choose a screen or window. Others see
+  **LIVE** next to your name and press **Watch** (with fullscreen). Nothing
+  is downloaded until someone presses Watch. *Include audio* shares your
+  computer's sound too (off by default: viewers on speakers may hear voice
+  chat echo). The picture starts a little soft and sharpens within
+  seconds as the connection ramps up.
+- **Close to tray.** The close button hides HopOn to the tray; voice, the
+  overlay and hotkeys keep working. Click the tray icon to open it again,
+  right-click → *Quit HopOn* to exit. Settings → Display switches it off.
+- **"Playing ARC Raiders"** is now recognised (THE FINALS already was).
+
+### Changed
+
+- The message box sits at the very bottom of the window.
+- The channel header no longer repeats the server name.
+
 ## HopOn 0.3.0
 
 **Update the app and the server together** (new protocol again: a 0.2 app

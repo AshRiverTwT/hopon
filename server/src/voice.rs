@@ -12,6 +12,9 @@ struct VideoGrant {
     can_publish: bool,
     can_subscribe: bool,
     can_publish_data: bool,
+    /// What this participant may publish (microphone for voice, screen for
+    /// screen share), so a voice token can't stream video and vice versa.
+    can_publish_sources: Vec<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -28,11 +31,25 @@ pub fn room_name(channel_id: i64) -> String {
     format!("ch_{channel_id}")
 }
 
+/// LiveKit identity of a user's screen-share connection (separate from voice).
+pub fn screen_identity(user_id: i64) -> String {
+    format!("{user_id}:screen")
+}
+
 pub fn grant(key: &str, secret: &str, user_id: i64, name: &str, channel_id: i64) -> String {
+    mint(key, secret, user_id.to_string(), name, channel_id, vec!["microphone"])
+}
+
+/// Screen share: publish screen video (+ its audio) and watch others'.
+pub fn screen_grant(key: &str, secret: &str, user_id: i64, name: &str, channel_id: i64) -> String {
+    mint(key, secret, screen_identity(user_id), name, channel_id, vec!["screen_share", "screen_share_audio"])
+}
+
+fn mint(key: &str, secret: &str, identity: String, name: &str, channel_id: i64, sources: Vec<&'static str>) -> String {
     let now = hopon_shared::time::now_us() / 1_000_000;
     let c = Claims {
         iss: key.to_owned(),
-        sub: user_id.to_string(),
+        sub: identity,
         name: name.to_owned(),
         nbf: now - 5,
         exp: now + 10 * 60,
@@ -42,6 +59,7 @@ pub fn grant(key: &str, secret: &str, user_id: i64, name: &str, channel_id: i64)
             can_publish: true,
             can_subscribe: true,
             can_publish_data: false,
+            can_publish_sources: sources,
         },
     };
     encode(&Header::new(Algorithm::HS256), &c, &EncodingKey::from_secret(secret.as_bytes())).expect("jwt")

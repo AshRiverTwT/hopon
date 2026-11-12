@@ -338,6 +338,15 @@ pub async fn voice_ptt(core: C<'_>, enabled: bool, key_code: u32) -> Res<()> {
     Ok(())
 }
 
+/// Token for the UI's screen-share connection to the voice room you're in.
+#[tauri::command]
+pub async fn screen_grant(core: C<'_>, channel_id: String) -> Res<(String, String)> {
+    match core.request(C2S::ScreenGrant { channel_id: pid(&channel_id)? }).await? {
+        S2C::VoiceGrant { url, token, .. } => Ok((url, token)),
+        _ => Err("unexpected reply".into()),
+    }
+}
+
 /// Settings → "Show what I'm playing".
 #[tauri::command]
 pub fn activity_sharing(core: C<'_>, enabled: bool) {

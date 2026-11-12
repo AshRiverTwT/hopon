@@ -32,7 +32,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
-tauri = { version = "2", default-features = false, features = ["wry", "common-controls-v6", "compression", "unstable"] }
+tauri = { version = "2", default-features = false, features = ["wry", "common-controls-v6", "compression", "unstable", "tray-icon"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 # Voice: LiveKit SDK with libwebrtc's platform ADM (WASAPI on Windows).
 # TLS for wss:// SFU signaling (off by default in the SDK).

@@ -17,6 +17,7 @@ import PerfOverlay from "./components/PerfOverlay";
 import { AudioToggles, Status } from "./components/Corners";
 import GamesPanel from "./components/GamesPanel";
 import PeopleRail from "./components/PeopleRail";
+import { connectScreens, disconnectScreens } from "./screen";
 import { ServerSettingsSheet } from "./components/ServerSettings";
 import { InviteSheet, MembersSheet, NewChannelSheet, ServersSheet } from "./components/Sheets";
 
@@ -65,6 +66,12 @@ export default function App() {
   createEffect(() => {
     if (!games()) return;
     call("games_visible", { visible: !sheet() && !perf() }).catch(() => {});
+  });
+  // Screen-share connection follows voice: up while connected, gone after.
+  createEffect(() => {
+    const ch = s.voice.channelId;
+    if (ch && s.voice.state === "connected") connectScreens(ch).catch((e) => toast(`Screen share unavailable: ${e}`));
+    else if (!ch) void disconnectScreens();
   });
   onMount(() => {
     call<{ testOpenGames?: boolean }>("get_config").then((c) => c?.testOpenGames && setGames(true)).catch(() => {});
@@ -152,7 +159,6 @@ export default function App() {
                 <Match when={s.selChannel}>
                   <main class="main">
                     <header class="head">
-                      <div class="eyebrow">{currentServer()?.name} · Channel</div>
                       <h1 class="display title" title={channel()?.name}>{channel()?.name}</h1>
                       <Show when={channel()?.topic}><p class="topic">{channel()!.topic}</p></Show>
                     </header>
@@ -163,10 +169,8 @@ export default function App() {
               </Switch>
               <Show when={games()} fallback={<PeopleRail />}><GamesPanel close={() => setGames(false)} /></Show>
             </Show>
-            <footer class="bottombar">
-              <AudioToggles />
-              <Status />
-            </footer>
+            <footer class="foot-l"><AudioToggles /></footer>
+            <footer class="foot-r"><Status /></footer>
           </div>
           <Switch>
             <Match when={sheet()?.k === "servers"}><ServersSheet close={close} /></Match>

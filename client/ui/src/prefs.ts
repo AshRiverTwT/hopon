@@ -25,12 +25,14 @@ export interface Prefs {
   showActivity: boolean;
   /** user id → voice volume in percent (0–200; missing = 100). */
   userVolumes: Record<string, number>;
+  /** Close button hides to the tray instead of quitting. */
+  closeToTray: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
   sounds: true, ptt: false, pttKey: 0, aec: true, ns: true, agc: true,
   game: "wordle", recentEmoji: [], lastServer: null, lastChannel: {},
-  scale: 1, hotkeys: { ...DEFAULT_HOTKEYS }, showActivity: true, userVolumes: {},
+  scale: 1, hotkeys: { ...DEFAULT_HOTKEYS }, showActivity: true, userVolumes: {}, closeToTray: true,
 };
 
 export const SCALES = [0.8, 0.9, 1, 1.1, 1.25, 1.4, 1.5];
@@ -74,6 +76,7 @@ function applyToCore(p: Prefs) {
   applyScale(p.scale);
   applyOverlayKeys(p);
   call("activity_sharing", { enabled: p.showActivity }).catch(() => {});
+  call("close_to_tray", { enabled: p.closeToTray }).catch(() => {});
   for (const [userId, v] of Object.entries(p.userVolumes)) call("voice_volume", { userId, volume: v / 100 }).catch(() => {});
 }
 

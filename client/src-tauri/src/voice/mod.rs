@@ -224,7 +224,9 @@ impl Voice {
             move || core.voice.audio()
         });
         let mut opts = RoomOptions::default();
-        opts.auto_subscribe = true;
+        // Audio only: screen shares in the same room are watched through the
+        // UI's own connection, and must never be downloaded/decoded here.
+        opts.auto_subscribe = false;
         opts.adaptive_stream = false;
         opts.dynacast = false;
         opts.single_peer_connection = true;
@@ -250,6 +252,13 @@ impl Voice {
         if p.muted || p.deafened || p.ptt {
             track.mute();
         }
+        for (_, part) in room.remote_participants() {
+            for (_, publication) in part.track_publications() {
+                if publication.kind() == TrackKind::Audio && publication.source() == TrackSource::Microphone {
+                    publication.set_subscribed(true);
+                }
+            }
+        }
         core.perf.rec(H::VoiceJoin, now_us() - t_click);
 
         let events = {
@@ -258,6 +267,11 @@ impl Voice {
                 let mut first_track = true;
                 while let Some(ev) = events.recv().await {
                     match ev {
+                        RoomEvent::TrackPublished { publication, .. } => {
+                            if publication.kind() == TrackKind::Audio && publication.source() == TrackSource::Microphone {
+                                publication.set_subscribed(true);
+                            }
+                        }
                         RoomEvent::TrackSubscribed { publication, track, participant } => {
                             let v = core.voice.volumes.lock().get(participant.identity().as_str()).copied();
                             if let Some(v) = v {

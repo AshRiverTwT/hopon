@@ -11,7 +11,7 @@ pub type Id = i64;
 /// Bumped on every wire-incompatible change. Sent as `?v=` on the WebSocket
 /// URL; the server answers HTTP 426 to any other version before any
 /// MessagePack is exchanged, so old and new builds fail loudly, not silently.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Append the protocol version to a chat URL (`ws://host:port/ws`).
 pub fn versioned_url(url: &str) -> String {
@@ -235,6 +235,9 @@ pub enum C2S {
     /// SFU and then sends `VoiceState`.
     VoiceGrant { channel_id: Id },
     VoiceState { channel_id: Option<Id>, muted: bool, deafened: bool },
+    /// Token for the screen-share connection (identity "<user>:screen") in the
+    /// voice room you're in. Answered with `VoiceGrant`.
+    ScreenGrant { channel_id: Id },
     /// PNG, JPEG or WebP, at most `MAX_AVATAR_BYTES`. Empty removes it.
     SetAvatar {
         #[serde(with = "serde_bytes")]
