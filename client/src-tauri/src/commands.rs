@@ -522,6 +522,14 @@ pub async fn screen_grant(core: C<'_>, channel_id: String) -> Res<(String, Strin
     }
 }
 
+#[tauri::command]
+pub async fn screen_presence(core: C<'_>, active: bool) -> Res<()> {
+    match core.request(C2S::ScreenShare { active }).await? {
+        S2C::Ok => Ok(()),
+        _ => Err("unexpected reply".into()),
+    }
+}
+
 /// Settings → "Show what I'm playing".
 #[tauri::command]
 pub fn activity_sharing(core: C<'_>, enabled: bool) {

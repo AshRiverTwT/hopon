@@ -130,6 +130,7 @@ pub fn run() {
             commands::voice_volume,
             commands::activity_sharing,
             commands::screen_grant,
+            commands::screen_presence,
             tray::close_to_tray,
             notify::notify,
             notify::set_fullscreen,

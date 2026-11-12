@@ -98,6 +98,13 @@ pub async fn upload(AxState(st): AxState<Arc<State>>, Query(q): Query<UploadQuer
     let Some((uid, _)) = token.and_then(|t| st.keys.verify(t)) else {
         return err(StatusCode::UNAUTHORIZED, "sign in again");
     };
+    let _upload_permit = match st.upload_slots.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            st.metrics.upload_rejected.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return err(StatusCode::TOO_MANY_REQUESTS, "upload capacity is busy; retry shortly");
+        }
+    };
     let cfg = &st.cfg;
     let max = cfg.max_upload_bytes;
     if let Some(len) = headers.get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()) {
@@ -249,18 +256,6 @@ pub async fn release(st: &State, ids: Vec<String>) {
     }
 }
 
-/// Link claimed uploads to their message (so deletes can find them).
-pub async fn link(st: &State, ids: Vec<String>, channel_id: Id, message_id: Id) {
-    if ids.is_empty() {
-        return;
-    }
-    if let Err(e) = sqlx::query("UPDATE files SET channel_id = $1, message_id = $2 WHERE id = ANY($3)")
-        .bind(channel_id).bind(message_id).bind(&ids).execute(&st.db).await
-    {
-        tracing::error!("link files: {e}");
-    }
-}
-
 async fn remove(st: &State, ids: Vec<String>) {
     for id in ids {
         let _ = tokio::fs::remove_file(st.cfg.files_dir.join(&id)).await;
@@ -288,7 +283,12 @@ pub async fn sweep(st: Arc<State>) {
     let mut iv = tokio::time::interval(std::time::Duration::from_secs(3600));
     loop {
         iv.tick().await;
-        let ids: Vec<(String,)> = sqlx::query_as("DELETE FROM files WHERE message_id IS NULL AND created_at < now() - interval '1 day' RETURNING id")
+        let ids: Vec<(String,)> = sqlx::query_as(
+            "DELETE FROM files
+             WHERE (message_id IS NULL AND created_at < now() - interval '1 day')
+                OR (message_id = 0 AND created_at < now() - interval '1 hour')
+             RETURNING id",
+        )
             .fetch_all(&st.db).await.unwrap_or_default();
         if !ids.is_empty() {
             tracing::info!(count = ids.len(), "swept unsent uploads");

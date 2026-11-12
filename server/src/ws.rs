@@ -211,8 +211,12 @@ impl Session {
         } else {
             bytes
         };
-        if self.tx.send(Out::Frame(bytes)).await.is_err() {
-            self.closed = true;
+        match tokio::time::timeout(Duration::from_secs(2), self.tx.send(Out::Frame(bytes))).await {
+            Ok(Ok(())) => {},
+            _ => {
+                self.st.metrics.lagged_disconnects.fetch_add(1, Ordering::Relaxed);
+                self.closed = true;
+            }
         }
     }
 
@@ -267,6 +271,11 @@ impl Session {
             }
         };
         if let Some(e) = prev {
+            if self.st.screen_shares.remove(&uid).is_some() {
+                if let Some(g) = self.st.guilds.get(&e.server_id) {
+                    g.publish(frame(0, S2C::ScreenPresence { server_id: e.server_id, channel_id: e.channel_id, user_id: uid, active: false }));
+                }
+            }
             if let Some(g) = self.st.guilds.get(&e.server_id) {
                 g.publish(frame(
                     0,
@@ -321,6 +330,13 @@ impl Session {
         Ok(())
     }
 
+    fn auth_permit(&self) -> Result<tokio::sync::OwnedSemaphorePermit, (ErrorCode, String)> {
+        self.st.auth_slots.clone().try_acquire_owned().map_err(|_| {
+            self.st.metrics.auth_rejected.fetch_add(1, Ordering::Relaxed);
+            (ErrorCode::RateLimited, "password service is busy; retry shortly".into())
+        })
+    }
+
     async fn signup(&mut self, req: u32, username: String, password: String) -> R {
         self.auth_gate()?;
         if !auth::valid_username(&username) {
@@ -335,7 +351,9 @@ impl Session {
                 "password must be at least 8 characters".into(),
             ));
         }
+        let _permit = self.auth_permit()?;
         let hash = auth::hash_password(password).await.map_err(internal)?;
+        drop(_permit);
         let id = self.st.ids.next();
         let row: Option<(i64,)> = sqlx::query_as(
             "INSERT INTO users (id, name, name_lower, pw_hash) VALUES ($1, $2, $3, $4) \
@@ -365,7 +383,10 @@ impl Session {
         // Verify against a dummy hash on unknown users so timing does not leak existence.
         const DUMMY: &str = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHRzb21lc2FsdA$J3Lw6rI6Bt0mWkh0H9r0V9P9oQkq1d5r9b0b1a2Yc3s";
         let (id, name, hash) = row.clone().unwrap_or((0, String::new(), DUMMY.into()));
-        if !auth::verify_password(password, hash).await || row.is_none() {
+        let _permit = self.auth_permit()?;
+        let valid = auth::verify_password(password, hash).await;
+        drop(_permit);
+        if !valid || row.is_none() {
             return Err((ErrorCode::Unauthorized, "wrong username or password".into()));
         }
         self.establish(req, id, name, true).await
@@ -458,6 +479,13 @@ impl Session {
             },
         )
         .await;
+        let active_shares: Vec<_> = self.st.screen_shares.iter()
+            .filter(|entry| self.guilds.contains(&entry.value().0))
+            .map(|entry| (*entry.key(), *entry.value()))
+            .collect();
+        for (user_id, (server_id, channel_id)) in active_shares {
+            self.send(0, S2C::ScreenPresence { server_id, channel_id, user_id, active: true }).await;
+        }
         Ok(())
     }
 
@@ -504,32 +532,28 @@ impl Session {
                         "message must be 1-4000 characters".into(),
                     ));
                 }
-                let (chan, guild) = self.member_chan(channel_id, uid).await?;
+                let (chan, _guild) = self.member_chan(channel_id, uid).await?;
                 if chan.kind != ChannelKind::Text {
                     return Err((ErrorCode::BadRequest, "not a text channel".into()));
                 }
-                // A resend after reconnect: already fanned out. Echo to this
-                // socket only and re-queue the (idempotent) insert so the author
-                // gets its durable ack on the new connection.
+                if nonce > i64::MAX as u64 {
+                    return Err((ErrorCode::BadRequest, "message nonce is out of range".into()));
+                }
+                // A resend after reconnect or server restart resolves to the
+                // already committed row and never claims its attachments twice.
                 if nonce != 0 {
-                    if let Some(prev) = self.st.nonces.get(&(uid, nonce)).map(|e| e.0.clone()) {
+                    let prev = self.st.nonces.get(&(uid, nonce)).map(|e| e.0.clone())
+                        .or(message_by_nonce(&self.st, uid, nonce).await);
+                    if let Some(prev) = prev {
+                        self.st.nonces.insert((uid, nonce), (prev.clone(), now_us()));
                         self.send(0, S2C::Message(prev.clone())).await;
-                        let op = PersistOp::Insert {
+                        self.send(req, S2C::Ack {
                             channel_id: prev.channel_id,
+                            nonce,
                             id: prev.id,
-                            author_id: uid,
-                            content: prev.content,
-                            reply_to: prev.reply_to,
-                            attachments: attachments_json(&prev.attachments),
-                            t_enqueue: now_us(),
-                            ack: Some(AckTo {
-                                conn: self.tx.clone(),
-                                req,
-                                nonce,
-                                t_server_recv: t_recv,
-                            }),
-                        };
-                        self.st.persist.send(op).await.map_err(internal)?;
+                            t_server_recv: t_recv,
+                            t_persisted: now_us(),
+                        }).await;
                         return Ok(());
                     }
                 }
@@ -542,8 +566,9 @@ impl Session {
                     .map_err(|e| (ErrorCode::NotFound, e))?;
                 let file_ids: Vec<String> = claimed.iter().map(|a| a.id.clone()).collect();
                 attachments.splice(0..0, claimed);
-                // Hot path: assign ID, fan out, then persist asynchronously.
-                let id = {
+                // Assign and serialize under the channel ordering lock. The
+                // persister commits both the row and event before fan-out.
+                let msg = {
                     let _order = chan.order.lock();
                     if chan.deleted.load(Ordering::Relaxed) {
                         drop(_order);
@@ -551,7 +576,6 @@ impl Session {
                         return Err((ErrorCode::NotFound, "channel was deleted".into()));
                     }
                     let id = self.st.ids.next();
-                    chan.last_id.store(id, Ordering::Relaxed);
                     let t_send = now_us();
                     let msg = Message {
                         id,
@@ -570,21 +594,20 @@ impl Session {
                         reactions: vec![],
                         attachments: attachments.clone(),
                     };
-                    guild.publish(frame(0, S2C::Message(msg.clone())));
                     self.st.metrics.fanout.lock().record_us(t_send - t_recv);
-                    if nonce != 0 {
-                        self.st.nonces.insert((uid, nonce), (msg, t_send));
-                    }
-                    id
+                    msg
                 };
+                let id = msg.id;
                 self.st.metrics.messages.fetch_add(1, Ordering::Relaxed);
                 let op = PersistOp::Insert {
                     channel_id,
                     id,
                     author_id: uid,
+                    client_nonce: i64::try_from(nonce).ok().filter(|n| *n != 0),
                     content,
                     reply_to,
                     attachments: attachments_json(&attachments),
+                    durable_event: Some(msg),
                     t_enqueue: now_us(),
                     ack: Some(AckTo {
                         conn: self.tx.clone(),
@@ -594,12 +617,9 @@ impl Session {
                     }),
                 };
                 self.st.persist.send(op).await.map_err(internal)?;
-                if !file_ids.is_empty() {
-                    let st = self.st.clone();
-                    tokio::spawn(
-                        async move { crate::files::link(&st, file_ids, channel_id, id).await },
-                    );
-                }
+                // Attachment rows are linked by the same persistence
+                // transaction as the message.  Keeping the link out of a
+                // detached task closes the crash window between the two.
                 Ok(())
             }
             C2S::SetActivity { game } => {
@@ -655,7 +675,7 @@ impl Session {
                         "message must be 1-4000 characters".into(),
                     ));
                 }
-                let (_, guild) = self.member_chan(channel_id, uid).await?;
+                self.member_chan(channel_id, uid).await?;
                 let edited_at = now_us() / 1000;
                 let (reply, rx) = oneshot::channel();
                 self.st
@@ -673,15 +693,6 @@ impl Session {
                 if !rx.await.unwrap_or(false) {
                     return Err((ErrorCode::NotFound, "no such message of yours".into()));
                 }
-                guild.publish(frame(
-                    0,
-                    S2C::Edited {
-                        channel_id,
-                        id: message_id,
-                        content,
-                        edited_at,
-                    },
-                ));
                 self.send(req, S2C::Ok).await;
                 Ok(())
             }
@@ -689,7 +700,7 @@ impl Session {
                 channel_id,
                 message_id,
             } => {
-                let (chan, guild) = self.member_chan(channel_id, uid).await?;
+                let (chan, _) = self.member_chan(channel_id, uid).await?;
                 // The server owner may delete anyone's message (moderation).
                 let is_owner = self.st.owner_of(chan.server_id).await == Some(uid);
                 let (reply, rx) = oneshot::channel();
@@ -706,13 +717,6 @@ impl Session {
                 if !rx.await.unwrap_or(false) {
                     return Err((ErrorCode::NotFound, "no such message of yours".into()));
                 }
-                guild.publish(frame(
-                    0,
-                    S2C::Deleted {
-                        channel_id,
-                        id: message_id,
-                    },
-                ));
                 crate::files::purge_message(self.st.clone(), channel_id, message_id);
                 self.send(req, S2C::Ok).await;
                 Ok(())
@@ -724,18 +728,74 @@ impl Session {
             } => {
                 self.member_chan(channel_id, uid).await?;
                 let limit = limit.clamp(1, HISTORY_PAGE_MAX) as i64;
+                let user_slots = self.st.user_history_slots.entry(uid).or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(4))).clone();
+                let user_permit = match user_slots.try_acquire_owned() {
+                    Ok(permit) => permit,
+                    Err(_) => {
+                        self.st.metrics.history_rejected.fetch_add(1, Ordering::Relaxed);
+                        self.err(req, ErrorCode::RateLimited, "too many concurrent history requests").await;
+                        return Ok(());
+                    }
+                };
+                let permit = match self.st.history_slots.clone().try_acquire_owned() {
+                    Ok(permit) => permit,
+                    Err(_) => {
+                        self.st.metrics.history_rejected.fetch_add(1, Ordering::Relaxed);
+                        self.err(req, ErrorCode::RateLimited, "history service is busy; retry shortly").await;
+                        return Ok(());
+                    }
+                };
                 // Off the reader loop so a slow query never delays live sends.
                 let (st, tx) = (self.st.clone(), self.tx.clone());
                 tokio::spawn(async move {
-                    let msg = match history_page(&st, channel_id, before, limit).await {
-                        Ok((messages, more)) => S2C::History {
+                    let _permit = permit;
+                    let _user_permit = user_permit;
+                    let msg = match tokio::time::timeout(Duration::from_secs(30), history_page(&st, channel_id, before, limit)).await {
+                        Err(_) => S2C::Error { code: ErrorCode::Internal, message: "history query timed out".into() },
+                        Ok(Err(e)) => S2C::Error { code: ErrorCode::Internal, message: e.to_string() },
+                        Ok(Ok((messages, more, latest_cursor))) => S2C::History {
                             channel_id,
                             messages,
                             more,
+                            latest_cursor,
                         },
-                        Err(e) => S2C::Error {
-                            code: ErrorCode::Internal,
-                            message: e.to_string(),
+                    };
+                    let _ = tx.send(Out::Frame(frame(req, msg))).await;
+                });
+                Ok(())
+            }
+            C2S::Replay { channel_id, after_cursor, limit } => {
+                self.member_chan(channel_id, uid).await?;
+                let limit = limit.clamp(1, 100) as i64;
+                let user_slots = self.st.user_history_slots.entry(uid).or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(4))).clone();
+                let user_permit = match user_slots.try_acquire_owned() {
+                    Ok(permit) => permit,
+                    Err(_) => {
+                        self.st.metrics.history_rejected.fetch_add(1, Ordering::Relaxed);
+                        self.err(req, ErrorCode::RateLimited, "too many concurrent history requests").await;
+                        return Ok(());
+                    }
+                };
+                let permit = match self.st.history_slots.clone().try_acquire_owned() {
+                    Ok(permit) => permit,
+                    Err(_) => {
+                        self.st.metrics.history_rejected.fetch_add(1, Ordering::Relaxed);
+                        self.err(req, ErrorCode::RateLimited, "history service is busy; retry shortly").await;
+                        return Ok(());
+                    }
+                };
+                let (st, tx) = (self.st.clone(), self.tx.clone());
+                tokio::spawn(async move {
+                    let _permit = permit;
+                    let _user_permit = user_permit;
+                    let msg = match tokio::time::timeout(Duration::from_secs(30), replay_page(&st, channel_id, after_cursor, limit)).await {
+                        Err(_) => S2C::Error { code: ErrorCode::Internal, message: "replay query timed out".into() },
+                        Ok(Err(e)) => S2C::Error { code: ErrorCode::Internal, message: e.to_string() },
+                        Ok(Ok(page)) => {
+                            if matches!(page, S2C::Replay { snapshot_required: true, .. }) {
+                                st.metrics.replay_snapshot_fallbacks.fetch_add(1, Ordering::Relaxed);
+                            }
+                            page
                         },
                     };
                     let _ = tx.send(Out::Frame(frame(req, msg))).await;
@@ -1000,6 +1060,22 @@ impl Session {
                 .await;
                 Ok(())
             }
+            C2S::ScreenShare { active } => {
+                let voice = self.st.voice.lock().get(&uid).map(|e| (e.server_id, e.channel_id));
+                let Some((server_id, channel_id)) = voice else {
+                    return Err((ErrorCode::Forbidden, "join the voice room first".into()));
+                };
+                if active {
+                    self.st.screen_shares.insert(uid, (server_id, channel_id));
+                } else {
+                    self.st.screen_shares.remove(&uid);
+                }
+                if let Some(g) = self.st.guilds.get(&server_id) {
+                    g.publish(frame(0, S2C::ScreenPresence { server_id, channel_id, user_id: uid, active }));
+                }
+                self.send(req, S2C::Ok).await;
+                Ok(())
+            }
             C2S::VoiceState {
                 channel_id,
                 muted,
@@ -1022,6 +1098,13 @@ impl Session {
                                 conn_id: self.conn,
                             },
                         );
+                        if let Some(p) = prev.filter(|p| p.channel_id != cid) {
+                            if self.st.screen_shares.remove(&uid).is_some() {
+                                if let Some(g) = self.st.guilds.get(&p.server_id) {
+                                    g.publish(frame(0, S2C::ScreenPresence { server_id: p.server_id, channel_id: p.channel_id, user_id: uid, active: false }));
+                                }
+                            }
+                        }
                         if let Some(p) = prev.filter(|p| p.server_id != chan.server_id) {
                             if let Some(g) = self.st.guilds.get(&p.server_id) {
                                 g.publish(frame(
@@ -1118,7 +1201,7 @@ impl Session {
                 if !valid_emoji(&emoji) {
                     return Err((ErrorCode::BadRequest, "not a valid reaction".into()));
                 }
-                let (_, guild) = self.member_chan(channel_id, uid).await?;
+                self.member_chan(channel_id, uid).await?;
                 let (reply, rx) = oneshot::channel();
                 self.st
                     .persist
@@ -1133,16 +1216,7 @@ impl Session {
                     .await
                     .map_err(internal)?;
                 match rx.await.unwrap_or(Err("could not be saved")) {
-                    Ok(true) => guild.publish(frame(
-                        0,
-                        S2C::Reaction {
-                            channel_id,
-                            message_id,
-                            emoji,
-                            user_id: uid,
-                            add,
-                        },
-                    )),
+                    Ok(true) => {},
                     Ok(false) => {} // already in that state
                     Err(e) => return Err((ErrorCode::BadRequest, e.into())),
                 }
@@ -1292,13 +1366,50 @@ impl Session {
 
 type R = Result<(), (ErrorCode, String)>;
 
+async fn message_by_nonce(st: &State, author_id: Id, nonce: u64) -> Option<Message> {
+    let row: Option<(Id, Id, Id, String, Option<Id>, Option<Id>, Option<String>)> = sqlx::query_as(
+        "SELECT id, channel_id, author_id, content, edited_at, reply_to, attachments \
+         FROM messages WHERE author_id = $1 AND client_nonce = $2",
+    )
+    .bind(author_id)
+    .bind(nonce as i64)
+    .fetch_optional(&st.db)
+    .await
+    .ok()?;
+    let (id, channel_id, author_id, content, edited_at, reply_to, attachments) = row?;
+    let rows: Vec<(String, Vec<Id>)> = sqlx::query_as(
+        "SELECT emoji, array_agg(user_id ORDER BY user_id) FROM reactions \
+         WHERE channel_id = $1 AND message_id = $2 GROUP BY emoji ORDER BY emoji",
+    )
+    .bind(channel_id)
+    .bind(id)
+    .fetch_all(&st.db)
+    .await
+    .ok()?;
+    Some(Message {
+        id,
+        channel_id,
+        author_id,
+        content,
+        edited_at,
+        nonce,
+        trace: None,
+        reply_to,
+        reactions: rows.into_iter().map(|(emoji, users)| Reaction { emoji, users }).collect(),
+        attachments: attachments.and_then(|value| serde_json::from_str(&value).ok()).unwrap_or_default(),
+    })
+}
+
 /// Newest-first page plus its reactions (two queries for the whole page).
 async fn history_page(
     st: &State,
     channel_id: Id,
     before: Option<Id>,
     limit: i64,
-) -> anyhow::Result<(Vec<Message>, bool)> {
+) -> anyhow::Result<(Vec<Message>, bool, Id)> {
+    // Capture the snapshot boundary before reading rows. Events committed
+    // afterwards will be replayed by cursor even if a concurrent query sees them.
+    let latest_cursor = latest_event_cursor(st, channel_id).await?;
     let mut rows: Vec<(i64, i64, String, Option<i64>, Option<i64>, Option<String>)> =
         sqlx::query_as(
             "SELECT id, author_id, content, edited_at, reply_to, attachments FROM messages \
@@ -1347,7 +1458,70 @@ async fn history_page(
             },
         )
         .collect();
-    Ok((messages, more))
+    Ok((messages, more, latest_cursor))
+}
+
+async fn replay_page(st: &State, channel_id: Id, after: Id, limit: i64) -> anyhow::Result<S2C> {
+    let latest_cursor = latest_event_cursor(st, channel_id).await?;
+    let pruned_through: Id = sqlx::query_scalar(
+        "SELECT COALESCE((SELECT pruned_through FROM durable_event_state WHERE channel_id = $1), 0)",
+    )
+    .bind(channel_id)
+    .fetch_one(&st.db)
+    .await?;
+    let snapshot_required = replay_snapshot_required(after, latest_cursor, pruned_through);
+    if snapshot_required {
+        return Ok(S2C::Replay {
+            channel_id,
+            events: vec![],
+            latest_cursor,
+            more: false,
+            snapshot_required: true,
+        });
+    }
+    let rows: Vec<(Id, String)> = sqlx::query_as(
+        "SELECT cursor, payload::text FROM durable_events WHERE channel_id = $1 AND cursor > $2 ORDER BY cursor LIMIT $3",
+    )
+    .bind(channel_id)
+    .bind(after)
+    .bind(limit)
+    .fetch_all(&st.db)
+    .await?;
+    let events = rows
+        .into_iter()
+        .map(|(cursor, json)| Ok(DurableEvent { cursor, payload: serde_json::from_str(&json)? }))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let more = events.last().is_some_and(|event| event.cursor < latest_cursor);
+    Ok(S2C::Replay { channel_id, events, latest_cursor, more, snapshot_required: false })
+}
+
+async fn latest_event_cursor(st: &State, channel_id: Id) -> anyhow::Result<Id> {
+    Ok(sqlx::query_scalar(
+        "SELECT GREATEST( \
+           COALESCE((SELECT MAX(cursor) FROM durable_events WHERE channel_id = $1), 0), \
+           COALESCE((SELECT pruned_through FROM durable_event_state WHERE channel_id = $1), 0) \
+         )",
+    )
+    .bind(channel_id)
+    .fetch_one(&st.db)
+    .await?)
+}
+
+fn replay_snapshot_required(after: Id, latest: Id, pruned_through: Id) -> bool {
+    after > latest || after < pruned_through
+}
+
+#[cfg(test)]
+mod replay_tests {
+    use super::replay_snapshot_required;
+
+    #[test]
+    fn replay_uses_channel_pruning_watermark_not_global_sequence_gaps() {
+        assert!(!replay_snapshot_required(10, 100, 0));
+        assert!(!replay_snapshot_required(20, 100, 20));
+        assert!(replay_snapshot_required(19, 100, 20));
+        assert!(replay_snapshot_required(101, 100, 20));
+    }
 }
 
 fn attachments_json(a: &[Attachment]) -> Option<String> {
@@ -1381,7 +1555,7 @@ pub async fn welcome(st: &Arc<State>, server_id: Id, user: Id) {
     .ok()
     .flatten();
     let Some((channel_id,)) = row else { return };
-    let Some((chan, guild)) = st.chan_for(channel_id, user).await else {
+    let Some((chan, _guild)) = st.chan_for(channel_id, user).await else {
         return;
     };
     let pick = {
@@ -1389,13 +1563,12 @@ pub async fn welcome(st: &Arc<State>, server_id: Id, user: Id) {
         rand::thread_rng().gen_range(0..WELCOMES.len())
     };
     let content = WELCOMES[pick].replace("{u}", &mention_token(user));
-    let id = {
+    let msg = {
         let _order = chan.order.lock();
         if chan.deleted.load(Ordering::Relaxed) {
             return;
         }
         let id = st.ids.next();
-        chan.last_id.store(id, Ordering::Relaxed);
         let msg = Message {
             id,
             channel_id,
@@ -1408,18 +1581,20 @@ pub async fn welcome(st: &Arc<State>, server_id: Id, user: Id) {
             reactions: vec![],
             attachments: vec![],
         };
-        guild.publish(frame(0, S2C::Message(msg)));
-        id
+        msg
     };
+    let id = msg.id;
     let _ = st
         .persist
         .send(PersistOp::Insert {
             channel_id,
             id,
             author_id: SYSTEM_USER,
+            client_nonce: None,
             content,
             reply_to: None,
             attachments: None,
+            durable_event: Some(msg),
             t_enqueue: now_us(),
             ack: None,
         })

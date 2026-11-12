@@ -24,6 +24,7 @@ export const [s, set] = createStore({
   memberLoaded: {} as Record<string, number>,
   presence: {} as Record<string, Presence & { serverId: string }>,
   speaking: [] as string[],
+  screenShares: {} as Record<string, string>,
   voice: { channelId: null, state: "idle", muted: false, deafened: false, detail: null } as VoiceState,
   selServer: null as string | null,
   selChannel: null as string | null,
@@ -243,7 +244,7 @@ function apply(e: UiEvent, painted: string[]) {
       absorbServers(e.servers, true);
       if (loggingOut) resetPrefs();
       if (changedUser) {
-        set({ selServer: null, selChannel: null, stage: null, msgs: [] });
+        set({ selServer: null, selChannel: null, stage: null, msgs: [], screenShares: {} });
       }
       if (e.user && !s.selServer && e.servers.length) {
         const last = prefs.lastServer;
@@ -424,6 +425,10 @@ function apply(e: UiEvent, painted: string[]) {
       if (sv) queueMicrotask(() => { if (s.selServer !== sv.id) selectServer(sv.id); if (s.selChannel !== id || s.stage) void selectChannel(id); });
       break;
     }
+    case "screenShare":
+      if (e.active) set("screenShares", e.userId, e.channelId);
+      else if (s.screenShares[e.userId] === e.channelId) set("screenShares", e.userId, undefined!);
+      break;
     case "error":
       toast(e.message);
       break;

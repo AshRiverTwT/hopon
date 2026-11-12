@@ -275,6 +275,7 @@ pub enum UiEvent {
         server_id: String,
         presence: UiPresence,
     },
+    ScreenShare { server_id: String, channel_id: String, user_id: String, active: bool },
     /// Voice connection status for the local user.
     Voice {
         channel_id: Option<String>,

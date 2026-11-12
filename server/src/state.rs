@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
+use tokio::sync::Semaphore;
 
 pub const GUILD_BACKLOG: usize = 2048;
 pub const CONN_QUEUE: usize = 1024;
@@ -73,6 +74,16 @@ pub struct State {
     pub chans: DashMap<Id, Arc<Chan>>,
     pub conns: DashMap<Id, Vec<(u64, ConnTx)>>,
     pub voice: Mutex<HashMap<Id, VoiceEntry>>,
+    /// Active screen shares advertised over the main socket, keyed by user.
+    pub screen_shares: DashMap<Id, (Id, Id)>,
+    /// Caps expensive history/replay work across the process.
+    pub history_slots: Arc<Semaphore>,
+    /// Per-account concurrency cap for history and replay requests.
+    pub user_history_slots: DashMap<Id, Arc<Semaphore>>,
+    /// Caps simultaneous disk uploads before streaming bodies to storage.
+    pub upload_slots: Arc<Semaphore>,
+    /// Bounds CPU and blocking-pool demand from Argon2 password work.
+    pub auth_slots: Arc<Semaphore>,
     pub persist: mpsc::Sender<PersistOp>,
     pub metrics: Metrics,
     pub http: reqwest::Client,
@@ -113,6 +124,11 @@ impl State {
             chans: DashMap::new(),
             conns: DashMap::new(),
             voice: Mutex::new(HashMap::new()),
+            screen_shares: DashMap::new(),
+            history_slots: Arc::new(Semaphore::new(128)),
+            user_history_slots: DashMap::new(),
+            upload_slots: Arc::new(Semaphore::new(8)),
+            auth_slots: Arc::new(Semaphore::new(8)),
             persist,
             metrics: Metrics::new(),
             http: reqwest::Client::new(),
@@ -222,6 +238,21 @@ impl State {
                 _ => None,
             }
         }?;
+        let share = self.screen_shares.get(&user).map(|entry| *entry.value());
+        if share == Some((server, removed.channel_id)) {
+            self.screen_shares.remove(&user);
+            if let Some(g) = announce {
+                g.publish(Bytes::from(hopon_shared::encode(&hopon_shared::ServerFrame {
+                    req: 0,
+                    msg: hopon_shared::S2C::ScreenPresence {
+                        server_id: server,
+                        channel_id: removed.channel_id,
+                        user_id: user,
+                        active: false,
+                    },
+                })));
+            }
+        }
         if let Some(g) = announce {
             g.publish(Bytes::from(hopon_shared::encode(
                 &hopon_shared::ServerFrame {

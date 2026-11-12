@@ -89,7 +89,7 @@ export default function Stage() {
   const join = () => { openAudio(); return call("voice_join", { channelId: s.stage }); };
   const joinNow = () => join().catch((e) => toast(String(e)));
   const leave = () => call("voice_leave").catch((e) => toast(String(e)));
-  const sharing = (u: string) => screen.shares.some((x) => x.userId === u) || (u === s.user?.id && screen.sharing);
+  const sharing = (u: string) => s.screenShares[u] === s.stage || screen.shares.some((x) => x.userId === u) || (u === s.user?.id && screen.sharing);
   return (
     <section class="stage">
       <header class="head">
@@ -107,8 +107,8 @@ export default function Stage() {
                 <Show when={sharing(p.userId)}><span class="live-badge">LIVE</span><Show when={viewerCount(p.userId)}><Viewers userId={p.userId} /></Show></Show>
               </span>
               <span class="index-meta">
-                <Show when={joined() && screen.shares.some((x) => x.userId === p.userId) && !screen.watching.includes(p.userId)}>
-                  <button class="pill" onClick={() => watch(p.userId)}>Watch</button>
+                <Show when={joined() && sharing(p.userId) && p.userId !== s.user?.id && !screen.watching.includes(p.userId)}>
+                  <button class="pill" onClick={() => void watch(p.userId).catch((e) => toast(String(e)))}>Watch</button>
                 </Show>
                 {[p.muted && "Mic off", p.deafened && "Sound off"].filter(Boolean).join(" · ")}
                 <Show when={joined() && p.userId !== s.user?.id}><VolumeSlider userId={p.userId} /></Show>

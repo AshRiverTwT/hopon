@@ -11,7 +11,7 @@ pub type Id = i64;
 /// Bumped on every wire-incompatible change. Sent as `?v=` on the WebSocket
 /// URL; the server answers HTTP 426 to any other version before any
 /// MessagePack is exchanged, so old and new builds fail loudly, not silently.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Append the protocol version to a chat URL (`ws://host:port/ws`).
 pub fn versioned_url(url: &str) -> String {
@@ -120,6 +120,21 @@ pub struct Message {
     /// Aggregated reactions (history pages; live messages start empty).
     pub reactions: Vec<Reaction>,
     pub attachments: Vec<Attachment>,
+}
+
+/// Durable channel changes stored in PostgreSQL and replayed after reconnect.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum DurablePayload {
+    Message(Message),
+    Edited { channel_id: Id, id: Id, content: String, edited_at: i64 },
+    Deleted { channel_id: Id, id: Id },
+    Reaction { channel_id: Id, message_id: Id, emoji: String, user_id: Id, add: bool },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct DurableEvent {
+    pub cursor: i64,
+    pub payload: DurablePayload,
 }
 
 /// A file or GIF attached to a message.
@@ -275,6 +290,12 @@ pub enum C2S {
         before: Option<Id>,
         limit: u16,
     },
+    /// Replay durable channel changes after the last cursor received.
+    Replay {
+        channel_id: Id,
+        after_cursor: i64,
+        limit: u16,
+    },
     /// Membership is fetched on demand in bounded pages.
     Members {
         server_id: Id,
@@ -321,6 +342,8 @@ pub enum C2S {
     ScreenGrant {
         channel_id: Id,
     },
+    /// Advertise whether the current voice participant is sharing a screen.
+    ScreenShare { active: bool },
     /// PNG, JPEG or WebP, at most `MAX_AVATAR_BYTES`. Empty removes it.
     SetAvatar {
         #[serde(with = "serde_bytes")]
@@ -433,6 +456,17 @@ pub enum S2C {
         channel_id: Id,
         messages: Vec<Message>,
         more: bool,
+        /// Highest durable event cursor included in the snapshot boundary.
+        latest_cursor: i64,
+    },
+    /// A live durable channel event. The cursor is scoped to its channel.
+    ChannelEvent(DurableEvent),
+    Replay {
+        channel_id: Id,
+        events: Vec<DurableEvent>,
+        latest_cursor: i64,
+        more: bool,
+        snapshot_required: bool,
     },
     Members {
         server_id: Id,
@@ -469,6 +503,7 @@ pub enum S2C {
         muted: bool,
         deafened: bool,
     },
+    ScreenPresence { server_id: Id, channel_id: Id, user_id: Id, active: bool },
     LoggedOut,
     Ok,
     /// A user's profile changed (e.g. new avatar); sent to all their servers.
@@ -642,5 +677,14 @@ mod tests {
             msg: C2S::Ping { t_client: 5 },
         };
         assert_eq!(decode::<ClientFrame>(&encode(&c)).unwrap(), c);
+
+        let durable = ServerFrame {
+            req: 0,
+            msg: S2C::ChannelEvent(DurableEvent {
+                cursor: 12,
+                payload: DurablePayload::Deleted { channel_id: 4, id: 9 },
+            }),
+        };
+        assert_eq!(decode::<ServerFrame>(&encode(&durable)).unwrap(), durable);
     }
 }

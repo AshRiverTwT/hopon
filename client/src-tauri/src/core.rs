@@ -225,6 +225,8 @@ pub struct Core {
     out: Mutex<Option<mpsc::Sender<WsMsg>>>,
     waiters: Mutex<HashMap<u32, oneshot::Sender<S2C>>>,
     send_reqs: Mutex<HashMap<u32, (u64, Id)>>,
+    /// Last durable server event applied for each channel.
+    event_cursors: Mutex<HashMap<Id, Id>>,
     req: AtomicU32,
     reconnect: Notify,
     pub voice: crate::voice::Voice,
@@ -255,6 +257,7 @@ impl Core {
             out: Mutex::new(None),
             waiters: Mutex::new(HashMap::new()),
             send_reqs: Mutex::new(HashMap::new()),
+            event_cursors: Mutex::new(HashMap::new()),
             req: AtomicU32::new(1),
             reconnect: Notify::new(),
             voice: crate::voice::Voice::new(),
@@ -813,7 +816,8 @@ impl Core {
     /// Fetch the latest page from the server and merge into the UI.
     pub fn refresh_latest(self: Arc<Self>, ch: Id) {
         tauri::async_runtime::spawn(async move {
-            if let Ok(S2C::History { messages, .. }) = self
+            let previous = self.cursor_from_cache(ch).await;
+            if let Ok(S2C::History { messages, latest_cursor, .. }) = self
                 .request(C2S::History {
                     channel_id: ch,
                     before: None,
@@ -821,22 +825,79 @@ impl Core {
                 })
                 .await
             {
-                let ui: Vec<UiMsg> = messages
-                    .iter()
-                    .rev()
-                    .map(|m| UiMsg::from_msg(m, 2))
-                    .collect();
-                {
-                    let mut s = self.store.lock();
-                    for m in &messages {
-                        s.insert_recent(m.clone());
-                    }
+                // Keep the previous checkpoint while replaying.  Advancing it
+                // to the snapshot's latest cursor first would make the replay
+                // handler discard the edits/deletes we are trying to recover.
+                self.apply_history_snapshot(ch, messages, latest_cursor, previous.is_none());
+                if let Some(cursor) = previous {
+                    self.replay_from(ch, cursor);
                 }
-                self.cache.put(messages);
-                self.emit(UiEvent::Messages {
-                    channel_id: sid(ch),
-                    msgs: ui,
-                });
+            }
+        });
+    }
+
+    fn record_event_cursor(&self, channel_id: Id, cursor: Id) {
+        let advanced = {
+            let mut cursors = self.event_cursors.lock();
+            let current = cursors.entry(channel_id).or_default();
+            if cursor > *current { *current = cursor; true } else { false }
+        };
+        if advanced {
+            self.cache.kv_set(&format!("event-cursor:{channel_id}"), Some(cursor.to_le_bytes().to_vec()));
+        }
+    }
+
+    async fn cursor_from_cache(&self, channel_id: Id) -> Option<Id> {
+        if let Some(cursor) = self.event_cursors.lock().get(&channel_id).copied() {
+            return Some(cursor);
+        }
+        let value = self.cache.kv_get(&format!("event-cursor:{channel_id}")).await?;
+        let bytes: [u8; 8] = value.as_slice().try_into().ok()?;
+        let cursor = Id::from_le_bytes(bytes);
+        self.event_cursors.lock().insert(channel_id, cursor);
+        Some(cursor)
+    }
+
+    fn apply_history_snapshot(self: &Arc<Self>, channel_id: Id, messages: Vec<Message>, cursor: Id, set_cursor: bool) {
+        let ui: Vec<UiMsg> = messages.iter().rev().map(|m| UiMsg::from_msg(m, 2)).collect();
+        {
+            let mut store = self.store.lock();
+            for message in &messages { store.insert_recent(message.clone()); }
+        }
+        self.cache.put(messages);
+        if set_cursor {
+            self.event_cursors.lock().insert(channel_id, cursor);
+            self.cache.kv_set(&format!("event-cursor:{channel_id}"), Some(cursor.to_le_bytes().to_vec()));
+        }
+        self.emit(UiEvent::Messages { channel_id: sid(channel_id), msgs: ui });
+    }
+
+    fn replay_from(self: &Arc<Self>, channel_id: Id, cursor: Id) {
+        let core = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut after = cursor;
+            loop {
+                let response = core.request(C2S::Replay { channel_id, after_cursor: after, limit: 100 }).await;
+                match response {
+                    Ok(S2C::Replay { snapshot_required: true, .. }) => {
+                        match core.request(C2S::History { channel_id, before: None, limit: 50 }).await {
+                            Ok(S2C::History { messages, latest_cursor, .. }) => {
+                                core.apply_history_snapshot(channel_id, messages, latest_cursor, true);
+                                after = latest_cursor;
+                                continue;
+                            }
+                            _ => break,
+                        }
+                    }
+                    Ok(S2C::Replay { events, more, latest_cursor, .. }) => {
+                        if let Some(last) = events.last() { after = last.cursor; }
+                        if !more || events.is_empty() {
+                            core.record_event_cursor(channel_id, latest_cursor);
+                            break;
+                        }
+                    }
+                    _ => break,
+                }
             }
         });
     }
@@ -849,20 +910,29 @@ impl Core {
                 S2C::Ack { .. } => {
                     self.send_reqs.lock().remove(&f.req);
                 }
-                S2C::Error { message, .. } => {
+                S2C::Error { code, message } => {
                     if let Some((nonce, channel_id)) = self.send_reqs.lock().remove(&f.req) {
-                        self.store.lock().pending.remove(&nonce);
-                        let cache = self.cache.clone();
-                        tauri::async_runtime::spawn(async move {
-                            cache.outbox_remove(nonce).await;
-                        });
-                        self.emit(UiEvent::MsgState {
-                            channel_id: sid(channel_id),
-                            nonce: nonce.to_string(),
-                            id: format!("p{nonce}"),
-                            state: 3,
-                        });
-                        tracing::warn!("message {nonce} rejected by server: {message}");
+                        if matches!(code, ErrorCode::Internal | ErrorCode::RateLimited) {
+                            // The server may have failed before durability. Keep
+                            // the outbox item and retry after reconnect instead
+                            // of losing a message that was only temporarily
+                            // rejected by overload or a database outage.
+                            tracing::warn!("message {nonce} will retry after a temporary server error: {message}");
+                            self.force_reconnect();
+                        } else {
+                            self.store.lock().pending.remove(&nonce);
+                            let cache = self.cache.clone();
+                            tauri::async_runtime::spawn(async move {
+                                cache.outbox_remove(nonce).await;
+                            });
+                            self.emit(UiEvent::MsgState {
+                                channel_id: sid(channel_id),
+                                nonce: nonce.to_string(),
+                                id: format!("p{nonce}"),
+                                state: 3,
+                            });
+                            tracing::warn!("message {nonce} rejected by server: {message}");
+                        }
                     }
                 }
                 _ => {}
@@ -955,6 +1025,10 @@ impl Core {
                         game: game.clone(),
                     });
                 }
+            }
+            S2C::ChannelEvent(event) => self.apply_durable_event(event, t_recv),
+            S2C::Replay { events, .. } => {
+                for event in events { self.apply_durable_event(event, t_recv); }
             }
             S2C::Message(m) => {
                 let t_emit = now_us();
@@ -1443,6 +1517,11 @@ impl Core {
                     });
                 }
             }
+            S2C::ScreenPresence { server_id, channel_id, user_id, active } => {
+                self.emit(UiEvent::ScreenShare {
+                    server_id: sid(*server_id), channel_id: sid(*channel_id), user_id: sid(*user_id), active: *active,
+                });
+            }
             S2C::LoggedOut => {
                 *self.store.lock() = Store::default();
                 self.activity.current.lock().clear();
@@ -1462,6 +1541,30 @@ impl Core {
             | S2C::Avatar { .. }
             | S2C::Ok => {}
         }
+    }
+
+    fn apply_durable_event(self: &Arc<Self>, event: &DurableEvent, t_recv: i64) {
+        let channel_id = match &event.payload {
+            DurablePayload::Message(message) => message.channel_id,
+            DurablePayload::Edited { channel_id, .. }
+            | DurablePayload::Deleted { channel_id, .. }
+            | DurablePayload::Reaction { channel_id, .. } => *channel_id,
+        };
+        if self.event_cursors.lock().get(&channel_id).is_some_and(|cursor| *cursor >= event.cursor) {
+            return;
+        }
+        let msg = match &event.payload {
+            DurablePayload::Message(message) => S2C::Message(message.clone()),
+            DurablePayload::Edited { channel_id, id, content, edited_at } => S2C::Edited {
+                channel_id: *channel_id, id: *id, content: content.clone(), edited_at: *edited_at,
+            },
+            DurablePayload::Deleted { channel_id, id } => S2C::Deleted { channel_id: *channel_id, id: *id },
+            DurablePayload::Reaction { channel_id, message_id, emoji, user_id, add } => S2C::Reaction {
+                channel_id: *channel_id, message_id: *message_id, emoji: emoji.clone(), user_id: *user_id, add: *add,
+            },
+        };
+        self.apply(&msg, t_recv);
+        self.record_event_cursor(channel_id, event.cursor);
     }
 
     /// Flash the taskbar if the window isn't focused (no plugin needed).

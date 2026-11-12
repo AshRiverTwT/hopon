@@ -59,6 +59,7 @@ let room: Room | null = null;
 let connecting: Promise<void> | null = null;
 let local: LocalTrack[] = [];
 let myUser = "";
+let voiceChannel: string | null = null;
 /** The one <video> per watched stream, and the slots that want it (last = on top). */
 const players = new Map<string, HTMLVideoElement>();
 const slots = new Map<string, HTMLElement[]>();
@@ -102,6 +103,7 @@ function refresh() {
   if (screen.full && screen.full !== SELF && !out.some((s) => s.userId === screen.full)) setFullscreen(null);
   if (!screen.watching.length && screen.popped) setScreen("popped", false);
   recountViewers();
+  if (ended.length && !screen.sharing && room) void disconnectScreens();
 }
 
 /** Viewers announce what they watch as a participant attribute; count them per stream. */
@@ -184,8 +186,16 @@ function dropViews(userId: string) {
   setScreen("live", produce((l) => void delete l[userId]));
 }
 
-/** Join the voice room's screen connection (called when voice connects). */
-export async function connectScreens(channelId: string, me: string) {
+/** Track voice context without opening the optional screen-media connection. */
+export function setScreenContext(channelId: string, me: string) {
+  const changed = voiceChannel !== null && voiceChannel !== channelId;
+  voiceChannel = channelId;
+  myUser = me;
+  if (changed) void disconnectScreens();
+}
+
+/** Join the screen-media room on first Watch or Share. */
+async function connectScreens(channelId: string, me: string) {
   myUser = me;
   if (target === channelId) return connecting ?? undefined;
   target = channelId;
@@ -211,6 +221,7 @@ export async function connectScreens(channelId: string, me: string) {
       .on(E.LocalTrackUnpublished, () => { if (!local.length) setScreen({ sharing: false, sharingAudio: false }); })
       .on(E.Disconnected, () => {
         if (room !== r) return; // an old connection closing
+        if (local.length) void call("screen_presence", { active: false }).catch(() => {});
         room = null;
         target = null; // let the next connectScreens reconnect
         for (const track of local) track.stop();
@@ -248,14 +259,19 @@ async function disconnectRoom() {
   await r?.disconnect().catch(() => {});
 }
 
-export async function disconnectScreens() {
+export async function disconnectScreens(clearContext = false) {
   target = null;
   await disconnectRoom();
   setScreen("channelId", null);
+  if (clearContext) { voiceChannel = null; myUser = ""; }
 }
 
 /** Pick a screen/window (the system picker) and stream it. */
 export async function startShare(quality: Quality, audio: boolean) {
+  if (!room) {
+    if (!voiceChannel || !myUser) throw new Error("Join voice first");
+    await connectScreens(voiceChannel, myUser);
+  }
   if (connecting) await connecting;
   if (!room || !lk) throw new Error("Join voice first");
   const q = QUALITIES[quality];
@@ -302,6 +318,8 @@ export async function startShare(quality: Quality, audio: boolean) {
     throw error;
   }
   setScreen({ sharing: true, sharingAudio: tracks.some((t) => t.kind === "audio") });
+  try { await call("screen_presence", { active: true }); }
+  catch (error) { await stopShare(); throw error; }
   return tracks.find((t) => t.kind === "video") ?? null;
 }
 
@@ -314,12 +332,23 @@ export async function stopShare() {
   }
   if (screen.full === SELF) setFullscreen(null);
   setScreen({ sharing: false, sharingAudio: false });
+  if (tracks.length) {
+    await call("screen_presence", { active: false }).catch(() => {});
+    if (!screen.watching.length && room) void disconnectScreens();
+  }
 }
 
 /** Start watching someone's stream (subscribes; views bind with bindVideo). */
-export function watch(userId: string) {
+export async function watch(userId: string) {
+  if (!voiceChannel || !myUser) throw new Error("Join voice first");
+  if (!room) await connectScreens(voiceChannel, myUser);
   if (!room || !lk) return;
-  const p = [...room.remoteParticipants.values()].find((x) => userOf(x.identity) === userId && x.getTrackPublication(lk!.Track.Source.ScreenShare));
+  const deadline = Date.now() + 5000;
+  let p = [...room.remoteParticipants.values()].find((x) => userOf(x.identity) === userId && x.getTrackPublication(lk!.Track.Source.ScreenShare));
+  while (!p && Date.now() < deadline && room) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    p = [...room.remoteParticipants.values()].find((x) => userOf(x.identity) === userId && x.getTrackPublication(lk!.Track.Source.ScreenShare));
+  }
   if (!p) return;
   if (screen.lowResource) for (const user of [...screen.watching]) if (user !== userId) unwatch(user);
   watchedParticipants.set(userId, p.identity);
@@ -351,6 +380,7 @@ export function unwatch(userId: string) {
     if (pub?.track) detachTrack(pub.track as RemoteTrack);
     pub?.setSubscribed(false);
   }
+  if (!screen.watching.length && !local.length && room) void disconnectScreens();
 }
 
 function videoTrackOf(userId: string) {

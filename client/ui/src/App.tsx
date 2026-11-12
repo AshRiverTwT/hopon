@@ -17,7 +17,7 @@ import PerfOverlay from "./components/PerfOverlay";
 import { AudioToggles, Status } from "./components/Corners";
 import GamesPanel from "./components/GamesPanel";
 import PeopleRail from "./components/PeopleRail";
-import { connectScreens, disconnectScreens } from "./screen";
+import { setScreenContext, disconnectScreens } from "./screen";
 import UpdatePrompt from "./components/UpdatePrompt";
 import { FullStream, MiniPlayer } from "./components/Streams";
 import { Banners, ChannelBell } from "./components/Banners";
@@ -83,11 +83,11 @@ export default function App() {
     if (!games()) return;
     call("games_visible", { visible: !sheet() && !perf() }).catch(() => {});
   });
-  // Screen-share connection follows voice: up while connected, gone after.
+  // Screen media is joined only when someone watches or shares.
   createEffect(() => {
     const ch = s.voice.channelId;
-    if (ch && s.voice.state === "connected" && s.user) connectScreens(ch, s.user.id).catch((e) => toast(`Screen share unavailable: ${e}`));
-    else if (!ch) void disconnectScreens();
+    if (ch && s.voice.state === "connected" && s.user) setScreenContext(ch, s.user.id);
+    else if (!ch) void disconnectScreens(true);
   });
   onMount(() => {
     startUpdateChecks();

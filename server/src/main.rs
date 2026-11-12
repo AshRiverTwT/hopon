@@ -45,13 +45,45 @@ async fn main() -> Result<()> {
         });
     }
     tokio::spawn(files::sweep(st.clone()));
+    {
+        let db = st.db.clone();
+        tokio::spawn(async move {
+            let mut iv = tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                iv.tick().await;
+                let result = sqlx::query(
+                    "WITH removed AS ( \
+                       DELETE FROM durable_events WHERE created_at < now() - interval '30 days' \
+                       RETURNING channel_id, cursor \
+                     ), pruned AS ( \
+                       SELECT channel_id, MAX(cursor) AS cursor FROM removed GROUP BY channel_id \
+                     ) \
+                     INSERT INTO durable_event_state (channel_id, pruned_through) \
+                     SELECT channel_id, cursor FROM pruned \
+                     ON CONFLICT (channel_id) DO UPDATE \
+                       SET pruned_through = GREATEST(durable_event_state.pruned_through, EXCLUDED.pruned_through)",
+                )
+                .execute(&db)
+                .await;
+                if let Err(error) = result {
+                    tracing::warn!("durable event retention failed: {error}");
+                }
+            }
+        });
+    }
 
     let app = Router::new()
         .route("/ws", get(ws::handler))
         .route("/files", axum::routing::post(files::upload))
         .route("/files/{id}", get(files::download))
         .route("/health", get(|| async { "ok" }))
-        .route("/metrics", get(|AxState(st): AxState<Arc<state::State>>| async move { st.metrics.render() }))
+        .route("/metrics", get(|AxState(st): AxState<Arc<state::State>>| async move {
+            format!("{}history_active {}\nupload_active {}\npersist_queue_depth {}\n",
+                st.metrics.render(),
+                128 - st.history_slots.available_permits(),
+                8 - st.upload_slots.available_permits(),
+                st.persist.max_capacity() - st.persist.capacity())
+        }))
         .route("/metrics/reset", get(|AxState(st): AxState<Arc<state::State>>| async move { st.metrics.reset(); "reset" }))
         .with_state(st.clone());
 
