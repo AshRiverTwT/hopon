@@ -2,6 +2,11 @@
 
 **Download the latest:** [HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe)
 
+## HopOn 0.4.1
+
+- Settings → Account shows the app version.
+- Same protocol as 0.4.0: no server update needed.
+
 ## HopOn 0.4.0
 
 **Update the app and the server together** (new protocol: a 0.3 app shows

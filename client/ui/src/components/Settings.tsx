@@ -109,6 +109,7 @@ export default function Settings(p: { close: () => void }) {
       step: (d: -1 | 0 | 1) => { if (d === 0) setCapturing(a.id); },
     })) },
     { name: "Account", opts: [
+      { label: "Version", value: () => `HopOn ${__APP_VERSION__}`, step: () => {} },
       { label: "Server", value: () => cfg()?.url ?? "", step: () => {} },
       { label: "Emoji artwork", value: () => "Twemoji · CC-BY 4.0", step: (d) => { if (d === 0) call("open_url", { url: "https://github.com/jdecked/twemoji" }).catch(() => {}); } },
       { label: "Session", value: () => "Log out", step: (d) => { if (d === 0) { call("logout").catch(err); p.close(); } } },
