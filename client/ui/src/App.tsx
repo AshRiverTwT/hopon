@@ -32,6 +32,18 @@ export default function App() {
   const [sheet, setSheet] = createSignal<Sheet>(null);
   const [games, setGamesRaw] = createSignal(false);
   const [dropping, setDropping] = createSignal(false);
+  createEffect(() => {
+    call("ui_set_context", {
+      serverId: s.selServer,
+      joinedVoice: s.voice.channelId,
+    }).catch(() => {});
+  });
+  onMount(() => {
+    const syncVisibility = () => call("ui_set_visibility", { visible: !document.hidden }).catch(() => {});
+    syncVisibility();
+    document.addEventListener("visibilitychange", syncVisibility);
+    onCleanup(() => document.removeEventListener("visibilitychange", syncVisibility));
+  });
   const setGames = (v: boolean | ((x: boolean) => boolean)) => {
     const next = typeof v === "function" ? v(games()) : v;
     if (next && window.innerWidth < GAMES_MIN_WIDTH) {
@@ -143,7 +155,7 @@ export default function App() {
               <button class="pill ghost" title={currentServer()?.name} onClick={() => setSheet({ k: "servers" })}>{currentServer()?.name ?? "Servers"}</button>
               <div class="topbar-right">
                 <Show when={currentServer()}>
-                  <button class="pill ghost" onClick={() => setSheet({ k: "members" })}>People {currentServer()!.members.filter((m) => s.online[m.id]).length}/{currentServer()!.members.length}</button>
+                  <button class="pill ghost" onClick={() => setSheet({ k: "members" })}>People {currentServer()!.memberIds.length}/{currentServer()!.memberCount}</button>
                   <Show when={isOwner()}><button class="pill ghost" onClick={() => setSheet({ k: "server" })}>Server<span class="long"> settings</span></button></Show>
                   <button class="pill ghost" onClick={invite}>Invite</button>
                   <button class="pill ghost" classList={{ active: games() }} onClick={() => setGames((v) => !v)}>Games</button>

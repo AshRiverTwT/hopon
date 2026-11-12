@@ -1,7 +1,9 @@
 //! Types pushed to the webview. IDs are 63-bit, beyond JS's 2^53 safe range,
 //! so they cross the IPC boundary as decimal strings.
 
-use hopon_shared::{Attachment, ChannelInfo, ChannelKind, Id, Message, ServerInfo, UserInfo, VoicePresence};
+use hopon_shared::{
+    Attachment, ChannelInfo, ChannelKind, Id, Message, ServerInfo, UserInfo, VoicePresence,
+};
 use serde::Serialize;
 
 pub fn sid(id: Id) -> String {
@@ -21,7 +23,11 @@ pub struct UiUser {
 }
 impl From<&UserInfo> for UiUser {
     fn from(u: &UserInfo) -> Self {
-        Self { id: sid(u.id), name: u.name.clone(), avatar_v: u.avatar_v }
+        Self {
+            id: sid(u.id),
+            name: u.name.clone(),
+            avatar_v: u.avatar_v,
+        }
     }
 }
 
@@ -37,7 +43,14 @@ pub struct UiChannel {
 }
 impl From<&ChannelInfo> for UiChannel {
     fn from(c: &ChannelInfo) -> Self {
-        Self { id: sid(c.id), server_id: sid(c.server_id), name: c.name.clone(), voice: c.kind == ChannelKind::Voice, topic: c.topic.clone(), last_id: sid(c.last_id) }
+        Self {
+            id: sid(c.id),
+            server_id: sid(c.server_id),
+            name: c.name.clone(),
+            voice: c.kind == ChannelKind::Voice,
+            topic: c.topic.clone(),
+            last_id: sid(c.last_id),
+        }
     }
 }
 
@@ -48,7 +61,8 @@ pub struct UiServer {
     pub name: String,
     pub owner_id: String,
     pub channels: Vec<UiChannel>,
-    pub members: Vec<UiUser>,
+    pub member_ids: Vec<String>,
+    pub member_count: u32,
     /// channel id → last read message id.
     pub reads: std::collections::HashMap<String, String>,
     pub online: Vec<String>,
@@ -62,10 +76,15 @@ impl From<&ServerInfo> for UiServer {
             name: s.name.clone(),
             owner_id: sid(s.owner_id),
             channels: s.channels.iter().map(Into::into).collect(),
-            members: s.members.iter().map(Into::into).collect(),
+            member_ids: s.member_ids.iter().map(|id| sid(*id)).collect(),
+            member_count: s.member_count,
             reads: s.reads.iter().map(|(c, r)| (sid(*c), sid(*r))).collect(),
             online: s.online.iter().map(|u| sid(*u)).collect(),
-            activities: s.activities.iter().map(|(u, g)| (sid(*u), g.clone())).collect(),
+            activities: s
+                .activities
+                .iter()
+                .map(|(u, g)| (sid(*u), g.clone()))
+                .collect(),
         }
     }
 }
@@ -107,10 +126,21 @@ impl UiMsg {
             content: m.content.clone(),
             edited_at: m.edited_at,
             ts: hopon_shared::ids::id_unix_ms(m.id),
-            nonce: if m.nonce == 0 { String::new() } else { m.nonce.to_string() },
+            nonce: if m.nonce == 0 {
+                String::new()
+            } else {
+                m.nonce.to_string()
+            },
             state,
             reply_to: m.reply_to.map(sid),
-            reactions: m.reactions.iter().map(|r| UiReaction { emoji: r.emoji.clone(), users: r.users.iter().map(|u| sid(*u)).collect() }).collect(),
+            reactions: m
+                .reactions
+                .iter()
+                .map(|r| UiReaction {
+                    emoji: r.emoji.clone(),
+                    users: r.users.iter().map(|u| sid(*u)).collect(),
+                })
+                .collect(),
             attachments: m.attachments.clone(),
         }
     }
@@ -126,7 +156,12 @@ pub struct UiPresence {
 }
 impl From<&VoicePresence> for UiPresence {
     fn from(v: &VoicePresence) -> Self {
-        Self { user_id: sid(v.user_id), channel_id: Some(sid(v.channel_id)), muted: v.muted, deafened: v.deafened }
+        Self {
+            user_id: sid(v.user_id),
+            channel_id: Some(sid(v.channel_id)),
+            muted: v.muted,
+            deafened: v.deafened,
+        }
     }
 }
 
@@ -134,38 +169,130 @@ impl From<&VoicePresence> for UiPresence {
 #[serde(tag = "t", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum UiEvent {
     /// `state`: "connecting" | "online" | "offline" | "incompatible".
-    Conn { state: &'static str, rtt_ms: Option<f64> },
+    Conn {
+        state: &'static str,
+        rtt_ms: Option<f64>,
+    },
     /// Full session snapshot (also sent with `user: None` when logged out).
-    Session { user: Option<UiUser>, servers: Vec<UiServer>, voice: Vec<UiPresence> },
-    Server { server: UiServer },
-    ChannelCreated { channel: UiChannel },
-    MemberJoined { server_id: String, user: UiUser },
-    UserUpdated { user: UiUser },
+    Session {
+        user: Option<UiUser>,
+        servers: Vec<UiServer>,
+        users: Vec<UiUser>,
+        voice: Vec<UiPresence>,
+    },
+    Server {
+        server: UiServer,
+    },
+    ChannelCreated {
+        channel: UiChannel,
+    },
+    MemberJoined {
+        server_id: String,
+        user: UiUser,
+    },
+    MemberPage {
+        server_id: String,
+        offset: u32,
+        users: Vec<UiUser>,
+        online: Vec<String>,
+        activities: std::collections::HashMap<String, String>,
+    },
+    MemberSearch {
+        server_id: String,
+        users: Vec<UiUser>,
+    },
+    UserUpdated {
+        user: UiUser,
+    },
     /// "deleted" | "kicked" | "left".
-    ServerRemoved { server_id: String, reason: &'static str },
-    ChannelDeleted { server_id: String, channel_id: String },
-    ReadUpdated { channel_id: String, last_read: String },
-    Reaction { channel_id: String, message_id: String, emoji: String, user_id: String, add: bool },
-    Typing { channel_id: String, user_id: String },
+    ServerRemoved {
+        server_id: String,
+        reason: &'static str,
+    },
+    ChannelDeleted {
+        server_id: String,
+        channel_id: String,
+    },
+    ReadUpdated {
+        channel_id: String,
+        last_read: String,
+    },
+    /// Lightweight channel activity keeps unread markers current without sending background messages.
+    ChannelActivity {
+        channel_id: String,
+        last_id: String,
+    },
+    Reaction {
+        channel_id: String,
+        message_id: String,
+        emoji: String,
+        user_id: String,
+        add: bool,
+    },
+    Typing {
+        channel_id: String,
+        user_id: String,
+    },
     /// Account preferences (JSON object), on login and when another device saves.
-    Prefs { json: String },
+    Prefs {
+        json: String,
+    },
     /// A message in this channel mentions you.
-    Mentioned { channel_id: String },
-    UserPresence { user_id: String, online: bool },
+    Mentioned {
+        channel_id: String,
+    },
+    UserPresence {
+        user_id: String,
+        online: bool,
+    },
     /// A member started/stopped playing ("" = stopped).
-    Activity { user_id: String, game: String },
+    Activity {
+        user_id: String,
+        game: String,
+    },
     /// New or updated messages (merge by `id`, replacing pending by `nonce`).
-    Messages { channel_id: String, msgs: Vec<UiMsg> },
-    MsgState { channel_id: String, nonce: String, id: String, state: u8 },
-    Edited { channel_id: String, id: String, content: String, edited_at: i64 },
-    Deleted { channel_id: String, id: String },
-    Presence { server_id: String, presence: UiPresence },
+    Messages {
+        channel_id: String,
+        msgs: Vec<UiMsg>,
+    },
+    MsgState {
+        channel_id: String,
+        nonce: String,
+        id: String,
+        state: u8,
+    },
+    Edited {
+        channel_id: String,
+        id: String,
+        content: String,
+        edited_at: i64,
+    },
+    Deleted {
+        channel_id: String,
+        id: String,
+    },
+    Presence {
+        server_id: String,
+        presence: UiPresence,
+    },
     /// Voice connection status for the local user.
-    Voice { channel_id: Option<String>, state: &'static str, muted: bool, deafened: bool, detail: Option<String> },
+    Voice {
+        channel_id: Option<String>,
+        state: &'static str,
+        muted: bool,
+        deafened: bool,
+        detail: Option<String>,
+    },
     /// Users currently speaking in the joined voice channel.
-    Speaking { user_ids: Vec<String> },
+    Speaking {
+        user_ids: Vec<String>,
+    },
     /// A notification was clicked: show this channel.
-    OpenChannel { channel_id: String },
+    OpenChannel {
+        channel_id: String,
+    },
     #[allow(dead_code)]
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }

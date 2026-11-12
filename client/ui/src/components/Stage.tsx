@@ -1,6 +1,6 @@
 // Voice room view: who is here, who is speaking, join / leave.
 import { createSignal, For, Show } from "solid-js";
-import { attachLocalPreview, QUALITIES, screen, SELF, setFullscreen, setScreen, startShare, stopShare, viewerCount, watch, type Quality } from "../screen";
+import { attachLocalPreview, QUALITIES, screen, SELF, setFullscreen, setLowResourceMode, setScreen, startShare, stopShare, viewerCount, watch, type Quality } from "../screen";
 import { StreamTiles, Viewers } from "./Streams";
 import { FullIcon, PipIcon } from "./icons";
 import { call } from "../ipc";
@@ -30,6 +30,7 @@ function ShareControls() {
   const [audio, setAudio] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [bigPreview, setBigPreview] = createSignal(false);
+  const lowResource = () => screen.lowResource;
   let preview: HTMLVideoElement | undefined;
   const start = async () => {
     setBusy(true);
@@ -54,6 +55,12 @@ function ShareControls() {
           </div>
           <label class="check" title="Shares your computer's sound too. Voice chat may echo for viewers on speakers.">
             <input type="checkbox" checked={audio()} onChange={(e) => setAudio(e.currentTarget.checked)} /> Include audio <span class="muted small">(whole screen only)</span>
+          </label>
+          <label class="check" title="Use 720p30 and watch one screen stream at a time.">
+            <input type="checkbox" checked={lowResource()} onChange={(e) => {
+              setLowResourceMode(e.currentTarget.checked);
+              if (e.currentTarget.checked) setQuality("720p30");
+            }} /> Low resource
           </label>
         </div>
       }>

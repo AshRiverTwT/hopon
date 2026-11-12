@@ -1,8 +1,8 @@
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { currentServer, iAmTyping, s, sendMessage, set, toast, typingIn, userName } from "../store";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { currentServer, iAmTyping, rememberMentionCandidates, s, sendMessage, serverUsers, set, toast, typingIn, userName } from "../store";
 import { call } from "../ipc";
 import { fmtSize } from "../media";
-import type { Attachment } from "../types";
+import type { Attachment, User } from "../types";
 import { GifPicker } from "./GifPicker";
 import { preview } from "../rich";
 import { Avatar } from "./Avatar";
@@ -35,6 +35,7 @@ export default function Composer() {
   const [emoji, setEmoji] = createSignal(false);
   const [gif, setGif] = createSignal(false);
   const [files, setFiles] = createSignal<Pending[]>([]);
+  const [searchResults, setSearchResults] = createSignal<User[]>([]);
   let ta!: HTMLTextAreaElement;
   let fileInput!: HTMLInputElement;
   let seq = 0;
@@ -73,11 +74,29 @@ export default function Composer() {
     const m = before.match(/(^|[\s(])@([^\s@<>]{0,32})$/);
     return m ? m[2] : null;
   });
+  let searchSeq = 0;
+  createEffect(() => {
+    const q = query();
+    const serverId = currentServer()?.id;
+    if (!q || !serverId) { searchSeq++; setSearchResults([]); return; }
+    const seq = ++searchSeq;
+    const timer = window.setTimeout(() => {
+      call<User[]>("member_search", { serverId, query: q })
+        .then((users) => {
+          if (seq !== searchSeq) return;
+          setSearchResults(users);
+          rememberMentionCandidates(serverId, users);
+        }).catch(() => {});
+    }, 130);
+    onCleanup(() => clearTimeout(timer));
+  });
   const matches = createMemo(() => {
     const q = query();
     if (q === null) return [];
     const ql = q.toLowerCase();
-    return (currentServer()?.members ?? []).filter((m) => m.name.toLowerCase().startsWith(ql)).slice(0, 6);
+    const merged = new Map(serverUsers(currentServer()).map((m) => [m.id, m]));
+    for (const m of searchResults()) merged.set(m.id, m);
+    return [...merged.values()].filter((m) => m.name.toLowerCase().startsWith(ql)).slice(0, 6);
   });
 
   const resize = () => { ta.style.height = "auto"; ta.style.height = Math.min(200, ta.scrollHeight) + "px"; };

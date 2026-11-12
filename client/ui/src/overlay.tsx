@@ -14,9 +14,10 @@ import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-j
 import { listen } from "@tauri-apps/api/event";
 import { createStore, reconcile } from "solid-js/store";
 import { call, now, randomNonce, subscribe } from "./ipc";
-import { set as setMain, userName } from "./store";
+import { s as mainStore, set as setMain, userName } from "./store";
 import { mergeMsgs } from "./merge";
 import { encodeMentions } from "./rich";
+import { rememberMentionCandidates, serverUsers } from "./store";
 import Rich from "./components/Rich";
 import { Avatar } from "./components/Avatar";
 import Attachments from "./components/Attachments";
@@ -45,7 +46,7 @@ function onEvent(e: UiEvent) {
       set("servers", reconcile(e.servers, { key: "id" }));
       set("presence", reconcile(Object.fromEntries(e.voice.map((p) => [p.userId, p]))));
       if (e.user) set("voiceCh", e.voice.find((p) => p.userId === e.user!.id)?.channelId ?? null);
-      setMain({ user: e.user, servers: e.servers });
+      setMain({ user: e.user, servers: e.servers, users: Object.fromEntries(e.users.map((u) => [u.id, u])) });
       break;
     case "server": {
       const i = o.servers.findIndex((x) => x.id === e.server.id);
@@ -53,6 +54,15 @@ function onEvent(e: UiEvent) {
       setMain("servers", reconcile([...o.servers], { key: "id" }));
       break;
     }
+    case "memberPage": {
+      const users = { ...mainStore.users, ...Object.fromEntries(e.users.map((u) => [u.id, u])) };
+      setMain("users", users);
+      setMain("servers", (servers) => servers.map((sv) => sv.id === e.serverId ? { ...sv, memberIds: [...new Set([...sv.memberIds, ...e.users.map((u) => u.id)])] } : sv));
+      break;
+    }
+    case "memberSearch":
+      rememberMentionCandidates(e.serverId, e.users);
+      break;
     case "messages":
       if (e.channelId === o.channelId) set("msgs", mergeMsgs([...o.msgs], e.msgs).list.slice(-KEEP));
       break;
@@ -75,6 +85,7 @@ function onEvent(e: UiEvent) {
       break;
     case "userUpdated":
       if (o.me?.id === e.user.id) set("me", e.user);
+      setMain("users", e.user.id, e.user);
       break;
   }
 }
@@ -93,7 +104,7 @@ function Overlay() {
   const send = () => {
     const ch = o.channelId;
     const sv = channel()?.sv;
-    const text = encodeMentions(ta.value.trim(), sv?.members ?? []);
+    const text = encodeMentions(ta.value.trim(), serverUsers(sv, true));
     if (!ch || !text) return;
     call("send_message", { channelId: ch, content: text, nonce: randomNonce(), tInputMs: now(), replyTo: null }).catch(() => {});
     ta.value = "";

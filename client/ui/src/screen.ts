@@ -16,8 +16,9 @@ import { call } from "./ipc";
 import { prefs, setPrefs } from "./prefs";
 import type { LocalTrack, RemoteAudioTrack, RemoteTrack, Room } from "livekit-client";
 
-export type Quality = "720p60" | "1080p60";
+export type Quality = "720p30" | "720p60" | "1080p60";
 export const QUALITIES: Record<Quality, { label: string; width: number; height: number; fps: number; bitrate: number }> = {
+  "720p30": { label: "720p · 30 fps · Low resource", width: 1280, height: 720, fps: 30, bitrate: 2_000_000 },
   "720p60": { label: "720p · 60 fps", width: 1280, height: 720, fps: 60, bitrate: 4_500_000 },
   "1080p60": { label: "1080p · 60 fps", width: 1920, height: 1080, fps: 60, bitrate: 8_000_000 },
 };
@@ -49,6 +50,8 @@ export const [screen, setScreen] = createStore({
   full: null as string | null,
   /** the floating mini player was opened by hand (shows even in the voice room) */
   popped: false,
+  /** Prefer 720p30 sharing and keep only one remote stream subscribed. */
+  lowResource: false,
 });
 
 let lk: typeof import("livekit-client") | null = null;
@@ -67,11 +70,18 @@ let park: HTMLDivElement | null = null;
  * overlapping calls don't open duplicate connections. */
 let target: string | null = null;
 const audios = new Map<string, RemoteAudioTrack>();
+/** The screen participant, rather than the same user's separate voice participant. */
+const watchedParticipants = new Map<string, string>();
 
 const userOf = (identity: string) => identity.split(":")[0];
 
 export const viewerCount = (userId: string) => (screen.viewers[userId] ?? []).length;
 export const streamVolume = (userId: string) => prefs.streamVolumes[userId] ?? 100;
+
+export function setLowResourceMode(enabled: boolean) {
+  setScreen("lowResource", enabled);
+  if (enabled) for (const user of [...screen.watching].slice(1)) unwatch(user);
+}
 
 function refresh() {
   if (!room || !lk) return;
@@ -143,6 +153,8 @@ function place(userId: string) {
 
 function attach(track: RemoteTrack, identity: string) {
   const user = userOf(identity);
+  // Stop Watching may race with a subscription already in flight.
+  if (watchedParticipants.get(user) !== identity) { detachTrack(track); return; }
   if (track.kind === "video") {
     if (!screen.watching.includes(user)) return;
     track.attach(playerFor(user));
@@ -153,6 +165,14 @@ function attach(track: RemoteTrack, identity: string) {
     const a = track as RemoteAudioTrack;
     audios.set(user, a);
     a.setVolume(streamVolume(user) / 100);
+  }
+}
+
+function detachTrack(track: RemoteTrack) {
+  for (const element of track.detach()) {
+    element.pause();
+    element.srcObject = null;
+    if (track.kind === "audio") element.remove();
   }
 }
 
@@ -183,7 +203,7 @@ export async function connectScreens(channelId: string, me: string) {
       .on(E.ParticipantAttributesChanged, recountViewers)
       .on(E.TrackSubscribed, (t, _pub, p) => attach(t, p.identity))
       .on(E.TrackUnsubscribed, (t, _pub, p) => {
-        t.detach();
+        detachTrack(t);
         const u = userOf(p.identity);
         if (t.kind === "video") setScreen("live", produce((l) => void delete l[u]));
         else audios.delete(u);
@@ -193,6 +213,9 @@ export async function connectScreens(channelId: string, me: string) {
         if (room !== r) return; // an old connection closing
         room = null;
         target = null; // let the next connectScreens reconnect
+        for (const track of local) track.stop();
+        local = [];
+        watchedParticipants.clear();
         resetState(null);
       });
     try {
@@ -246,8 +269,10 @@ export async function startShare(quality: Quality, audio: boolean) {
     selfBrowserSurface: "exclude",
     surfaceSwitching: "include",
   });
+  // Keep the captured tracks reachable if any later publish rejects.
+  local = tracks;
   const enc = { maxBitrate: q.bitrate, maxFramerate: q.fps };
-  for (const t of tracks) {
+  try { for (const t of tracks) {
     if (t.kind === "video") {
       await room.localParticipant.publishTrack(t, {
         source: lk.Track.Source.ScreenShare,
@@ -272,8 +297,10 @@ export async function startShare(quality: Quality, audio: boolean) {
     }
     // "Stop sharing" in the system UI ends the track.
     t.mediaStreamTrack.addEventListener("ended", () => void stopShare());
+  } } catch (error) {
+    await stopShare();
+    throw error;
   }
-  local = tracks;
   setScreen({ sharing: true, sharingAudio: tracks.some((t) => t.kind === "audio") });
   return tracks.find((t) => t.kind === "video") ?? null;
 }
@@ -294,6 +321,8 @@ export function watch(userId: string) {
   if (!room || !lk) return;
   const p = [...room.remoteParticipants.values()].find((x) => userOf(x.identity) === userId && x.getTrackPublication(lk!.Track.Source.ScreenShare));
   if (!p) return;
+  if (screen.lowResource) for (const user of [...screen.watching]) if (user !== userId) unwatch(user);
+  watchedParticipants.set(userId, p.identity);
   if (!screen.watching.includes(userId)) {
     setScreen("watching", (w) => [...w, userId]);
     publishWatching();
@@ -308,15 +337,18 @@ export function watch(userId: string) {
 
 export function unwatch(userId: string) {
   if (screen.full === userId) setFullscreen(null);
+  // Clear the watch first so late TrackSubscribed callbacks cannot restart audio.
+  const identity = watchedParticipants.get(userId);
+  watchedParticipants.delete(userId);
   dropViews(userId);
   setScreen("watching", (w) => w.filter((u) => u !== userId));
   if (!screen.watching.length) setScreen("popped", false);
   publishWatching();
   if (!room || !lk) return;
-  const p = [...room.remoteParticipants.values()].find((x) => userOf(x.identity) === userId);
+  const p = identity ? room.remoteParticipants.get(identity) : undefined;
   for (const src of [lk.Track.Source.ScreenShare, lk.Track.Source.ScreenShareAudio]) {
     const pub = p?.getTrackPublication(src);
-    pub?.track?.detach();
+    if (pub?.track) detachTrack(pub.track as RemoteTrack);
     pub?.setSubscribed(false);
   }
 }

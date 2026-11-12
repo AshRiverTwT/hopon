@@ -4,15 +4,15 @@ mod cache;
 mod commands;
 mod core;
 mod games;
-mod overlay;
 mod guard;
 mod notify;
+mod overlay;
 mod perf;
 mod secure;
 mod sys;
 mod tray;
-mod update;
 mod ui;
+mod update;
 #[cfg(feature = "voice")]
 mod voice;
 #[cfg(not(feature = "voice"))]
@@ -31,7 +31,10 @@ pub fn run() {
         return;
     }
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,livekit=warn,libwebrtc=warn".into()))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,livekit=warn,libwebrtc=warn".into()),
+        )
         .init();
 
     tauri::Builder::default()
@@ -82,6 +85,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::ui_subscribe,
+            commands::ui_set_visibility,
+            commands::ui_set_context,
+            commands::ui_set_visible_members,
             commands::ui_ready,
             commands::get_config,
             commands::set_server_url,
@@ -90,6 +96,8 @@ pub fn run() {
             commands::logout,
             commands::open_channel,
             commands::load_older,
+            commands::load_members,
+            commands::member_search,
             commands::send_message,
             commands::upload_file,
             commands::gif_search,
@@ -165,7 +173,9 @@ async fn load_voice_prefs(core: &Arc<core::Core>) {
     }
     if let Some(p) = s(core.cache.kv_get("ptt").await) {
         if let Some((en, vk)) = p.split_once(':') {
-            core.voice.set_ptt(core, en == "1", vk.parse().unwrap_or(0)).await;
+            core.voice
+                .set_ptt(core, en == "1", vk.parse().unwrap_or(0))
+                .await;
         }
     }
 }

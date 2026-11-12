@@ -5,7 +5,7 @@ import type { Msg, Server } from "./types";
 const names = ["ash", "mira", "jun", "tobias", "nell"];
 const members = names.map((n, i) => ({ id: String(1001 + i), name: n, avatarV: 1 }));
 const server: Server = {
-  id: "9001", name: "Night Shift", ownerId: "1001", members, reads: {}, online: ["1001", "1002", "1003"], activities: {},
+  id: "9001", name: "Night Shift", ownerId: "1001", memberIds: members.map((m) => m.id), memberCount: members.length, reads: {}, online: ["1001", "1002", "1003"], activities: {},
   channels: [{ id: "7001", serverId: "9001", name: "general", voice: false, topic: "", lastId: "0" }, { id: "7101", serverId: "9001", name: "Lounge", voice: true, topic: "", lastId: "0" }],
 };
 const t = Date.now();
@@ -35,5 +35,5 @@ mockIPC((cmd, args) => {
 });
 await import("./overlay");
 const push = (window as unknown as { __ovPush: (e: unknown) => void }).__ovPush;
-push({ t: "session", user: members[0], servers: [server], voice: ["1001", "1002", "1003", "1004"].map((u, i) => ({ userId: u, channelId: "7101", muted: i === 3, deafened: false })) });
+push({ t: "session", user: members[0], servers: [server], users: members, voice: ["1001", "1002", "1003", "1004"].map((u, i) => ({ userId: u, channelId: "7101", muted: i === 3, deafened: false })) });
 push({ t: "speaking", userIds: ["1002"] });

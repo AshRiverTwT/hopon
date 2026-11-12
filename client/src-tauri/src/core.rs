@@ -14,17 +14,64 @@ use futures_util::{FutureExt, SinkExt, StreamExt};
 use hopon_shared::time::{now_us, ClockSync};
 use hopon_shared::*;
 use parking_lot::Mutex;
+use std::collections::HashSet;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::hash::Hash;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::ipc::Channel;
+use tauri::Manager;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, Notify};
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 
 const RECENT_PER_CHANNEL: usize = 300;
+const RECENT_BYTES_LIMIT: usize = 64 * 1024 * 1024;
+const SOCKET_QUEUE_CAPACITY: usize = 512;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const UI_COALESCE_MS: u64 = 50;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum UiCoalesceKey {
+    Typing(String, String),
+    Presence(String, String),
+    UserPresence(String),
+    Activity(String),
+    Speaking,
+    ChannelActivity(String),
+}
+
+impl UiEvent {
+    fn coalesce_key(&self) -> Option<UiCoalesceKey> {
+        match self {
+            UiEvent::Typing {
+                channel_id,
+                user_id,
+            } => Some(UiCoalesceKey::Typing(channel_id.clone(), user_id.clone())),
+            UiEvent::Presence {
+                server_id,
+                presence,
+            } => Some(UiCoalesceKey::Presence(
+                server_id.clone(),
+                presence.user_id.clone(),
+            )),
+            UiEvent::UserPresence { user_id, .. } => {
+                Some(UiCoalesceKey::UserPresence(user_id.clone()))
+            }
+            UiEvent::Activity { user_id, .. } => Some(UiCoalesceKey::Activity(user_id.clone())),
+            UiEvent::Speaking { .. } => Some(UiCoalesceKey::Speaking),
+            UiEvent::ChannelActivity { channel_id, .. } => {
+                Some(UiCoalesceKey::ChannelActivity(channel_id.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    fn replaceable(&self) -> bool {
+        self.coalesce_key().is_some()
+    }
+}
 
 pub struct PendingSend {
     pub channel_id: Id,
@@ -39,8 +86,12 @@ pub struct PendingSend {
 #[derive(Default)]
 pub struct Store {
     pub me: Option<UserInfo>,
+    pub users_by_id: HashMap<Id, UserInfo>,
+    user_lookups: HashSet<Id>,
     pub servers: Vec<ServerInfo>,
     pub recent: HashMap<Id, VecDeque<Message>>,
+    recent_lru: VecDeque<Id>,
+    recent_bytes: usize,
     /// user → (server, presence)
     pub voice: HashMap<Id, (Id, VoicePresence)>,
     pub pending: HashMap<u64, PendingSend>,
@@ -49,22 +100,55 @@ pub struct Store {
     pub prefs: Option<String>,
     pub refresh_token: Option<String>,
     pub open_channel: Option<Id>,
+    /// Server whose member rail is currently visible in the client.
+    pub visible_server: Option<Id>,
+    /// Voice room the client is currently joined to.
+    pub joined_voice: Option<Id>,
+    /// Member rows intersecting the visible people list.
+    pub visible_members: HashSet<Id>,
+    pub speaking: Vec<String>,
 }
 
 impl Store {
     fn insert_recent(&mut self, m: Message) {
-        let q = self.recent.entry(m.channel_id).or_default();
-        match q.binary_search_by_key(&m.id, |x| x.id) {
-            Ok(i) => q[i] = m,
-            Err(i) => {
-                // Older than our window and the window is full: not "recent".
-                if i == 0 && q.len() >= RECENT_PER_CHANNEL {
-                    return;
-                }
-                q.insert(i, m);
-                while q.len() > RECENT_PER_CHANNEL {
-                    q.pop_front();
-                }
+        let channel = m.channel_id;
+        let q = self.recent.entry(channel).or_default();
+        let old = q
+            .binary_search_by_key(&m.id, |x| x.id)
+            .ok()
+            .map(|i| q.remove(i).unwrap());
+        if let Some(prev) = &old {
+            self.recent_bytes = self.recent_bytes.saturating_sub(message_bytes(prev));
+        }
+        let size = message_bytes(&m);
+        let i = q
+            .binary_search_by_key(&m.id, |x| x.id)
+            .unwrap_or_else(|i| i);
+        // Old messages outside a full per-channel window are left to SQLite.
+        if i == 0 && old.is_none() && q.len() >= RECENT_PER_CHANNEL {
+            return;
+        }
+        q.insert(i, m);
+        self.recent_bytes = self.recent_bytes.saturating_add(size);
+        while self
+            .recent
+            .get(&channel)
+            .is_some_and(|q| q.len() > RECENT_PER_CHANNEL)
+        {
+            if let Some(m) = self.recent.get_mut(&channel).and_then(VecDeque::pop_front) {
+                self.recent_bytes = self.recent_bytes.saturating_sub(message_bytes(&m));
+            }
+        }
+        self.recent_lru.retain(|id| *id != channel);
+        self.recent_lru.push_back(channel);
+        while self.recent_bytes > RECENT_BYTES_LIMIT {
+            let Some(oldest) = self.recent_lru.pop_front() else {
+                break;
+            };
+            if let Some(q) = self.recent.remove(&oldest) {
+                self.recent_bytes = self
+                    .recent_bytes
+                    .saturating_sub(q.iter().map(message_bytes).sum::<usize>());
             }
         }
     }
@@ -72,9 +156,56 @@ impl Store {
         UiEvent::Session {
             user: self.me.as_ref().map(Into::into),
             servers: self.servers.iter().map(Into::into).collect(),
+            users: self.users_by_id.values().map(Into::into).collect(),
             voice: self.voice.values().map(|(_, p)| p.into()).collect(),
         }
     }
+
+    fn edit_recent(&mut self, channel: Id, id: Id, content: &str, edited_at: i64) {
+        if let Some(q) = self.recent.get_mut(&channel) {
+            if let Ok(i) = q.binary_search_by_key(&id, |m| m.id) {
+                self.recent_bytes = self.recent_bytes.saturating_sub(message_bytes(&q[i]));
+                q[i].content = content.to_owned();
+                q[i].edited_at = Some(edited_at);
+                self.recent_bytes = self.recent_bytes.saturating_add(message_bytes(&q[i]));
+            }
+        }
+    }
+
+    fn delete_recent(&mut self, channel: Id, id: Id) {
+        if let Some(q) = self.recent.get_mut(&channel) {
+            if let Ok(i) = q.binary_search_by_key(&id, |m| m.id) {
+                self.recent_bytes = self
+                    .recent_bytes
+                    .saturating_sub(message_bytes(&q.remove(i).unwrap()));
+            }
+        }
+    }
+
+    fn remove_recent_channel(&mut self, channel: Id) {
+        if let Some(q) = self.recent.remove(&channel) {
+            self.recent_bytes = self
+                .recent_bytes
+                .saturating_sub(q.iter().map(message_bytes).sum::<usize>());
+        }
+        self.recent_lru.retain(|id| *id != channel);
+    }
+
+    fn touch_recent(&mut self, channel: Id) {
+        if self.recent.contains_key(&channel) {
+            self.recent_lru.retain(|id| *id != channel);
+            self.recent_lru.push_back(channel);
+        }
+    }
+}
+
+fn message_bytes(m: &Message) -> usize {
+    m.content.len()
+        + m.attachments
+            .iter()
+            .map(|a| a.name.len() + a.mime.len() + a.url.len() + a.preview.len() + a.id.len() + 128)
+            .sum::<usize>()
+        + 256
 }
 
 pub struct Core {
@@ -86,10 +217,14 @@ pub struct Core {
     /// Subscribed windows (label → channel), plus events buffered while the
     /// main window isn't attached yet.
     ui: Mutex<(Vec<(String, Channel<UiEvent>)>, Vec<UiEvent>)>,
+    pending_ui: Mutex<HashMap<UiCoalesceKey, UiEvent>>,
+    pending_ui_scheduled: AtomicBool,
+    ui_suspended: AtomicBool,
     /// HTTP client for uploads (separate connections: never blocks chat).
     http: reqwest::Client,
-    out: Mutex<Option<mpsc::UnboundedSender<WsMsg>>>,
+    out: Mutex<Option<mpsc::Sender<WsMsg>>>,
     waiters: Mutex<HashMap<u32, oneshot::Sender<S2C>>>,
+    send_reqs: Mutex<HashMap<u32, (u64, Id)>>,
     req: AtomicU32,
     reconnect: Notify,
     pub voice: crate::voice::Voice,
@@ -110,9 +245,16 @@ impl Core {
             clock: Mutex::new(ClockSync::default()),
             url: Mutex::new(url),
             ui: Mutex::new((Vec::new(), Vec::new())),
-            http: reqwest::Client::builder().connect_timeout(Duration::from_secs(10)).build().unwrap_or_default(),
+            pending_ui: Mutex::new(HashMap::new()),
+            pending_ui_scheduled: AtomicBool::new(false),
+            ui_suspended: AtomicBool::new(false),
+            http: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(10))
+                .build()
+                .unwrap_or_default(),
             out: Mutex::new(None),
             waiters: Mutex::new(HashMap::new()),
+            send_reqs: Mutex::new(HashMap::new()),
             req: AtomicU32::new(1),
             reconnect: Notify::new(),
             voice: crate::voice::Voice::new(),
@@ -124,7 +266,73 @@ impl Core {
 
     // ---------- UI plumbing ----------
 
-    pub fn emit(&self, ev: UiEvent) {
+    pub fn emit(self: &Arc<Self>, ev: UiEvent) {
+        if let UiEvent::Speaking { user_ids } = &ev {
+            self.store.lock().speaking = user_ids.clone();
+        }
+        if let Some(key) = ev.coalesce_key() {
+            let schedule = {
+                let mut pending = self.pending_ui.lock();
+                pending.insert(key, ev);
+                !self.pending_ui_scheduled.swap(true, Ordering::AcqRel)
+            };
+            if schedule {
+                let core = self.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_millis(UI_COALESCE_MS)).await;
+                        let batch = {
+                            let mut pending = core.pending_ui.lock();
+                            if pending.is_empty() {
+                                core.pending_ui_scheduled.store(false, Ordering::Release);
+                                return;
+                            }
+                            pending.drain().map(|(_, event)| event).collect::<Vec<_>>()
+                        };
+                        for event in batch {
+                            core.emit_now(event);
+                        }
+                    }
+                });
+            }
+            return;
+        }
+        self.emit_now(ev);
+    }
+
+    fn emit_now(&self, ev: UiEvent) {
+        let native_hidden = self
+            .app
+            .get()
+            .and_then(|app| app.get_webview_window("main"))
+            .map(|window| {
+                window.is_minimized().unwrap_or(false) || !window.is_visible().unwrap_or(true)
+            })
+            .unwrap_or(false);
+        if native_hidden {
+            self.ui_suspended.store(true, Ordering::Release);
+        }
+        if self.ui_suspended.load(Ordering::Acquire)
+            && !matches!(
+                &ev,
+                UiEvent::Conn { .. }
+                    | UiEvent::Session { .. }
+                    | UiEvent::Prefs { .. }
+                    | UiEvent::Mentioned { .. }
+                    | UiEvent::ChannelActivity { .. }
+                    | UiEvent::MsgState { .. }
+                    | UiEvent::ReadUpdated { .. }
+                    | UiEvent::ServerRemoved { .. }
+                    | UiEvent::ChannelDeleted { .. }
+                    | UiEvent::ChannelCreated { .. }
+                    | UiEvent::MemberJoined { .. }
+                    | UiEvent::UserUpdated { .. }
+                    | UiEvent::OpenChannel { .. }
+                    | UiEvent::Error { .. }
+            )
+        {
+            return;
+        }
         let mut ui = self.ui.lock();
         let mut main_ok = false;
         ui.0.retain(|(label, ch)| {
@@ -167,18 +375,102 @@ impl Core {
         self.store.lock().session_event()
     }
 
+    pub fn set_ui_visible(self: &Arc<Self>, visible: bool) {
+        let was_suspended = self.ui_suspended.swap(!visible, Ordering::AcqRel);
+        if visible && was_suspended {
+            self.emit_now(self.session_snapshot());
+            self.emit_now(UiEvent::Speaking {
+                user_ids: self.store.lock().speaking.clone(),
+            });
+            if let Some(channel_id) = self.store.lock().open_channel {
+                self.clone().refresh_latest(channel_id);
+            }
+        }
+    }
+
+    pub fn set_ui_context(self: &Arc<Self>, server_id: Option<Id>, joined_voice: Option<Id>) {
+        let visible = {
+            let mut store = self.store.lock();
+            store.visible_server = server_id;
+            store.joined_voice = joined_voice;
+            store.visible_members.clone()
+        };
+        self.set_visible_members(visible);
+    }
+
+    pub fn set_visible_members(self: &Arc<Self>, members: HashSet<Id>) {
+        let (online, activities, presences) = {
+            let mut store = self.store.lock();
+            store.visible_members = members.clone();
+            let online = store
+                .servers
+                .iter()
+                .filter(|sv| Some(sv.id) == store.visible_server)
+                .flat_map(|sv| sv.online.iter())
+                .filter(|id| members.contains(id))
+                .copied()
+                .collect::<Vec<_>>();
+            let activities = store
+                .servers
+                .iter()
+                .filter(|sv| Some(sv.id) == store.visible_server)
+                .flat_map(|sv| sv.activities.iter())
+                .filter(|(id, _)| members.contains(id))
+                .map(|(id, game)| (*id, game.clone()))
+                .collect::<Vec<_>>();
+            let presences = store
+                .voice
+                .iter()
+                .filter(|(id, (server, p))| {
+                    members.contains(id)
+                        && (Some(*server) == store.visible_server
+                            || Some(p.channel_id) == store.joined_voice)
+                })
+                .map(|(id, (server, p))| (*server, *id, p.channel_id, p.muted, p.deafened))
+                .collect::<Vec<_>>();
+            (online, activities, presences)
+        };
+        for user_id in online {
+            self.emit(UiEvent::UserPresence {
+                user_id: sid(user_id),
+                online: true,
+            });
+        }
+        for (user_id, game) in activities {
+            self.emit(UiEvent::Activity {
+                user_id: sid(user_id),
+                game,
+            });
+        }
+        for (server_id, user_id, channel_id, muted, deafened) in presences {
+            self.emit(UiEvent::Presence {
+                server_id: sid(server_id),
+                presence: UiPresence {
+                    user_id: sid(user_id),
+                    channel_id: Some(sid(channel_id)),
+                    muted,
+                    deafened,
+                },
+            });
+        }
+    }
+
     // ---------- requests ----------
 
     fn next_req(&self) -> u32 {
         // Wraps far beyond any realistic session; 0 is reserved for events.
         let r = self.req.fetch_add(1, Ordering::Relaxed);
-        if r == 0 { self.req.fetch_add(1, Ordering::Relaxed) } else { r }
+        if r == 0 {
+            self.req.fetch_add(1, Ordering::Relaxed)
+        } else {
+            r
+        }
     }
 
     pub fn send_frame(&self, req: u32, msg: C2S) -> bool {
         let bytes = encode(&ClientFrame { req, msg });
         match &*self.out.lock() {
-            Some(tx) => tx.send(WsMsg::Binary(bytes.into())).is_ok(),
+            Some(tx) => tx.try_send(WsMsg::Binary(bytes.into())).is_ok(),
             None => false,
         }
     }
@@ -190,7 +482,7 @@ impl Core {
         self.waiters.lock().insert(req, tx);
         if !self.send_frame(req, msg) {
             self.waiters.lock().remove(&req);
-            return Err("offline".into());
+            return Err("offline or socket send queue is full".into());
         }
         match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
             Ok(Ok(S2C::Error { message, .. })) => Err(message),
@@ -215,7 +507,10 @@ impl Core {
         let mut incompatible = false;
         loop {
             if !incompatible {
-                self.emit(UiEvent::Conn { state: "connecting", rtt_ms: None });
+                self.emit(UiEvent::Conn {
+                    state: "connecting",
+                    rtt_ms: None,
+                });
             }
             let url = self.url.lock().clone();
             incompatible = false;
@@ -228,7 +523,10 @@ impl Core {
                     incompatible = matches!(e.downcast_ref::<tokio_tungstenite::tungstenite::Error>(),
                         Some(tokio_tungstenite::tungstenite::Error::Http(r)) if r.status().as_u16() == 426);
                     if incompatible {
-                        self.emit(UiEvent::Conn { state: "incompatible", rtt_ms: None });
+                        self.emit(UiEvent::Conn {
+                            state: "incompatible",
+                            rtt_ms: None,
+                        });
                         backoff = 5_000;
                     }
                     tracing::info!("connect {url}: {e}");
@@ -236,11 +534,15 @@ impl Core {
                 Err(_) => tracing::info!("connect {url}: timeout"),
             }
             *self.out.lock() = None;
+            self.send_reqs.lock().clear();
             for (_, w) in self.waiters.lock().drain() {
                 drop(w);
             }
             if !incompatible {
-                self.emit(UiEvent::Conn { state: "offline", rtt_ms: None });
+                self.emit(UiEvent::Conn {
+                    state: "offline",
+                    rtt_ms: None,
+                });
             }
             let jitter = (now_us() as u64) % (backoff / 2 + 1);
             tokio::select! {
@@ -251,9 +553,13 @@ impl Core {
         }
     }
 
-    async fn session(self: Arc<Self>, ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>, first: &mut bool) {
+    async fn session(
+        self: Arc<Self>,
+        ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+        first: &mut bool,
+    ) {
         let (mut sink, mut stream) = ws.split();
-        let (tx, mut rx) = mpsc::unbounded_channel::<WsMsg>();
+        let (tx, mut rx) = mpsc::channel::<WsMsg>(SOCKET_QUEUE_CAPACITY);
         *self.out.lock() = Some(tx);
 
         // Writer: feed everything ready, flush once.
@@ -299,7 +605,10 @@ impl Core {
                 best = Some(best.map_or(rtt, |b: i64| b.min(rtt)));
             }
         }
-        self.emit(UiEvent::Conn { state: "online", rtt_ms: best.map(|r| r as f64 / 1000.0) });
+        self.emit(UiEvent::Conn {
+            state: "online",
+            rtt_ms: best.map(|r| r as f64 / 1000.0),
+        });
         if std::mem::take(first) {
             let t = now_us() - self.perf.t_main;
             self.perf.t_connected.store(now_us(), Ordering::Relaxed);
@@ -315,7 +624,10 @@ impl Core {
                 loop {
                     iv.tick().await;
                     let rtt = me.ping().await;
-                    me.emit(UiEvent::Conn { state: "online", rtt_ms: rtt.map(|r| r as f64 / 1000.0) });
+                    me.emit(UiEvent::Conn {
+                        state: "online",
+                        rtt_ms: rtt.map(|r| r as f64 / 1000.0),
+                    });
                 }
             })
         };
@@ -348,12 +660,21 @@ impl Core {
         };
         let refresh = match refresh {
             Some(r) => Some(r),
-            None => self.cache.kv_get("refresh").await.and_then(|b| crate::secure::unprotect(&b)).and_then(|b| String::from_utf8(b).ok()),
+            None => self
+                .cache
+                .kv_get("refresh")
+                .await
+                .and_then(|b| crate::secure::unprotect(&b))
+                .and_then(|b| String::from_utf8(b).ok()),
         };
         let now_s = now_us() / 1_000_000;
         if let Some((tok, exp)) = access.filter(|(_, exp)| *exp > now_s + 30) {
             let _ = exp;
-            if self.request(C2S::Resume { access_token: tok }).await.is_ok() {
+            if self
+                .request(C2S::Resume { access_token: tok })
+                .await
+                .is_ok()
+            {
                 return self.after_auth().await;
             }
         }
@@ -368,8 +689,19 @@ impl Core {
             }
         }
         // Benchmark automation only: log in without the UI.
-        if let Some((u, p)) = std::env::var("HOPON_PERF_LOGIN").ok().as_deref().and_then(|v| v.split_once(':')) {
-            if self.request(C2S::Login { username: u.into(), password: p.into() }).await.is_ok() {
+        if let Some((u, p)) = std::env::var("HOPON_PERF_LOGIN")
+            .ok()
+            .as_deref()
+            .and_then(|v| v.split_once(':'))
+        {
+            if self
+                .request(C2S::Login {
+                    username: u.into(),
+                    password: p.into(),
+                })
+                .await
+                .is_ok()
+            {
                 return self.after_auth().await;
             }
         }
@@ -379,19 +711,79 @@ impl Core {
 
     /// After (re)authentication: resend un-echoed sends, resync the open channel.
     async fn after_auth(self: Arc<Self>) {
+        let user_id = self.store.lock().me.as_ref().map(|u| u.id);
+        if let Some(user_id) = user_id {
+            for item in self
+                .cache
+                .outbox_list()
+                .await
+                .into_iter()
+                .filter(|item| item.user_id == user_id)
+            {
+                self.store
+                    .lock()
+                    .pending
+                    .entry(item.nonce)
+                    .or_insert(PendingSend {
+                        channel_id: item.channel_id,
+                        content: item.content,
+                        reply_to: item.reply_to,
+                        files: item.files,
+                        gifs: item.gifs,
+                        t_input: item.t_input,
+                        echoed: false,
+                    });
+            }
+        }
         let resend: Vec<(u64, Id, String, i64, Option<Id>, Vec<String>, Vec<String>)> = {
             let s = self.store.lock();
             s.pending
                 .iter()
-                .filter(|(_, p)| !p.echoed)
-                .map(|(n, p)| (*n, p.channel_id, p.content.clone(), p.t_input, p.reply_to, p.files.clone(), p.gifs.clone()))
+                .map(|(n, p)| {
+                    (
+                        *n,
+                        p.channel_id,
+                        p.content.clone(),
+                        p.t_input,
+                        p.reply_to,
+                        p.files.clone(),
+                        p.gifs.clone(),
+                    )
+                })
                 .collect()
         };
         let off = self.clock.lock().offset_us;
         for (nonce, channel_id, content, t_input, reply_to, files, gifs) in resend {
-            self.send_frame(self.next_req(), C2S::Send { channel_id, content, nonce, t_input: t_input + off, t_client_send: now_us() + off, reply_to, files, gifs });
+            let req = self.next_req();
+            self.send_reqs.lock().insert(req, (nonce, channel_id));
+            if !self.send_frame(
+                req,
+                C2S::Send {
+                    channel_id,
+                    content,
+                    nonce,
+                    t_input: t_input + off,
+                    t_client_send: now_us() + off,
+                    reply_to,
+                    files,
+                    gifs,
+                },
+            ) {
+                self.send_reqs.lock().remove(&req);
+                self.force_reconnect();
+            }
         }
         let open = self.store.lock().open_channel;
+        let visible_server = self.store.lock().visible_server;
+        if let Some(server_id) = visible_server {
+            let _ = self
+                .request(C2S::Members {
+                    server_id,
+                    offset: 0,
+                    limit: 50,
+                })
+                .await;
+        }
         if let Some(ch) = open {
             self.clone().refresh_latest(ch);
         }
@@ -402,8 +794,19 @@ impl Core {
     /// Fetch the latest page from the server and merge into the UI.
     pub fn refresh_latest(self: Arc<Self>, ch: Id) {
         tauri::async_runtime::spawn(async move {
-            if let Ok(S2C::History { messages, .. }) = self.request(C2S::History { channel_id: ch, before: None, limit: 50 }).await {
-                let ui: Vec<UiMsg> = messages.iter().rev().map(|m| UiMsg::from_msg(m, 2)).collect();
+            if let Ok(S2C::History { messages, .. }) = self
+                .request(C2S::History {
+                    channel_id: ch,
+                    before: None,
+                    limit: 50,
+                })
+                .await
+            {
+                let ui: Vec<UiMsg> = messages
+                    .iter()
+                    .rev()
+                    .map(|m| UiMsg::from_msg(m, 2))
+                    .collect();
                 {
                     let mut s = self.store.lock();
                     for m in &messages {
@@ -411,7 +814,10 @@ impl Core {
                     }
                 }
                 self.cache.put(messages);
-                self.emit(UiEvent::Messages { channel_id: sid(ch), msgs: ui });
+                self.emit(UiEvent::Messages {
+                    channel_id: sid(ch),
+                    msgs: ui,
+                });
             }
         });
     }
@@ -419,6 +825,30 @@ impl Core {
     // ---------- inbound ----------
 
     fn on_frame(self: &Arc<Self>, f: ServerFrame, t_recv: i64) {
+        if f.req != 0 {
+            match &f.msg {
+                S2C::Ack { .. } => {
+                    self.send_reqs.lock().remove(&f.req);
+                }
+                S2C::Error { message, .. } => {
+                    if let Some((nonce, channel_id)) = self.send_reqs.lock().remove(&f.req) {
+                        self.store.lock().pending.remove(&nonce);
+                        let cache = self.cache.clone();
+                        tauri::async_runtime::spawn(async move {
+                            cache.outbox_remove(nonce).await;
+                        });
+                        self.emit(UiEvent::MsgState {
+                            channel_id: sid(channel_id),
+                            nonce: nonce.to_string(),
+                            id: format!("p{nonce}"),
+                            state: 3,
+                        });
+                        tracing::warn!("message {nonce} rejected by server: {message}");
+                    }
+                }
+                _ => {}
+            }
+        }
         self.apply(&f.msg, t_recv);
         if f.req != 0 {
             if let Some(w) = self.waiters.lock().remove(&f.req) {
@@ -429,22 +859,47 @@ impl Core {
 
     fn apply(self: &Arc<Self>, msg: &S2C, t_recv: i64) {
         match msg {
-            S2C::Authed { user, access_token, refresh_token, servers, voice, prefs } => {
+            S2C::Authed {
+                user,
+                access_token,
+                refresh_token,
+                servers,
+                voice,
+                prefs,
+            } => {
                 // Before the session snapshot, so the UI can pick your last server.
                 self.store.lock().prefs = Some(prefs.clone());
-                self.emit(UiEvent::Prefs { json: prefs.clone() });
+                self.emit(UiEvent::Prefs {
+                    json: prefs.clone(),
+                });
                 {
                     let mut s = self.store.lock();
                     if s.me.as_ref().map(|u| u.id) != Some(user.id) {
                         s.recent.clear();
+                        s.recent_lru.clear();
+                        s.recent_bytes = 0;
                         s.pending.clear();
                         s.open_channel = None;
+                        s.visible_server = None;
+                        s.visible_members.clear();
+                        s.user_lookups.clear();
+                        s.users_by_id.clear();
                     }
                     s.me = Some(user.clone());
                     s.servers = servers.clone();
+                    for server in servers.iter() {
+                        for member in &server.members {
+                            s.users_by_id.insert(member.id, member.clone());
+                        }
+                    }
                     s.voice = voice
                         .iter()
-                        .filter_map(|v| servers.iter().find(|sv| sv.channels.iter().any(|c| c.id == v.channel_id)).map(|sv| (v.user_id, (sv.id, v.clone()))))
+                        .filter_map(|v| {
+                            servers
+                                .iter()
+                                .find(|sv| sv.channels.iter().any(|c| c.id == v.channel_id))
+                                .map(|sv| (v.user_id, (sv.id, v.clone())))
+                        })
                         .collect();
                     s.access_token = Some((access_token.clone(), now_us() / 1_000_000 + 14 * 60));
                     if !refresh_token.is_empty() {
@@ -461,19 +916,47 @@ impl Core {
                 crate::activity::Activity::start(self.clone());
             }
             S2C::Activity { user_id, game } => {
-                for sv in self.store.lock().servers.iter_mut() {
-                    sv.activities.retain(|(u, _)| u != user_id);
-                    if !game.is_empty() && sv.members.iter().any(|m| m.id == *user_id) {
-                        sv.activities.push((*user_id, game.clone()));
+                let visible = {
+                    let mut s = self.store.lock();
+                    let visible_members = s.visible_members.clone();
+                    let mut visible = false;
+                    for sv in s.servers.iter_mut() {
+                        let is_member = sv.member_ids.contains(user_id);
+                        sv.activities.retain(|(u, _)| u != user_id);
+                        if !game.is_empty() && is_member {
+                            sv.activities.push((*user_id, game.clone()));
+                        }
+                        visible |= is_member && visible_members.contains(user_id);
                     }
+                    visible
+                };
+                if visible {
+                    self.emit(UiEvent::Activity {
+                        user_id: sid(*user_id),
+                        game: game.clone(),
+                    });
                 }
-                self.emit(UiEvent::Activity { user_id: sid(*user_id), game: game.clone() });
             }
             S2C::Message(m) => {
                 let t_emit = now_us();
-                let (own, t_input_local) = {
+                let (own, t_input_local, missing_profile) = {
                     let mut s = self.store.lock();
                     let own = s.me.as_ref().map(|u| u.id) == Some(m.author_id);
+                    let missing_profile = if !s.users_by_id.contains_key(&m.author_id)
+                        && s.me.as_ref().map(|u| u.id) != Some(m.author_id)
+                    {
+                        s.servers
+                            .iter()
+                            .find(|server| {
+                                server
+                                    .channels
+                                    .iter()
+                                    .any(|channel| channel.id == m.channel_id)
+                            })
+                            .map(|server| (server.id, m.author_id))
+                    } else {
+                        None
+                    };
                     let mut t_in = None;
                     if own {
                         if let Some(p) = s.pending.get_mut(&m.nonce) {
@@ -482,59 +965,115 @@ impl Core {
                         }
                     }
                     s.insert_recent(m.clone());
-                    if let Some(c) = s.servers.iter_mut().flat_map(|sv| sv.channels.iter_mut()).find(|c| c.id == m.channel_id) {
+                    if let Some(c) = s
+                        .servers
+                        .iter_mut()
+                        .flat_map(|sv| sv.channels.iter_mut())
+                        .find(|c| c.id == m.channel_id)
+                    {
                         c.last_id = c.last_id.max(m.id);
                     }
-                    (own, t_in)
+                    (own, t_in, missing_profile)
                 };
+                if let Some((server_id, user_id)) = missing_profile {
+                    let should_lookup = self.store.lock().user_lookups.insert(user_id);
+                    if should_lookup {
+                        let core = self.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = core.request(C2S::UserLookup { server_id, user_id }).await;
+                            core.store.lock().user_lookups.remove(&user_id);
+                        });
+                    }
+                }
                 let clock = *self.clock.lock();
                 if let Some(t) = t_input_local {
                     self.perf.rec(H::OwnEcho, t_recv - t);
                 }
                 if let Some(tr) = m.trace {
-                    self.perf.expect_server(sid(m.id), clock.to_local(tr.t_input), clock.to_local(tr.t_server_send), t_emit, own);
+                    self.perf.expect_server(
+                        sid(m.id),
+                        clock.to_local(tr.t_input),
+                        clock.to_local(tr.t_server_send),
+                        t_emit,
+                        own,
+                    );
                 }
-                self.cache.put(vec![Message { trace: None, ..m.clone() }]);
-                self.emit(UiEvent::Messages { channel_id: sid(m.channel_id), msgs: vec![UiMsg::from_msg(m, 1)] });
+                self.cache.put(vec![Message {
+                    trace: None,
+                    ..m.clone()
+                }]);
+                let open = self.store.lock().open_channel == Some(m.channel_id);
+                self.emit(UiEvent::ChannelActivity {
+                    channel_id: sid(m.channel_id),
+                    last_id: sid(m.id),
+                });
+                if open {
+                    self.emit(UiEvent::Messages {
+                        channel_id: sid(m.channel_id),
+                        msgs: vec![UiMsg::from_msg(m, 1)],
+                    });
+                }
                 if !own {
                     if let Some(me) = self.store.lock().me.as_ref().map(|u| u.id) {
                         if hopon_shared::mentions(&m.content).contains(&me) {
-                            self.emit(UiEvent::Mentioned { channel_id: sid(m.channel_id) });
+                            self.emit(UiEvent::Mentioned {
+                                channel_id: sid(m.channel_id),
+                            });
                             self.attention();
                         }
                     }
                 }
             }
-            S2C::Ack { channel_id, nonce, id, .. } => {
+            S2C::Ack {
+                channel_id,
+                nonce,
+                id,
+                ..
+            } => {
                 if let Some(p) = self.store.lock().pending.remove(nonce) {
                     self.perf.rec(H::OwnAck, t_recv - p.t_input);
                 }
-                self.emit(UiEvent::MsgState { channel_id: sid(*channel_id), nonce: nonce.to_string(), id: sid(*id), state: 2 });
+                let cache = self.cache.clone();
+                let nonce = *nonce;
+                tauri::async_runtime::spawn(async move {
+                    cache.outbox_remove(nonce).await;
+                });
+                self.emit(UiEvent::MsgState {
+                    channel_id: sid(*channel_id),
+                    nonce: nonce.to_string(),
+                    id: sid(*id),
+                    state: 2,
+                });
             }
-            S2C::Edited { channel_id, id, content, edited_at } => {
-                {
-                    let mut s = self.store.lock();
-                    if let Some(q) = s.recent.get_mut(channel_id) {
-                        if let Ok(i) = q.binary_search_by_key(id, |x| x.id) {
-                            q[i].content = content.clone();
-                            q[i].edited_at = Some(*edited_at);
-                        }
-                    }
+            S2C::Edited {
+                channel_id,
+                id,
+                content,
+                edited_at,
+            } => {
+                self.store
+                    .lock()
+                    .edit_recent(*channel_id, *id, content, *edited_at);
+                self.cache
+                    .edit(*channel_id, *id, content.clone(), *edited_at);
+                if self.store.lock().open_channel == Some(*channel_id) {
+                    self.emit(UiEvent::Edited {
+                        channel_id: sid(*channel_id),
+                        id: sid(*id),
+                        content: content.clone(),
+                        edited_at: *edited_at,
+                    });
                 }
-                self.cache.edit(*channel_id, *id, content.clone(), *edited_at);
-                self.emit(UiEvent::Edited { channel_id: sid(*channel_id), id: sid(*id), content: content.clone(), edited_at: *edited_at });
             }
             S2C::Deleted { channel_id, id } => {
-                {
-                    let mut s = self.store.lock();
-                    if let Some(q) = s.recent.get_mut(channel_id) {
-                        if let Ok(i) = q.binary_search_by_key(id, |x| x.id) {
-                            q.remove(i);
-                        }
-                    }
-                }
+                self.store.lock().delete_recent(*channel_id, *id);
                 self.cache.delete(*channel_id, *id);
-                self.emit(UiEvent::Deleted { channel_id: sid(*channel_id), id: sid(*id) });
+                if self.store.lock().open_channel == Some(*channel_id) {
+                    self.emit(UiEvent::Deleted {
+                        channel_id: sid(*channel_id),
+                        id: sid(*id),
+                    });
+                }
             }
             S2C::ServerJoined(sv) => {
                 {
@@ -543,6 +1082,17 @@ impl Core {
                     s.servers.push(sv.clone());
                 }
                 self.emit(UiEvent::Server { server: sv.into() });
+                let core = self.clone();
+                let server_id = sv.id;
+                tauri::async_runtime::spawn(async move {
+                    let _ = core
+                        .request(C2S::Members {
+                            server_id,
+                            offset: 0,
+                            limit: 50,
+                        })
+                        .await;
+                });
             }
             S2C::ChannelCreated(c) => {
                 {
@@ -558,25 +1108,95 @@ impl Core {
             S2C::MemberJoined { server_id, user } => {
                 {
                     let mut s = self.store.lock();
+                    s.users_by_id.insert(user.id, user.clone());
                     if let Some(sv) = s.servers.iter_mut().find(|x| x.id == *server_id) {
-                        if !sv.members.iter().any(|x| x.id == user.id) {
-                            sv.members.push(user.clone());
+                        if !sv.member_ids.contains(&user.id) {
+                            sv.member_ids.push(user.id);
+                            sv.member_count = sv.member_count.saturating_add(1);
                         }
                         if !sv.online.contains(&user.id) {
                             sv.online.push(user.id);
                         }
                     }
                 }
-                self.emit(UiEvent::MemberJoined { server_id: sid(*server_id), user: user.into() });
+                self.emit(UiEvent::MemberJoined {
+                    server_id: sid(*server_id),
+                    user: user.into(),
+                });
+            }
+            S2C::Members {
+                server_id,
+                offset,
+                members,
+                online,
+                activities,
+            } => {
+                let page_users = members.iter().map(UiUser::from).collect::<Vec<_>>();
+                let activity_map = activities
+                    .iter()
+                    .map(|(u, g)| (sid(*u), g.clone()))
+                    .collect();
+                {
+                    let mut s = self.store.lock();
+                    for user in members {
+                        s.users_by_id.insert(user.id, user.clone());
+                    }
+                    if let Some(server) = s.servers.iter_mut().find(|x| x.id == *server_id) {
+                        for user in members {
+                            if !server.member_ids.contains(&user.id) {
+                                server.member_ids.push(user.id);
+                            }
+                        }
+                        for user_id in online {
+                            if !server.online.contains(user_id) {
+                                server.online.push(*user_id);
+                            }
+                        }
+                        for (user_id, game) in activities {
+                            server.activities.retain(|(id, _)| id != user_id);
+                            server.activities.push((*user_id, game.clone()));
+                        }
+                    }
+                }
+                self.emit(UiEvent::MemberPage {
+                    server_id: sid(*server_id),
+                    offset: *offset,
+                    users: page_users,
+                    online: online.iter().map(|id| sid(*id)).collect(),
+                    activities: activity_map,
+                });
+            }
+            S2C::MemberSearch { server_id, members } => {
+                let users = members.iter().map(UiUser::from).collect::<Vec<_>>();
+                self.emit(UiEvent::MemberSearch {
+                    server_id: sid(*server_id),
+                    users,
+                });
+            }
+            S2C::UserLookup(user) => {
+                self.store.lock().users_by_id.insert(user.id, user.clone());
+                self.emit(UiEvent::UserUpdated { user: user.into() });
             }
             S2C::ServerUpdated { server_id, name } => {
-                if let Some(sv) = self.store.lock().servers.iter_mut().find(|x| x.id == *server_id) {
+                if let Some(sv) = self
+                    .store
+                    .lock()
+                    .servers
+                    .iter_mut()
+                    .find(|x| x.id == *server_id)
+                {
                     sv.name = name.clone();
                 }
                 self.emit_server(*server_id);
             }
             S2C::ChannelUpdated(c) => {
-                if let Some(sv) = self.store.lock().servers.iter_mut().find(|x| x.id == c.server_id) {
+                if let Some(sv) = self
+                    .store
+                    .lock()
+                    .servers
+                    .iter_mut()
+                    .find(|x| x.id == c.server_id)
+                {
                     if let Some(x) = sv.channels.iter_mut().find(|x| x.id == c.id) {
                         let last = x.last_id.max(c.last_id);
                         *x = c.clone();
@@ -585,27 +1205,41 @@ impl Core {
                 }
                 self.emit_server(c.server_id);
             }
-            S2C::ChannelDeleted { server_id, channel_id } => {
+            S2C::ChannelDeleted {
+                server_id,
+                channel_id,
+            } => {
                 {
                     let mut s = self.store.lock();
                     if let Some(sv) = s.servers.iter_mut().find(|x| x.id == *server_id) {
                         sv.channels.retain(|x| x.id != *channel_id);
                     }
-                    s.recent.remove(channel_id);
+                    s.remove_recent_channel(*channel_id);
                     s.pending.retain(|_, p| p.channel_id != *channel_id);
                 }
                 self.cache.purge_channels(vec![*channel_id]);
                 self.voice.leave_if_in(self.clone(), &[*channel_id]);
                 self.emit_server(*server_id);
-                self.emit(UiEvent::ChannelDeleted { server_id: sid(*server_id), channel_id: sid(*channel_id) });
+                self.emit(UiEvent::ChannelDeleted {
+                    server_id: sid(*server_id),
+                    channel_id: sid(*channel_id),
+                });
             }
-            S2C::MemberLeft { server_id, user_id, .. } => {
+            S2C::MemberLeft {
+                server_id, user_id, ..
+            } => {
                 {
                     let mut s = self.store.lock();
                     if let Some(sv) = s.servers.iter_mut().find(|x| x.id == *server_id) {
-                        sv.members.retain(|m| m.id != *user_id);
+                        if let Some(i) = sv.member_ids.iter().position(|id| id == user_id) {
+                            sv.member_ids.remove(i);
+                        }
+                        sv.member_count = sv.member_count.saturating_sub(1);
                     }
-                    if s.voice.get(user_id).map_or(false, |(srv, _)| srv == server_id) {
+                    if s.voice
+                        .get(user_id)
+                        .map_or(false, |(srv, _)| srv == server_id)
+                    {
                         s.voice.remove(user_id);
                     }
                 }
@@ -614,10 +1248,15 @@ impl Core {
             S2C::ServerRemoved { server_id, reason } => {
                 let channels: Vec<Id> = {
                     let mut s = self.store.lock();
-                    let chans = s.servers.iter().find(|x| x.id == *server_id).map(|sv| sv.channels.iter().map(|c| c.id).collect()).unwrap_or_default();
+                    let chans = s
+                        .servers
+                        .iter()
+                        .find(|x| x.id == *server_id)
+                        .map(|sv| sv.channels.iter().map(|c| c.id).collect::<Vec<Id>>())
+                        .unwrap_or_default();
                     s.servers.retain(|x| x.id != *server_id);
                     for c in &chans {
-                        s.recent.remove(c);
+                        s.remove_recent_channel(*c);
                     }
                     s.voice.retain(|_, (srv, _)| srv != server_id);
                     chans
@@ -629,9 +1268,18 @@ impl Core {
                     RemovedReason::Kicked => "kicked",
                     RemovedReason::Left => "left",
                 };
-                self.emit(UiEvent::ServerRemoved { server_id: sid(*server_id), reason });
+                self.emit(UiEvent::ServerRemoved {
+                    server_id: sid(*server_id),
+                    reason,
+                });
             }
-            S2C::Reaction { channel_id, message_id, emoji, user_id, add } => {
+            S2C::Reaction {
+                channel_id,
+                message_id,
+                emoji,
+                user_id,
+                add,
+            } => {
                 let updated = {
                     let mut s = self.store.lock();
                     s.recent.get_mut(channel_id).and_then(|q| {
@@ -644,71 +1292,137 @@ impl Core {
                 if let Some(m) = updated {
                     self.cache.put(vec![m]);
                 }
-                self.emit(UiEvent::Reaction { channel_id: sid(*channel_id), message_id: sid(*message_id), emoji: emoji.clone(), user_id: sid(*user_id), add: *add });
+                if self.store.lock().open_channel == Some(*channel_id) {
+                    self.emit(UiEvent::Reaction {
+                        channel_id: sid(*channel_id),
+                        message_id: sid(*message_id),
+                        emoji: emoji.clone(),
+                        user_id: sid(*user_id),
+                        add: *add,
+                    });
+                }
             }
             S2C::PrefsUpdated { json } => {
                 self.store.lock().prefs = Some(json.clone());
                 self.emit(UiEvent::Prefs { json: json.clone() });
             }
-            S2C::Typing { channel_id, user_id } => {
-                if self.store.lock().me.as_ref().map(|u| u.id) != Some(*user_id) {
-                    self.emit(UiEvent::Typing { channel_id: sid(*channel_id), user_id: sid(*user_id) });
+            S2C::Typing {
+                channel_id,
+                user_id,
+            } => {
+                let s = self.store.lock();
+                if s.open_channel == Some(*channel_id)
+                    && s.me.as_ref().map(|u| u.id) != Some(*user_id)
+                {
+                    self.emit(UiEvent::Typing {
+                        channel_id: sid(*channel_id),
+                        user_id: sid(*user_id),
+                    });
                 }
             }
-            S2C::ReadUpdated { channel_id, last_read } => {
+            S2C::ReadUpdated {
+                channel_id,
+                last_read,
+            } => {
                 {
                     let mut s = self.store.lock();
-                    if let Some(sv) = s.servers.iter_mut().find(|sv| sv.channels.iter().any(|c| c.id == *channel_id)) {
+                    if let Some(sv) = s
+                        .servers
+                        .iter_mut()
+                        .find(|sv| sv.channels.iter().any(|c| c.id == *channel_id))
+                    {
                         match sv.reads.iter_mut().find(|(c, _)| c == channel_id) {
                             Some(r) => r.1 = r.1.max(*last_read),
                             None => sv.reads.push((*channel_id, *last_read)),
                         }
                     }
                 }
-                self.emit(UiEvent::ReadUpdated { channel_id: sid(*channel_id), last_read: sid(*last_read) });
+                self.emit(UiEvent::ReadUpdated {
+                    channel_id: sid(*channel_id),
+                    last_read: sid(*last_read),
+                });
             }
             S2C::UserPresence { user_id, online } => {
-                {
+                let visible = {
                     let mut s = self.store.lock();
-                    for sv in s.servers.iter_mut().filter(|sv| sv.members.iter().any(|m| m.id == *user_id)) {
+                    let visible_members = s.visible_members.clone();
+                    let mut visible = false;
+                    for sv in s
+                        .servers
+                        .iter_mut()
+                        .filter(|sv| sv.member_ids.contains(user_id))
+                    {
                         sv.online.retain(|u| u != user_id);
                         if *online {
                             sv.online.push(*user_id);
                         }
+                        visible |= visible_members.contains(user_id);
                     }
+                    visible
+                };
+                if visible {
+                    self.emit(UiEvent::UserPresence {
+                        user_id: sid(*user_id),
+                        online: *online,
+                    });
                 }
-                self.emit(UiEvent::UserPresence { user_id: sid(*user_id), online: *online });
             }
             S2C::UserUpdated(u) => {
                 {
                     let mut s = self.store.lock();
-                    for sv in s.servers.iter_mut() {
-                        for m in sv.members.iter_mut().filter(|m| m.id == u.id) {
-                            *m = u.clone();
-                        }
-                    }
+                    s.users_by_id.insert(u.id, u.clone());
                     if let Some(me) = s.me.as_mut().filter(|me| me.id == u.id) {
                         *me = u.clone();
                     }
                 }
                 self.emit(UiEvent::UserUpdated { user: u.into() });
             }
-            S2C::VoicePresence { server_id, user_id, channel_id, muted, deafened } => {
-                {
+            S2C::VoicePresence {
+                server_id,
+                user_id,
+                channel_id,
+                muted,
+                deafened,
+            } => {
+                let visible = {
                     let mut s = self.store.lock();
+                    let previous = s.voice.get(user_id).map(|(_, p)| p.channel_id);
+                    let visible = s.visible_members.contains(user_id)
+                        || s.joined_voice.map_or(false, |joined| {
+                            *channel_id == Some(joined) || previous == Some(joined)
+                        });
                     match channel_id {
                         Some(c) => {
-                            s.voice.insert(*user_id, (*server_id, VoicePresence { channel_id: *c, user_id: *user_id, muted: *muted, deafened: *deafened }));
+                            s.voice.insert(
+                                *user_id,
+                                (
+                                    *server_id,
+                                    VoicePresence {
+                                        channel_id: *c,
+                                        user_id: *user_id,
+                                        muted: *muted,
+                                        deafened: *deafened,
+                                    },
+                                ),
+                            );
                         }
                         None => {
                             s.voice.remove(user_id);
                         }
                     }
+                    visible
+                };
+                if visible {
+                    self.emit(UiEvent::Presence {
+                        server_id: sid(*server_id),
+                        presence: UiPresence {
+                            user_id: sid(*user_id),
+                            channel_id: channel_id.map(sid),
+                            muted: *muted,
+                            deafened: *deafened,
+                        },
+                    });
                 }
-                self.emit(UiEvent::Presence {
-                    server_id: sid(*server_id),
-                    presence: UiPresence { user_id: sid(*user_id), channel_id: channel_id.map(sid), muted: *muted, deafened: *deafened },
-                });
             }
             S2C::LoggedOut => {
                 *self.store.lock() = Store::default();
@@ -720,7 +1434,14 @@ impl Core {
             S2C::Error { message, .. } => {
                 tracing::debug!("server error: {message}");
             }
-            S2C::Pong { .. } | S2C::AccessToken { .. } | S2C::Gifs { .. } | S2C::History { .. } | S2C::Invite { .. } | S2C::VoiceGrant { .. } | S2C::Avatar { .. } | S2C::Ok => {}
+            S2C::Pong { .. }
+            | S2C::AccessToken { .. }
+            | S2C::Gifs { .. }
+            | S2C::History { .. }
+            | S2C::Invite { .. }
+            | S2C::VoiceGrant { .. }
+            | S2C::Avatar { .. }
+            | S2C::Ok => {}
         }
     }
 
@@ -740,20 +1461,36 @@ impl Core {
     pub fn mark_read(self: &Arc<Self>, channel: Id, message_id: Id) {
         let newer = {
             let s = self.store.lock();
-            let cur = s.servers.iter().flat_map(|sv| sv.reads.iter()).find(|(c, _)| *c == channel).map_or(0, |r| r.1);
+            let cur = s
+                .servers
+                .iter()
+                .flat_map(|sv| sv.reads.iter())
+                .find(|(c, _)| *c == channel)
+                .map_or(0, |r| r.1);
             message_id > cur
         };
         if newer {
             let me = self.clone();
             tauri::async_runtime::spawn(async move {
-                let _ = me.request(C2S::MarkRead { channel_id: channel, message_id }).await;
+                let _ = me
+                    .request(C2S::MarkRead {
+                        channel_id: channel,
+                        message_id,
+                    })
+                    .await;
             });
         }
     }
 
     /// Push the full current state of one server to the UI.
-    fn emit_server(&self, server_id: Id) {
-        let ev = self.store.lock().servers.iter().find(|x| x.id == server_id).map(|sv| UiEvent::Server { server: sv.into() });
+    fn emit_server(self: &Arc<Self>, server_id: Id) {
+        let ev = self
+            .store
+            .lock()
+            .servers
+            .iter()
+            .find(|x| x.id == server_id)
+            .map(|sv| UiEvent::Server { server: sv.into() });
         if let Some(ev) = ev {
             self.emit(ev);
         }
@@ -762,7 +1499,16 @@ impl Core {
     // ---------- outbound helpers used by commands ----------
 
     #[allow(clippy::too_many_arguments)]
-    pub fn send_message(&self, channel_id: Id, content: String, nonce: u64, t_input: i64, reply_to: Option<Id>, files: Vec<String>, gifs: Vec<String>) -> Res<()> {
+    pub async fn send_message(
+        &self,
+        channel_id: Id,
+        content: String,
+        nonce: u64,
+        t_input: i64,
+        reply_to: Option<Id>,
+        files: Vec<String>,
+        gifs: Vec<String>,
+    ) -> Res<()> {
         let content = content.trim().to_owned();
         let n_att = files.len() + gifs.len();
         if (content.is_empty() && n_att == 0) || content.chars().count() > MAX_MESSAGE_CHARS {
@@ -771,11 +1517,63 @@ impl Core {
         if n_att > MAX_ATTACHMENTS {
             return Err(format!("at most {MAX_ATTACHMENTS} attachments per message"));
         }
+        let user_id = self
+            .store
+            .lock()
+            .me
+            .as_ref()
+            .map(|u| u.id)
+            .ok_or_else(|| "log in first".to_string())?;
+        if self.store.lock().pending.len() >= 1000 {
+            return Err("outgoing message queue is full; wait for messages to send".into());
+        }
+        self.cache
+            .outbox_put(crate::cache::OutboxItem {
+                nonce,
+                user_id,
+                channel_id,
+                content: content.clone(),
+                reply_to,
+                files: files.clone(),
+                gifs: gifs.clone(),
+                t_input,
+            })
+            .await
+            .map_err(|e| e.to_string())?;
         let off = self.clock.lock().offset_us;
-        self.perf.expect_local(format!("p{nonce}"), t_input, now_us());
-        self.store.lock().pending.insert(nonce, PendingSend { channel_id, content: content.clone(), reply_to, files: files.clone(), gifs: gifs.clone(), t_input, echoed: false });
+        self.perf
+            .expect_local(format!("p{nonce}"), t_input, now_us());
+        self.store.lock().pending.insert(
+            nonce,
+            PendingSend {
+                channel_id,
+                content: content.clone(),
+                reply_to,
+                files: files.clone(),
+                gifs: gifs.clone(),
+                t_input,
+                echoed: false,
+            },
+        );
         // Offline: stays pending and is sent after reconnect.
-        self.send_frame(self.next_req(), C2S::Send { channel_id, content, nonce, t_input: t_input + off, t_client_send: now_us() + off, reply_to, files, gifs });
+        let req = self.next_req();
+        self.send_reqs.lock().insert(req, (nonce, channel_id));
+        if !self.send_frame(
+            req,
+            C2S::Send {
+                channel_id,
+                content,
+                nonce,
+                t_input: t_input + off,
+                t_client_send: now_us() + off,
+                reply_to,
+                files,
+                gifs,
+            },
+        ) {
+            self.send_reqs.lock().remove(&req);
+            self.force_reconnect();
+        }
         Ok(())
     }
 
@@ -816,19 +1614,35 @@ impl Core {
         let res = self
             .http
             .post(url)
-            .query(&[("name", name.to_owned()), ("w", w.to_string()), ("h", h.to_string())])
+            .query(&[
+                ("name", name.to_owned()),
+                ("w", w.to_string()),
+                ("h", h.to_string()),
+            ])
             .bearer_auth(token)
             .timeout(Duration::from_secs(300))
             .body(data)
             .send()
             .await
-            .map_err(|e| if e.is_timeout() { "upload timed out".to_string() } else { "couldn't reach the server".to_string() })?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    "upload timed out".to_string()
+                } else {
+                    "couldn't reach the server".to_string()
+                }
+            })?;
         let status = res.status();
         if !status.is_success() {
             let msg = res.text().await.unwrap_or_default();
-            return Err(if msg.is_empty() || msg.len() > 200 { format!("upload failed ({status})") } else { msg });
+            return Err(if msg.is_empty() || msg.len() > 200 {
+                format!("upload failed ({status})")
+            } else {
+                msg
+            });
         }
-        res.json::<Attachment>().await.map_err(|_| "upload failed (bad reply)".to_string())
+        res.json::<Attachment>()
+            .await
+            .map_err(|_| "upload failed (bad reply)".to_string())
     }
 
     pub async fn gif_search(&self, query: String) -> Res<(bool, Vec<Gif>)> {
@@ -838,12 +1652,35 @@ impl Core {
         }
     }
 
+    pub async fn member_search(&self, server_id: Id, query: String) -> Res<Vec<UiUser>> {
+        match self
+            .request(C2S::MemberSearch {
+                server_id,
+                query,
+                limit: 6,
+            })
+            .await?
+        {
+            S2C::MemberSearch { members, .. } => Ok(members.iter().map(Into::into).collect()),
+            _ => Err("unexpected reply".into()),
+        }
+    }
+
     /// Messages to show immediately when a channel is opened.
     pub async fn open_channel(self: &Arc<Self>, ch: Id) -> Vec<UiMsg> {
         let mut msgs: Vec<Message> = {
             let mut s = self.store.lock();
             s.open_channel = Some(ch);
-            s.recent.get(&ch).map(|q| q.iter().rev().take(80).rev().cloned().collect()).unwrap_or_default()
+            s.visible_server = s
+                .servers
+                .iter()
+                .find(|sv| sv.channels.iter().any(|c| c.id == ch))
+                .map(|sv| sv.id);
+            s.touch_recent(ch);
+            s.recent
+                .get(&ch)
+                .map(|q| q.iter().rev().take(80).rev().cloned().collect())
+                .unwrap_or_default()
         };
         if msgs.len() < 40 {
             let before = msgs.first().map(|m| m.id).unwrap_or(i64::MAX);
@@ -866,7 +1703,8 @@ impl Core {
             Some(b) => b,
             None => match self.request(C2S::GetAvatar { user_id: user }).await {
                 Ok(S2C::Avatar { data, avatar_v, .. }) if !data.is_empty() => {
-                    self.cache.kv_set(&format!("av:{user}:{avatar_v}"), Some(data.clone()));
+                    self.cache
+                        .kv_set(&format!("av:{user}:{avatar_v}"), Some(data.clone()));
                     data
                 }
                 _ => return None,
@@ -874,21 +1712,38 @@ impl Core {
         };
         let mime = hopon_shared::image_mime(&bytes)?;
         use base64::Engine;
-        Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes)))
+        Some(format!(
+            "data:{mime};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&bytes)
+        ))
     }
 
     /// Older page: server when online (authoritative), local cache when offline.
     pub async fn load_older(&self, ch: Id, before: Id) -> (Vec<UiMsg>, bool) {
-        match self.request(C2S::History { channel_id: ch, before: Some(before), limit: 50 }).await {
+        match self
+            .request(C2S::History {
+                channel_id: ch,
+                before: Some(before),
+                limit: 50,
+            })
+            .await
+        {
             Ok(S2C::History { messages, more, .. }) => {
-                let ui = messages.iter().rev().map(|m| UiMsg::from_msg(m, 2)).collect();
+                let ui = messages
+                    .iter()
+                    .rev()
+                    .map(|m| UiMsg::from_msg(m, 2))
+                    .collect();
                 self.cache.put(messages);
                 (ui, more)
             }
             _ => {
                 let msgs = self.cache.page(ch, before, 50).await;
                 let more = msgs.len() == 50;
-                (msgs.iter().rev().map(|m| UiMsg::from_msg(m, 2)).collect(), more)
+                (
+                    msgs.iter().rev().map(|m| UiMsg::from_msg(m, 2)).collect(),
+                    more,
+                )
             }
         }
     }
@@ -914,7 +1769,10 @@ pub fn apply_reaction(list: &mut Vec<Reaction>, emoji: &str, user: Id, add: bool
                 }
             }
         }
-        None if add => list.push(Reaction { emoji: emoji.to_owned(), users: vec![user] }),
+        None if add => list.push(Reaction {
+            emoji: emoji.to_owned(),
+            users: vec![user],
+        }),
         None => {}
     }
 }
@@ -922,11 +1780,19 @@ pub fn apply_reaction(list: &mut Vec<Reaction>, emoji: &str, user: Id, add: bool
 pub fn http_base(ws_url: &str) -> String {
     let (scheme, rest) = ws_url.split_once("://").unwrap_or(("ws", ws_url));
     let host = rest.split('/').next().unwrap_or("");
-    format!("{}://{host}", if scheme == "wss" { "https" } else { "http" })
+    format!(
+        "{}://{host}",
+        if scheme == "wss" { "https" } else { "http" }
+    )
 }
 
-async fn connect(url: &str) -> anyhow::Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>> {
-    let (scheme, rest) = url.split_once("://").ok_or_else(|| anyhow::anyhow!("bad url"))?;
+async fn connect(
+    url: &str,
+) -> anyhow::Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>>
+{
+    let (scheme, rest) = url
+        .split_once("://")
+        .ok_or_else(|| anyhow::anyhow!("bad url"))?;
     let hostport = rest.split('/').next().unwrap_or("");
     let default = if scheme == "wss" { 443 } else { 80 };
     let (host, port) = match hostport.rsplit_once(':') {
@@ -938,7 +1804,9 @@ async fn connect(url: &str) -> anyhow::Result<tokio_tungstenite::WebSocketStream
     let mut cfg = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
     cfg.max_message_size = Some(MAX_FRAME_BYTES);
     cfg.write_buffer_size = 0;
-    let (ws, _) = tokio_tungstenite::client_async_tls_with_config(versioned_url(url), tcp, Some(cfg), None).await?;
+    let (ws, _) =
+        tokio_tungstenite::client_async_tls_with_config(versioned_url(url), tcp, Some(cfg), None)
+            .await?;
     Ok(ws)
 }
 

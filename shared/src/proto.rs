@@ -11,7 +11,7 @@ pub type Id = i64;
 /// Bumped on every wire-incompatible change. Sent as `?v=` on the WebSocket
 /// URL; the server answers HTTP 426 to any other version before any
 /// MessagePack is exchanged, so old and new builds fail loudly, not silently.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Append the protocol version to a chat URL (`ws://host:port/ws`).
 pub fn versioned_url(url: &str) -> String {
@@ -74,6 +74,10 @@ pub struct ServerInfo {
     pub owner_id: Id,
     pub channels: Vec<ChannelInfo>,
     pub members: Vec<UserInfo>,
+    /// Client-side normalized member relation; populated as member pages load.
+    pub member_ids: Vec<Id>,
+    /// Total membership count; `members` is only a small initial page now.
+    pub member_count: u32,
     /// Your read markers in this server (channel, last read message id).
     pub reads: Vec<(Id, Id)>,
     /// Members currently connected.
@@ -165,7 +169,8 @@ pub const MAX_EMOJI_BYTES: usize = 32;
 pub fn valid_emoji(e: &str) -> bool {
     !e.is_empty()
         && e.len() <= MAX_EMOJI_BYTES
-        && e.chars().all(|c| !c.is_whitespace() && !c.is_control() && !c.is_ascii_alphanumeric())
+        && e.chars()
+            .all(|c| !c.is_whitespace() && !c.is_control() && !c.is_ascii_alphanumeric())
 }
 
 /// Mention token for a user inside message content.
@@ -203,64 +208,169 @@ pub struct VoicePresence {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum C2S {
-    Signup { username: String, password: String },
-    Login { username: String, password: String },
+    Signup {
+        username: String,
+        password: String,
+    },
+    Login {
+        username: String,
+        password: String,
+    },
     /// Authenticate with a still-valid access token.
-    Resume { access_token: String },
+    Resume {
+        access_token: String,
+    },
     /// Exchange a refresh token for new tokens.
-    Refresh { refresh_token: String },
+    Refresh {
+        refresh_token: String,
+    },
     /// Revokes this device's refresh token.
-    Logout { refresh_token: String },
-    Ping { t_client: i64 },
+    Logout {
+        refresh_token: String,
+    },
+    Ping {
+        t_client: i64,
+    },
     /// `content` may be empty when there are attachments or GIFs. `files` are
     /// ids returned by `POST /files`; `gifs` are ids from `Gifs` results.
-    Send { channel_id: Id, content: String, nonce: u64, t_input: i64, t_client_send: i64, reply_to: Option<Id>, files: Vec<String>, gifs: Vec<String> },
+    Send {
+        channel_id: Id,
+        content: String,
+        nonce: u64,
+        t_input: i64,
+        t_client_send: i64,
+        reply_to: Option<Id>,
+        files: Vec<String>,
+        gifs: Vec<String>,
+    },
     /// GIF search; an empty query returns trending GIFs.
-    GifSearch { query: String },
+    GifSearch {
+        query: String,
+    },
     /// A fresh access token for HTTP calls (file uploads).
     AccessToken,
     /// "I'm playing <game>" (empty = nothing). Shown to people who share a server.
-    SetActivity { game: String },
+    SetActivity {
+        game: String,
+    },
     /// Add (`add = true`) or remove your reaction. Idempotent.
-    React { channel_id: Id, message_id: Id, emoji: String, add: bool },
-    Edit { channel_id: Id, message_id: Id, content: String },
-    Delete { channel_id: Id, message_id: Id },
+    React {
+        channel_id: Id,
+        message_id: Id,
+        emoji: String,
+        add: bool,
+    },
+    Edit {
+        channel_id: Id,
+        message_id: Id,
+        content: String,
+    },
+    Delete {
+        channel_id: Id,
+        message_id: Id,
+    },
     /// Newest-first page of messages older than `before` (or the latest).
-    History { channel_id: Id, before: Option<Id>, limit: u16 },
-    CreateServer { name: String },
-    CreateChannel { server_id: Id, name: String, kind: ChannelKind },
-    CreateInvite { server_id: Id },
-    JoinInvite { code: String },
+    History {
+        channel_id: Id,
+        before: Option<Id>,
+        limit: u16,
+    },
+    /// Membership is fetched on demand in bounded pages.
+    Members {
+        server_id: Id,
+        offset: u32,
+        limit: u16,
+    },
+    /// Prefix search for mention autocomplete.
+    MemberSearch {
+        server_id: Id,
+        query: String,
+        limit: u16,
+    },
+    /// Resolve a sender's display data when their roster page has not loaded.
+    UserLookup {
+        server_id: Id,
+        user_id: Id,
+    },
+    CreateServer {
+        name: String,
+    },
+    CreateChannel {
+        server_id: Id,
+        name: String,
+        kind: ChannelKind,
+    },
+    CreateInvite {
+        server_id: Id,
+    },
+    JoinInvite {
+        code: String,
+    },
     /// Ask for a media grant. Does not join on its own: the client joins the
     /// SFU and then sends `VoiceState`.
-    VoiceGrant { channel_id: Id },
-    VoiceState { channel_id: Option<Id>, muted: bool, deafened: bool },
+    VoiceGrant {
+        channel_id: Id,
+    },
+    VoiceState {
+        channel_id: Option<Id>,
+        muted: bool,
+        deafened: bool,
+    },
     /// Token for the screen-share connection (identity "<user>:screen") in the
     /// voice room you're in. Answered with `VoiceGrant`.
-    ScreenGrant { channel_id: Id },
+    ScreenGrant {
+        channel_id: Id,
+    },
     /// PNG, JPEG or WebP, at most `MAX_AVATAR_BYTES`. Empty removes it.
     SetAvatar {
         #[serde(with = "serde_bytes")]
         data: Vec<u8>,
     },
-    GetAvatar { user_id: Id },
+    GetAvatar {
+        user_id: Id,
+    },
     /// Replace your saved preferences (a JSON object, at most MAX_PREFS_BYTES).
-    SavePrefs { json: String },
+    SavePrefs {
+        json: String,
+    },
     /// "I'm typing in this channel" (ephemeral; send at most every 3 s).
-    Typing { channel_id: Id },
+    Typing {
+        channel_id: Id,
+    },
     /// Everything up to and including `message_id` has been seen. Markers
     /// only move forward.
-    MarkRead { channel_id: Id, message_id: Id },
+    MarkRead {
+        channel_id: Id,
+        message_id: Id,
+    },
     // ----- server administration (owner only unless noted) -----
-    RenameServer { server_id: Id, name: String },
-    DeleteServer { server_id: Id },
+    RenameServer {
+        server_id: Id,
+        name: String,
+    },
+    DeleteServer {
+        server_id: Id,
+    },
     /// `None` leaves a field unchanged.
-    UpdateChannel { channel_id: Id, name: Option<String>, topic: Option<String> },
-    DeleteChannel { channel_id: Id },
-    Kick { server_id: Id, user_id: Id },
-    RevokeInvites { server_id: Id },
+    UpdateChannel {
+        channel_id: Id,
+        name: Option<String>,
+        topic: Option<String>,
+    },
+    DeleteChannel {
+        channel_id: Id,
+    },
+    Kick {
+        server_id: Id,
+        user_id: Id,
+    },
+    RevokeInvites {
+        server_id: Id,
+    },
     /// Any member except the owner.
-    LeaveServer { server_id: Id },
+    LeaveServer {
+        server_id: Id,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -292,45 +402,135 @@ pub enum S2C {
         /// Your saved preferences (JSON object; opaque to the server).
         prefs: String,
     },
-    Error { code: ErrorCode, message: String },
-    Pong { t_client: i64, t_server: i64 },
+    Error {
+        code: ErrorCode,
+        message: String,
+    },
+    Pong {
+        t_client: i64,
+        t_server: i64,
+    },
     /// Sent to the author once the message is durable.
-    Ack { channel_id: Id, nonce: u64, id: Id, t_server_recv: i64, t_persisted: i64 },
+    Ack {
+        channel_id: Id,
+        nonce: u64,
+        id: Id,
+        t_server_recv: i64,
+        t_persisted: i64,
+    },
     Message(Message),
-    Edited { channel_id: Id, id: Id, content: String, edited_at: i64 },
-    Deleted { channel_id: Id, id: Id },
-    History { channel_id: Id, messages: Vec<Message>, more: bool },
+    Edited {
+        channel_id: Id,
+        id: Id,
+        content: String,
+        edited_at: i64,
+    },
+    Deleted {
+        channel_id: Id,
+        id: Id,
+    },
+    History {
+        channel_id: Id,
+        messages: Vec<Message>,
+        more: bool,
+    },
+    Members {
+        server_id: Id,
+        offset: u32,
+        members: Vec<UserInfo>,
+        online: Vec<Id>,
+        activities: Vec<(Id, String)>,
+    },
+    MemberSearch {
+        server_id: Id,
+        members: Vec<UserInfo>,
+    },
+    UserLookup(UserInfo),
     ServerJoined(ServerInfo),
     ChannelCreated(ChannelInfo),
-    MemberJoined { server_id: Id, user: UserInfo },
-    Invite { server_id: Id, code: String },
-    VoiceGrant { channel_id: Id, url: String, token: String },
+    MemberJoined {
+        server_id: Id,
+        user: UserInfo,
+    },
+    Invite {
+        server_id: Id,
+        code: String,
+    },
+    VoiceGrant {
+        channel_id: Id,
+        url: String,
+        token: String,
+    },
     /// `channel_id = None` means the user left voice.
-    VoicePresence { server_id: Id, user_id: Id, channel_id: Option<Id>, muted: bool, deafened: bool },
+    VoicePresence {
+        server_id: Id,
+        user_id: Id,
+        channel_id: Option<Id>,
+        muted: bool,
+        deafened: bool,
+    },
     LoggedOut,
     Ok,
     /// A user's profile changed (e.g. new avatar); sent to all their servers.
     UserUpdated(UserInfo),
-    Reaction { channel_id: Id, message_id: Id, emoji: String, user_id: Id, add: bool },
+    Reaction {
+        channel_id: Id,
+        message_id: Id,
+        emoji: String,
+        user_id: Id,
+        add: bool,
+    },
     /// Your preferences changed on another device.
-    PrefsUpdated { json: String },
+    PrefsUpdated {
+        json: String,
+    },
     /// Someone is typing (show for ~6 s unless refreshed).
-    Typing { channel_id: Id, user_id: Id },
+    Typing {
+        channel_id: Id,
+        user_id: Id,
+    },
     /// Your read marker moved (from another of your devices).
-    ReadUpdated { channel_id: Id, last_read: Id },
-    UserPresence { user_id: Id, online: bool },
-    ServerUpdated { server_id: Id, name: String },
+    ReadUpdated {
+        channel_id: Id,
+        last_read: Id,
+    },
+    UserPresence {
+        user_id: Id,
+        online: bool,
+    },
+    ServerUpdated {
+        server_id: Id,
+        name: String,
+    },
     /// You are no longer in this server (sent to the affected user, or to
     /// everyone when it was deleted).
-    ServerRemoved { server_id: Id, reason: RemovedReason },
+    ServerRemoved {
+        server_id: Id,
+        reason: RemovedReason,
+    },
     ChannelUpdated(ChannelInfo),
-    ChannelDeleted { server_id: Id, channel_id: Id },
-    MemberLeft { server_id: Id, user_id: Id, reason: RemovedReason },
-    AccessToken { token: String },
+    ChannelDeleted {
+        server_id: Id,
+        channel_id: Id,
+    },
+    MemberLeft {
+        server_id: Id,
+        user_id: Id,
+        reason: RemovedReason,
+    },
+    AccessToken {
+        token: String,
+    },
     /// A member started/stopped playing (`game` empty = stopped).
-    Activity { user_id: Id, game: String },
+    Activity {
+        user_id: Id,
+        game: String,
+    },
     /// GIF search results. `enabled = false`: this server has no GIF provider.
-    Gifs { enabled: bool, results: Vec<Gif> },
+    Gifs {
+        enabled: bool,
+        results: Vec<Gif>,
+    },
     Avatar {
         user_id: Id,
         avatar_v: u32,
@@ -396,8 +596,16 @@ mod tests {
     fn emoji_and_mentions() {
         assert!(valid_emoji("🏳️‍🌈"), "zwj sequence");
         assert!(valid_emoji("👍"));
-        assert!(!valid_emoji("ab") && !valid_emoji("") && !valid_emoji("👍 👍") && !valid_emoji(&"🔥".repeat(20)));
-        assert_eq!(mentions("hi <@12> and <@34> and <@12> <@x> <@5"), vec![12, 34]);
+        assert!(
+            !valid_emoji("ab")
+                && !valid_emoji("")
+                && !valid_emoji("👍 👍")
+                && !valid_emoji(&"🔥".repeat(20))
+        );
+        assert_eq!(
+            mentions("hi <@12> and <@34> and <@12> <@x> <@5"),
+            vec![12, 34]
+        );
         assert_eq!(mention_token(7), "<@7>");
     }
 
@@ -412,7 +620,12 @@ mod tests {
                 content: "hello".into(),
                 edited_at: None,
                 nonce: 7,
-                trace: Some(Trace { t_input: 1, t_client_send: 2, t_server_recv: 3, t_server_send: 4 }),
+                trace: Some(Trace {
+                    t_input: 1,
+                    t_client_send: 2,
+                    t_server_recv: 3,
+                    t_server_send: 4,
+                }),
                 reply_to: None,
                 reactions: vec![],
                 attachments: vec![],
@@ -424,7 +637,10 @@ mod tests {
         // Compact: a short chat message with full trace fits in well under 100 bytes.
         assert!(b.len() < 100, "{} bytes", b.len());
 
-        let c = ClientFrame { req: 9, msg: C2S::Ping { t_client: 5 } };
+        let c = ClientFrame {
+            req: 9,
+            msg: C2S::Ping { t_client: 5 },
+        };
         assert_eq!(decode::<ClientFrame>(&encode(&c)).unwrap(), c);
     }
 }
