@@ -30,6 +30,8 @@ pub struct PendingSend {
     pub channel_id: Id,
     pub content: String,
     pub reply_to: Option<Id>,
+    pub files: Vec<String>,
+    pub gifs: Vec<String>,
     pub t_input: i64,
     pub echoed: bool,
 }
@@ -81,7 +83,11 @@ pub struct Core {
     pub store: Mutex<Store>,
     pub clock: Mutex<ClockSync>,
     pub url: Mutex<String>,
-    ui: Mutex<(Option<Channel<UiEvent>>, Vec<UiEvent>)>,
+    /// Subscribed windows (label → channel), plus events buffered while the
+    /// main window isn't attached yet.
+    ui: Mutex<(Vec<(String, Channel<UiEvent>)>, Vec<UiEvent>)>,
+    /// HTTP client for uploads (separate connections: never blocks chat).
+    http: reqwest::Client,
     out: Mutex<Option<mpsc::UnboundedSender<WsMsg>>>,
     waiters: Mutex<HashMap<u32, oneshot::Sender<S2C>>>,
     req: AtomicU32,
@@ -102,7 +108,8 @@ impl Core {
             store: Mutex::new(Store::default()),
             clock: Mutex::new(ClockSync::default()),
             url: Mutex::new(url),
-            ui: Mutex::new((None, Vec::new())),
+            ui: Mutex::new((Vec::new(), Vec::new())),
+            http: reqwest::Client::builder().connect_timeout(Duration::from_secs(10)).build().unwrap_or_default(),
             out: Mutex::new(None),
             waiters: Mutex::new(HashMap::new()),
             req: AtomicU32::new(1),
@@ -117,22 +124,20 @@ impl Core {
 
     pub fn emit(&self, ev: UiEvent) {
         let mut ui = self.ui.lock();
-        match &ui.0 {
-            Some(ch) => {
-                if ch.send(ev.clone()).is_err() {
-                    ui.0 = None;
-                    ui.1.push(ev);
-                }
-            }
-            None => {
-                if ui.1.len() < 512 {
-                    ui.1.push(ev);
-                }
-            }
+        let mut main_ok = false;
+        ui.0.retain(|(label, ch)| {
+            let ok = ch.send(ev.clone()).is_ok();
+            main_ok |= ok && label == "main";
+            ok
+        });
+        if !main_ok && ui.1.len() < 512 {
+            ui.1.push(ev);
         }
     }
 
-    pub fn attach_ui(&self, ch: Channel<UiEvent>) {
+    /// A window subscribes (again, after a reload). The main window also gets
+    /// whatever was buffered while it wasn't listening.
+    pub fn attach_ui(&self, label: &str, ch: Channel<UiEvent>) {
         let mut ui = self.ui.lock();
         let (prefs, snap) = {
             let s = self.store.lock();
@@ -143,10 +148,17 @@ impl Core {
             let _ = ch.send(UiEvent::Prefs { json });
         }
         let _ = ch.send(snap);
-        for ev in ui.1.drain(..) {
-            let _ = ch.send(ev);
+        if label == "main" {
+            for ev in ui.1.drain(..) {
+                let _ = ch.send(ev);
+            }
         }
-        ui.0 = Some(ch);
+        ui.0.retain(|(l, _)| l != label);
+        ui.0.push((label.to_owned(), ch));
+    }
+
+    pub fn detach_ui(&self, label: &str) {
+        self.ui.lock().0.retain(|(l, _)| l != label);
     }
 
     pub fn session_snapshot(&self) -> UiEvent {
@@ -365,13 +377,17 @@ impl Core {
 
     /// After (re)authentication: resend un-echoed sends, resync the open channel.
     async fn after_auth(self: Arc<Self>) {
-        let resend: Vec<(u64, Id, String, i64, Option<Id>)> = {
+        let resend: Vec<(u64, Id, String, i64, Option<Id>, Vec<String>, Vec<String>)> = {
             let s = self.store.lock();
-            s.pending.iter().filter(|(_, p)| !p.echoed).map(|(n, p)| (*n, p.channel_id, p.content.clone(), p.t_input, p.reply_to)).collect()
+            s.pending
+                .iter()
+                .filter(|(_, p)| !p.echoed)
+                .map(|(n, p)| (*n, p.channel_id, p.content.clone(), p.t_input, p.reply_to, p.files.clone(), p.gifs.clone()))
+                .collect()
         };
         let off = self.clock.lock().offset_us;
-        for (nonce, channel_id, content, t_input, reply_to) in resend {
-            self.send_frame(self.next_req(), C2S::Send { channel_id, content, nonce, t_input: t_input + off, t_client_send: now_us() + off, reply_to });
+        for (nonce, channel_id, content, t_input, reply_to, files, gifs) in resend {
+            self.send_frame(self.next_req(), C2S::Send { channel_id, content, nonce, t_input: t_input + off, t_client_send: now_us() + off, reply_to, files, gifs });
         }
         let open = self.store.lock().open_channel;
         if let Some(ch) = open {
@@ -690,7 +706,7 @@ impl Core {
             S2C::Error { message, .. } => {
                 tracing::debug!("server error: {message}");
             }
-            S2C::Pong { .. } | S2C::History { .. } | S2C::Invite { .. } | S2C::VoiceGrant { .. } | S2C::Avatar { .. } | S2C::Ok => {}
+            S2C::Pong { .. } | S2C::AccessToken { .. } | S2C::Gifs { .. } | S2C::History { .. } | S2C::Invite { .. } | S2C::VoiceGrant { .. } | S2C::Avatar { .. } | S2C::Ok => {}
         }
     }
 
@@ -731,17 +747,76 @@ impl Core {
 
     // ---------- outbound helpers used by commands ----------
 
-    pub fn send_message(&self, channel_id: Id, content: String, nonce: u64, t_input: i64, reply_to: Option<Id>) -> Res<()> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn send_message(&self, channel_id: Id, content: String, nonce: u64, t_input: i64, reply_to: Option<Id>, files: Vec<String>, gifs: Vec<String>) -> Res<()> {
         let content = content.trim().to_owned();
-        if content.is_empty() || content.chars().count() > MAX_MESSAGE_CHARS {
+        let n_att = files.len() + gifs.len();
+        if (content.is_empty() && n_att == 0) || content.chars().count() > MAX_MESSAGE_CHARS {
             return Err("message must be 1-4000 characters".into());
+        }
+        if n_att > MAX_ATTACHMENTS {
+            return Err(format!("at most {MAX_ATTACHMENTS} attachments per message"));
         }
         let off = self.clock.lock().offset_us;
         self.perf.expect_local(format!("p{nonce}"), t_input, now_us());
-        self.store.lock().pending.insert(nonce, PendingSend { channel_id, content: content.clone(), reply_to, t_input, echoed: false });
+        self.store.lock().pending.insert(nonce, PendingSend { channel_id, content: content.clone(), reply_to, files: files.clone(), gifs: gifs.clone(), t_input, echoed: false });
         // Offline: stays pending and is sent after reconnect.
-        self.send_frame(self.next_req(), C2S::Send { channel_id, content, nonce, t_input: t_input + off, t_client_send: now_us() + off, reply_to });
+        self.send_frame(self.next_req(), C2S::Send { channel_id, content, nonce, t_input: t_input + off, t_client_send: now_us() + off, reply_to, files, gifs });
         Ok(())
+    }
+
+    /// HTTP base of the chat server (`wss://h/ws` → `https://h`).
+    pub fn http_base(&self) -> String {
+        http_base(&self.url.lock())
+    }
+
+    /// A still-valid access token for HTTP calls (fetched fresh when close to expiry).
+    async fn access_token(&self) -> Res<String> {
+        let now_s = now_us() / 1_000_000;
+        if let Some((t, exp)) = self.store.lock().access_token.clone() {
+            if exp > now_s + 60 {
+                return Ok(t);
+            }
+        }
+        match self.request(C2S::AccessToken).await? {
+            S2C::AccessToken { token } => {
+                self.store.lock().access_token = Some((token.clone(), now_s + 14 * 60));
+                Ok(token)
+            }
+            _ => Err("unexpected reply".into()),
+        }
+    }
+
+    /// Upload one file; returns its attachment (send it with `send_message`).
+    pub async fn upload(&self, name: &str, data: Vec<u8>, w: u32, h: u32) -> Res<Attachment> {
+        if data.is_empty() {
+            return Err("that file is empty".into());
+        }
+        let token = self.access_token().await?;
+        let url = format!("{}/files", self.http_base());
+        let res = self
+            .http
+            .post(url)
+            .query(&[("name", name.to_owned()), ("w", w.to_string()), ("h", h.to_string())])
+            .bearer_auth(token)
+            .timeout(Duration::from_secs(300))
+            .body(data)
+            .send()
+            .await
+            .map_err(|e| if e.is_timeout() { "upload timed out".to_string() } else { "couldn't reach the server".to_string() })?;
+        let status = res.status();
+        if !status.is_success() {
+            let msg = res.text().await.unwrap_or_default();
+            return Err(if msg.is_empty() || msg.len() > 200 { format!("upload failed ({status})") } else { msg });
+        }
+        res.json::<Attachment>().await.map_err(|_| "upload failed (bad reply)".to_string())
+    }
+
+    pub async fn gif_search(&self, query: String) -> Res<(bool, Vec<Gif>)> {
+        match self.request(C2S::GifSearch { query }).await? {
+            S2C::Gifs { enabled, results } => Ok((enabled, results)),
+            _ => Err("unexpected reply".into()),
+        }
     }
 
     /// Messages to show immediately when a channel is opened.
@@ -823,6 +898,12 @@ pub fn apply_reaction(list: &mut Vec<Reaction>, emoji: &str, user: Id, add: bool
         None if add => list.push(Reaction { emoji: emoji.to_owned(), users: vec![user] }),
         None => {}
     }
+}
+
+pub fn http_base(ws_url: &str) -> String {
+    let (scheme, rest) = ws_url.split_once("://").unwrap_or(("ws", ws_url));
+    let host = rest.split('/').next().unwrap_or("");
+    format!("{}://{host}", if scheme == "wss" { "https" } else { "http" })
 }
 
 async fn connect(url: &str) -> anyhow::Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>> {

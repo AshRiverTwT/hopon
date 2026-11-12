@@ -212,6 +212,8 @@ pub enum C2S {
     Send { channel_id: Id, content: String, nonce: u64, t_input: i64, t_client_send: i64, reply_to: Option<Id>, files: Vec<String>, gifs: Vec<String> },
     /// GIF search; an empty query returns trending GIFs.
     GifSearch { query: String },
+    /// A fresh access token for HTTP calls (file uploads).
+    AccessToken,
     /// Add (`add = true`) or remove your reaction. Idempotent.
     React { channel_id: Id, message_id: Id, emoji: String, add: bool },
     Edit { channel_id: Id, message_id: Id, content: String },
@@ -314,6 +316,7 @@ pub enum S2C {
     ChannelUpdated(ChannelInfo),
     ChannelDeleted { server_id: Id, channel_id: Id },
     MemberLeft { server_id: Id, user_id: Id, reason: RemovedReason },
+    AccessToken { token: String },
     /// GIF search results. `enabled = false`: this server has no GIF provider.
     Gifs { enabled: bool, results: Vec<Gif> },
     Avatar {

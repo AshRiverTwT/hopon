@@ -17,8 +17,8 @@ fn ms_to_us(ms: f64) -> i64 {
 }
 
 #[tauri::command]
-pub fn ui_subscribe(core: C<'_>, events: Channel<UiEvent>) {
-    core.attach_ui(events);
+pub fn ui_subscribe(window: tauri::Window, core: C<'_>, events: Channel<UiEvent>) {
+    core.attach_ui(window.label(), events);
 }
 
 /// First frame painted: record cold-start timings. The window is visible from
@@ -115,10 +115,70 @@ pub async fn load_older(core: C<'_>, channel_id: String, before: String) -> Res<
 
 /// The webview already painted its optimistic copy; this only transmits.
 #[tauri::command]
-pub fn send_message(core: C<'_>, channel_id: String, content: String, nonce: String, t_input_ms: f64, reply_to: Option<String>) -> Res<()> {
+#[allow(clippy::too_many_arguments)]
+pub fn send_message(
+    core: C<'_>,
+    channel_id: String,
+    content: String,
+    nonce: String,
+    t_input_ms: f64,
+    reply_to: Option<String>,
+    files: Option<Vec<String>>,
+    gifs: Option<Vec<String>>,
+) -> Res<()> {
     let nonce: u64 = nonce.parse().map_err(|_| "bad nonce")?;
     let reply_to = reply_to.as_deref().map(pid).transpose()?;
-    core.send_message(pid(&channel_id)?, content, nonce, ms_to_us(t_input_ms), reply_to)
+    core.send_message(pid(&channel_id)?, content, nonce, ms_to_us(t_input_ms), reply_to, files.unwrap_or_default(), gifs.unwrap_or_default())
+}
+
+/// Upload a file. The body is the raw bytes (no JSON encoding); the name
+/// (percent-encoded) and pixel size come in headers.
+#[tauri::command]
+pub async fn upload_file(core: C<'_>, request: tauri::ipc::Request<'_>) -> Res<hopon_shared::Attachment> {
+    let tauri::ipc::InvokeBody::Raw(data) = request.body() else {
+        return Err("bad upload".into());
+    };
+    let h = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_owned();
+    let name = percent_decode(&h("x-name"));
+    let w = h("x-w").parse().unwrap_or(0);
+    let hgt = h("x-h").parse().unwrap_or(0);
+    core.upload(if name.is_empty() { "file" } else { &name }, data.clone(), w, hgt).await
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[derive(Serialize)]
+pub struct GifResults {
+    enabled: bool,
+    results: Vec<hopon_shared::Gif>,
+}
+
+#[tauri::command]
+pub async fn gif_search(core: C<'_>, query: String) -> Res<GifResults> {
+    let (enabled, results) = core.gif_search(query).await?;
+    Ok(GifResults { enabled, results })
+}
+
+/// UI scale (Ctrl +/-); 1.0 = 100 %.
+#[tauri::command]
+pub async fn set_zoom(window: tauri::WebviewWindow, scale: f64) -> Res<()> {
+    window.set_zoom(scale.clamp(0.5, 2.0)).map_err(|e| e.to_string())
 }
 
 /// Fire-and-forget typing signal (the webview throttles to one per 3 s).

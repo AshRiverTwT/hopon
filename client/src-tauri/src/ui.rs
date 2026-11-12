@@ -1,7 +1,7 @@
 //! Types pushed to the webview. IDs are 63-bit, beyond JS's 2^53 safe range,
 //! so they cross the IPC boundary as decimal strings.
 
-use hopon_shared::{ChannelInfo, ChannelKind, Id, Message, ServerInfo, UserInfo, VoicePresence};
+use hopon_shared::{Attachment, ChannelInfo, ChannelKind, Id, Message, ServerInfo, UserInfo, VoicePresence};
 use serde::Serialize;
 
 pub fn sid(id: Id) -> String {
@@ -83,6 +83,9 @@ pub struct UiMsg {
     pub state: u8,
     pub reply_to: Option<String>,
     pub reactions: Vec<UiReaction>,
+    /// `url` empty = served by the chat server at /files/{id} (the UI
+    /// resolves it against the server address).
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -105,6 +108,7 @@ impl UiMsg {
             state,
             reply_to: m.reply_to.map(sid),
             reactions: m.reactions.iter().map(|r| UiReaction { emoji: r.emoji.clone(), users: r.users.iter().map(|u| sid(*u)).collect() }).collect(),
+            attachments: m.attachments.clone(),
         }
     }
 }

@@ -25,14 +25,14 @@ pub struct Cache {
 
 /// Bump when the message table changes. The cache is disposable: an old
 /// version's message table is dropped and refilled from the server.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 const SCHEMA: &str = "
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 CREATE TABLE IF NOT EXISTS messages (
   channel_id INTEGER NOT NULL, id INTEGER NOT NULL, author_id INTEGER NOT NULL,
-  content TEXT NOT NULL, edited_at INTEGER, reply_to INTEGER, reactions TEXT,
+  content TEXT NOT NULL, edited_at INTEGER, reply_to INTEGER, reactions TEXT, attachments TEXT,
   PRIMARY KEY (channel_id, id)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v BLOB NOT NULL) WITHOUT ROWID;
 ";
@@ -130,12 +130,13 @@ fn run(mut conn: Connection, rx: mpsc::Receiver<Op>) {
                 match op {
                     Op::Put(ms) => {
                         let mut st = tx.prepare_cached(
-                            "INSERT INTO messages (channel_id, id, author_id, content, edited_at, reply_to, reactions) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+                            "INSERT INTO messages (channel_id, id, author_id, content, edited_at, reply_to, reactions, attachments) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
                              ON CONFLICT (channel_id, id) DO UPDATE SET content = excluded.content, edited_at = excluded.edited_at, \
-                             reply_to = excluded.reply_to, reactions = excluded.reactions",
+                             reply_to = excluded.reply_to, reactions = excluded.reactions, attachments = excluded.attachments",
                         )?;
                         for m in ms {
-                            st.execute(params![m.channel_id, m.id, m.author_id, m.content, m.edited_at, m.reply_to, reactions_json(&m.reactions)])?;
+                            let att = (!m.attachments.is_empty()).then(|| serde_json::to_string(&m.attachments).unwrap_or_default());
+                            st.execute(params![m.channel_id, m.id, m.author_id, m.content, m.edited_at, m.reply_to, reactions_json(&m.reactions), att])?;
                         }
                         puts += 1;
                     }
@@ -154,7 +155,7 @@ fn run(mut conn: Connection, rx: mpsc::Receiver<Op>) {
                     }
                     Op::Page { channel, before, limit, reply } => {
                         let mut st = tx.prepare_cached(
-                            "SELECT id, author_id, content, edited_at, reply_to, reactions FROM messages WHERE channel_id = ?1 AND id < ?2 ORDER BY id DESC LIMIT ?3",
+                            "SELECT id, author_id, content, edited_at, reply_to, reactions, attachments FROM messages WHERE channel_id = ?1 AND id < ?2 ORDER BY id DESC LIMIT ?3",
                         )?;
                         let rows = st
                             .query_map(params![channel, before, limit], |r| {
@@ -168,6 +169,7 @@ fn run(mut conn: Connection, rx: mpsc::Receiver<Op>) {
                                     trace: None,
                                     reply_to: r.get(4)?,
                                     reactions: reactions_from(r.get(5)?),
+                                    attachments: r.get::<_, Option<String>>(6)?.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default(),
                                 })
                             })?
                             .filter_map(Result::ok)

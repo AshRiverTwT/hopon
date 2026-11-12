@@ -471,6 +471,11 @@ impl Session {
                 }
                 Ok(())
             }
+            C2S::AccessToken => {
+                let token = self.st.keys.access_token(uid, name);
+                self.send(req, S2C::AccessToken { token }).await;
+                Ok(())
+            }
             C2S::GifSearch { query } => {
                 let (st, tx) = (self.st.clone(), self.tx.clone());
                 // Off the reader loop: the provider can take a while.
