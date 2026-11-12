@@ -1,0 +1,6 @@
+{
+  "version": "0.4.2",
+  "url": "https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe",
+  "sha256": "a649d648755e22370b73cb5b9ffd17a4ec5b0629b79eda7a2239d2dfb8d31e46",
+  "notes": "- **One-click updates.** When a new version is out, an **Update to \u2026**\n  button appears in the top bar (also Settings \u2192 Account \u2192 Updates). If the\n  server needs a newer app, HopOn asks you to update and does it for you:\n  downloads, checks the file, installs and reopens.\n- Same protocol as 0.4.0: no server update needed."
+}
