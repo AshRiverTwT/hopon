@@ -21,6 +21,7 @@ with zipfile.ZipFile("hopon-windows-kit.zip", "w", zipfile.ZIP_DEFLATED, compres
         z.write(os.path.join("hopon-windows-kit", f))
 PY
 rev=$(git rev-parse --short HEAD)
+branch=$(git rev-parse --abbrev-ref HEAD)
 wt=$(mktemp -d)
 git fetch -q origin downloads
 git worktree add -q --detach "$wt" origin/downloads
@@ -50,7 +51,7 @@ cat > "$wt/README.md" <<EOF
 - [HopOn-setup.exe](HopOn-setup.exe): Windows installer, version $VER (latest)
 - [hopon-windows-kit.zip](hopon-windows-kit.zip): local test kit (installer, server, benchmarks, scripts)
 
-Built from branch \`main\` at $rev.
+Built from branch \`$branch\` at $rev.
 
 $shots
 EOF
@@ -60,7 +61,7 @@ EOF
   git commit -qm "Downloads at $rev
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01CcWXzAm1Td6CAPRiwzZTSK"
+Claude-Session: https://claude.ai/code/session_01CcWXz7DJtjs9RpBCxmHEbN"
   git push -q origin HEAD:downloads
 )
 git worktree remove --force "$wt"
