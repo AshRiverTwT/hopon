@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
+use tokio::sync::Semaphore;
 
 pub const GUILD_BACKLOG: usize = 2048;
 pub const CONN_QUEUE: usize = 1024;
@@ -73,12 +74,25 @@ pub struct State {
     pub chans: DashMap<Id, Arc<Chan>>,
     pub conns: DashMap<Id, Vec<(u64, ConnTx)>>,
     pub voice: Mutex<HashMap<Id, VoiceEntry>>,
+    /// Active screen shares advertised over the main socket, keyed by user.
+    pub screen_shares: DashMap<Id, (Id, Id)>,
+    /// Caps expensive history/replay work across the process.
+    pub history_slots: Arc<Semaphore>,
+    /// Per-account concurrency cap for history and replay requests.
+    pub user_history_slots: DashMap<Id, Arc<Semaphore>>,
+    /// Caps simultaneous disk uploads before streaming bodies to storage.
+    pub upload_slots: Arc<Semaphore>,
+    /// Bounds CPU and blocking-pool demand from Argon2 password work.
+    pub auth_slots: Arc<Semaphore>,
     pub persist: mpsc::Sender<PersistOp>,
     pub metrics: Metrics,
     pub http: reqwest::Client,
     /// (author, nonce) → (message, accepted at µs). Makes client resends after
     /// a reconnect idempotent. Entries live `NONCE_TTL_US`.
     pub nonces: DashMap<(Id, u64), (hopon_shared::Message, i64)>,
+    /// Serializes concurrent retries of the same author nonce until its write
+    /// is committed, preventing two live fan-outs for one message key.
+    pub nonce_locks: DashMap<(Id, u64), Arc<tokio::sync::Mutex<()>>>,
     /// GIF id → (attachment, fetched at), from this server's own searches.
     pub gifs: DashMap<String, (hopon_shared::Attachment, std::time::Instant)>,
     /// What each connected user is playing (cleared when they go offline).
@@ -89,7 +103,11 @@ pub struct State {
 pub const NONCE_TTL_US: i64 = 5 * 60 * 1_000_000;
 
 pub fn kind_from_i16(k: i16) -> ChannelKind {
-    if k == 1 { ChannelKind::Voice } else { ChannelKind::Text }
+    if k == 1 {
+        ChannelKind::Voice
+    } else {
+        ChannelKind::Text
+    }
 }
 pub fn kind_to_i16(k: ChannelKind) -> i16 {
     match k {
@@ -109,10 +127,16 @@ impl State {
             chans: DashMap::new(),
             conns: DashMap::new(),
             voice: Mutex::new(HashMap::new()),
+            screen_shares: DashMap::new(),
+            history_slots: Arc::new(Semaphore::new(128)),
+            user_history_slots: DashMap::new(),
+            upload_slots: Arc::new(Semaphore::new(8)),
+            auth_slots: Arc::new(Semaphore::new(8)),
             persist,
             metrics: Metrics::new(),
             http: reqwest::Client::new(),
             nonces: DashMap::new(),
+            nonce_locks: DashMap::new(),
             gifs: DashMap::new(),
             activities: DashMap::new(),
             next_conn: AtomicU64::new(1),
@@ -123,6 +147,7 @@ impl State {
     pub fn prune_nonces(&self) {
         let cutoff = hopon_shared::time::now_us() - NONCE_TTL_US;
         self.nonces.retain(|_, (_, t)| *t > cutoff);
+        self.nonce_locks.retain(|_, lock| Arc::strong_count(lock) > 1);
     }
 
     pub fn conn_id(&self) -> u64 {
@@ -154,7 +179,10 @@ impl State {
     pub fn announce_activity(&self, user: Id, game: &str) {
         let f = Bytes::from(hopon_shared::encode(&hopon_shared::ServerFrame {
             req: 0,
-            msg: hopon_shared::S2C::Activity { user_id: user, game: game.to_owned() },
+            msg: hopon_shared::S2C::Activity {
+                user_id: user,
+                game: game.to_owned(),
+            },
         }));
         for g in self.guilds.iter().filter(|g| g.is_member(user)) {
             g.publish(f.clone());
@@ -165,7 +193,13 @@ impl State {
         if !online && self.activities.remove(&user).is_some() {
             self.announce_activity(user, "");
         }
-        let f = Bytes::from(hopon_shared::encode(&hopon_shared::ServerFrame { req: 0, msg: hopon_shared::S2C::UserPresence { user_id: user, online } }));
+        let f = Bytes::from(hopon_shared::encode(&hopon_shared::ServerFrame {
+            req: 0,
+            msg: hopon_shared::S2C::UserPresence {
+                user_id: user,
+                online,
+            },
+        }));
         for g in self.guilds.iter().filter(|g| g.is_member(user)) {
             g.publish(f.clone());
         }
@@ -193,19 +227,50 @@ impl State {
 
     /// Clear a user's voice presence if it is in `server` (optionally only in
     /// `channel`), announcing the leave. Returns the channel they were in.
-    pub fn clear_voice(&self, user: Id, server: Id, channel: Option<Id>, announce: Option<&Guild>) -> Option<Id> {
+    pub fn clear_voice(
+        &self,
+        user: Id,
+        server: Id,
+        channel: Option<Id>,
+        announce: Option<&Guild>,
+    ) -> Option<Id> {
         let removed = {
             let mut v = self.voice.lock();
             match v.get(&user) {
-                Some(e) if e.server_id == server && channel.map_or(true, |c| c == e.channel_id) => v.remove(&user),
+                Some(e) if e.server_id == server && channel.map_or(true, |c| c == e.channel_id) => {
+                    v.remove(&user)
+                }
                 _ => None,
             }
         }?;
+        let share = self.screen_shares.get(&user).map(|entry| *entry.value());
+        if share == Some((server, removed.channel_id)) {
+            self.screen_shares.remove(&user);
+            if let Some(g) = announce {
+                g.publish(Bytes::from(hopon_shared::encode(&hopon_shared::ServerFrame {
+                    req: 0,
+                    msg: hopon_shared::S2C::ScreenPresence {
+                        server_id: server,
+                        channel_id: removed.channel_id,
+                        user_id: user,
+                        active: false,
+                    },
+                })));
+            }
+        }
         if let Some(g) = announce {
-            g.publish(Bytes::from(hopon_shared::encode(&hopon_shared::ServerFrame {
-                req: 0,
-                msg: hopon_shared::S2C::VoicePresence { server_id: server, user_id: user, channel_id: None, muted: false, deafened: false },
-            })));
+            g.publish(Bytes::from(hopon_shared::encode(
+                &hopon_shared::ServerFrame {
+                    req: 0,
+                    msg: hopon_shared::S2C::VoicePresence {
+                        server_id: server,
+                        user_id: user,
+                        channel_id: None,
+                        muted: false,
+                        deafened: false,
+                    },
+                },
+            )));
         }
         Some(removed.channel_id)
     }
@@ -226,7 +291,13 @@ impl State {
         self.chans
             .entry(c.id)
             .or_insert_with(|| {
-                Arc::new(Chan { server_id: c.server_id, kind: c.kind, deleted: Default::default(), last_id: Default::default(), order: Mutex::new(()) })
+                Arc::new(Chan {
+                    server_id: c.server_id,
+                    kind: c.kind,
+                    deleted: Default::default(),
+                    last_id: Default::default(),
+                    order: Mutex::new(()),
+                })
             })
             .clone()
     }
@@ -236,14 +307,22 @@ impl State {
         let chan = match self.chans.get(&channel_id) {
             Some(c) => c.clone(),
             None => {
-                let row: Option<(i64, i64, String, i16, String)> =
-                    sqlx::query_as("SELECT id, server_id, name, kind, topic FROM channels WHERE id = $1")
-                        .bind(channel_id)
-                        .fetch_optional(&self.db)
-                        .await
-                        .ok()?;
+                let row: Option<(i64, i64, String, i16, String)> = sqlx::query_as(
+                    "SELECT id, server_id, name, kind, topic FROM channels WHERE id = $1",
+                )
+                .bind(channel_id)
+                .fetch_optional(&self.db)
+                .await
+                .ok()?;
                 let (id, server_id, name, kind, topic) = row?;
-                self.chan_insert(&ChannelInfo { id, server_id, name, kind: kind_from_i16(kind), topic, last_id: 0 })
+                self.chan_insert(&ChannelInfo {
+                    id,
+                    server_id,
+                    name,
+                    kind: kind_from_i16(kind),
+                    topic,
+                    last_id: 0,
+                })
             }
         };
         if chan.deleted.load(std::sync::atomic::Ordering::Relaxed) {
@@ -258,7 +337,10 @@ impl State {
             return Ok(g.clone());
         }
         let members: Vec<(i64,)> =
-            sqlx::query_as("SELECT user_id FROM members WHERE server_id = $1").bind(id).fetch_all(&self.db).await?;
+            sqlx::query_as("SELECT user_id FROM members WHERE server_id = $1")
+                .bind(id)
+                .fetch_all(&self.db)
+                .await?;
         Ok(self.guild_or_insert(id, members.into_iter().map(|m| m.0)))
     }
 
@@ -285,13 +367,14 @@ impl State {
         .bind(&ids)
         .fetch_all(&self.db)
         .await?;
-        let mems: Vec<(i64, i64, String, i32)> = sqlx::query_as(
-            "SELECT m.server_id, u.id, u.name, u.avatar_v FROM members m JOIN users u ON u.id = m.user_id \
-             WHERE m.server_id = ANY($1) ORDER BY u.name_lower",
+        let counts: Vec<(i64, i64)> = sqlx::query_as(
+            "SELECT server_id, count(*) FROM members WHERE server_id = ANY($1) GROUP BY server_id",
         )
         .bind(&ids)
         .fetch_all(&self.db)
         .await?;
+        let counts: HashMap<i64, u32> =
+            counts.into_iter().map(|(sid, n)| (sid, n as u32)).collect();
 
         let chan_ids: Vec<i64> = chans.iter().map(|c| c.0).collect();
         // Newest message per channel: one backward index probe each.
@@ -302,7 +385,10 @@ impl State {
         .bind(&chan_ids)
         .fetch_all(&self.db)
         .await?;
-        let lasts: HashMap<i64, i64> = lasts.into_iter().map(|(c, m)| (c, m.unwrap_or(0))).collect();
+        let lasts: HashMap<i64, i64> = lasts
+            .into_iter()
+            .map(|(c, m)| (c, m.unwrap_or(0)))
+            .collect();
         let reads: Vec<(i64, i64)> = sqlx::query_as("SELECT channel_id, last_read FROM channel_reads WHERE user_id = $1 AND channel_id = ANY($2)")
             .bind(user)
             .bind(&chan_ids)
@@ -312,36 +398,128 @@ impl State {
 
         let mut out: Vec<ServerInfo> = rows
             .into_iter()
-            .map(|(id, name, owner_id)| ServerInfo { id, name, owner_id, channels: vec![], members: vec![], reads: vec![], online: vec![], activities: vec![] })
+            .map(|(id, name, owner_id)| ServerInfo {
+                id,
+                name,
+                owner_id,
+                channels: vec![],
+                members: vec![],
+                member_ids: vec![],
+                member_count: counts.get(&id).copied().unwrap_or(0),
+                reads: vec![],
+                online: vec![],
+                activities: vec![],
+            })
             .collect();
         let idx: HashMap<i64, usize> = out.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
         for (id, server_id, name, kind, topic) in chans {
-            let mut c = ChannelInfo { id, server_id, name, kind: kind_from_i16(kind), topic, last_id: 0 };
+            let mut c = ChannelInfo {
+                id,
+                server_id,
+                name,
+                kind: kind_from_i16(kind),
+                topic,
+                last_id: 0,
+            };
             let chan = self.chan_insert(&c);
             // Persistence lags fan-out slightly: take whichever is newer.
-            c.last_id = lasts.get(&id).copied().unwrap_or(0).max(chan.last_id.load(std::sync::atomic::Ordering::Relaxed));
+            c.last_id = lasts
+                .get(&id)
+                .copied()
+                .unwrap_or(0)
+                .max(chan.last_id.load(std::sync::atomic::Ordering::Relaxed));
             if let Some(r) = read_map.get(&id) {
                 out[idx[&server_id]].reads.push((id, *r));
             }
             out[idx[&server_id]].channels.push(c);
         }
-        for (sid, id, name, av) in mems {
-            if let Some(g) = self.activities.get(&id) {
-                out[idx[&sid]].activities.push((id, g.clone()));
-            }
-            if self.is_online(id) {
-                out[idx[&sid]].online.push(id);
-            }
-            out[idx[&sid]].members.push(UserInfo { id, name, avatar_v: av as u32 });
-        }
         for s in &out {
-            let g = self.guild_or_insert(s.id, s.members.iter().map(|m| m.id));
-            // Refresh membership in case the cached guild is stale.
-            let mut m = g.members.write();
-            for u in &s.members {
-                m.insert(u.id);
-            }
+            // Routing membership stays server-side; the compact client manifest
+            // intentionally contains no full roster.
+            let _ = self.guild(s.id).await?;
         }
         Ok(out)
+    }
+
+    pub async fn load_members(
+        &self,
+        user: Id,
+        server_id: Id,
+        offset: u32,
+        limit: u16,
+    ) -> Result<(Vec<UserInfo>, Vec<Id>, Vec<(Id, String)>)> {
+        let guild = self.guild(server_id).await?;
+        anyhow::ensure!(guild.is_member(user), "not a member");
+        let rows: Vec<(i64, String, i32)> = sqlx::query_as(
+            "SELECT u.id, u.name, u.avatar_v FROM members m JOIN users u ON u.id = m.user_id \
+             WHERE m.server_id = $1 ORDER BY u.name_lower, u.id LIMIT $2 OFFSET $3",
+        )
+        .bind(server_id)
+        .bind(limit as i64)
+        .bind(offset as i64)
+        .fetch_all(&self.db)
+        .await?;
+        let users: Vec<UserInfo> = rows
+            .into_iter()
+            .map(|(id, name, avatar_v)| UserInfo {
+                id,
+                name,
+                avatar_v: avatar_v as u32,
+            })
+            .collect();
+        let online = users
+            .iter()
+            .filter(|u| self.is_online(u.id))
+            .map(|u| u.id)
+            .collect();
+        let activities = users
+            .iter()
+            .filter_map(|u| self.activities.get(&u.id).map(|g| (u.id, g.clone())))
+            .collect();
+        Ok((users, online, activities))
+    }
+
+    pub async fn search_members(
+        &self,
+        user: Id,
+        server_id: Id,
+        query: &str,
+        limit: u16,
+    ) -> Result<Vec<UserInfo>> {
+        let guild = self.guild(server_id).await?;
+        anyhow::ensure!(guild.is_member(user), "not a member");
+        let prefix = query.to_lowercase();
+        let rows: Vec<(i64, String, i32)> = sqlx::query_as(
+            "SELECT u.id, u.name, u.avatar_v FROM members m JOIN users u ON u.id = m.user_id \
+             WHERE m.server_id = $1 AND left(u.name_lower, char_length($2)) = $2 ORDER BY u.name_lower, u.id LIMIT $3",
+        )
+        .bind(server_id).bind(prefix).bind(limit as i64).fetch_all(&self.db).await?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, name, avatar_v)| UserInfo {
+                id,
+                name,
+                avatar_v: avatar_v as u32,
+            })
+            .collect())
+    }
+
+    pub async fn lookup_member(
+        &self,
+        user: Id,
+        server_id: Id,
+        user_id: Id,
+    ) -> Result<Option<UserInfo>> {
+        let guild = self.guild(server_id).await?;
+        anyhow::ensure!(guild.is_member(user), "not a member");
+        let row: Option<(i64, String, i32)> = sqlx::query_as(
+            "SELECT u.id, u.name, u.avatar_v FROM members m JOIN users u ON u.id = m.user_id WHERE m.server_id = $1 AND u.id = $2",
+        )
+        .bind(server_id).bind(user_id).fetch_optional(&self.db).await?;
+        Ok(row.map(|(id, name, avatar_v)| UserInfo {
+            id,
+            name,
+            avatar_v: avatar_v as u32,
+        }))
     }
 }

@@ -1,7 +1,7 @@
 // Mirrors client/src-tauri/src/ui.rs. IDs are decimal strings (63-bit).
 export interface User { id: string; name: string; avatarV: number }
 export interface Channel { id: string; serverId: string; name: string; voice: boolean; topic: string; lastId: string }
-export interface Server { id: string; name: string; ownerId: string; channels: Channel[]; members: User[]; reads: Record<string, string>; online: string[];
+export interface Server { id: string; name: string; ownerId: string; channels: Channel[]; memberIds: string[]; memberCount: number; reads: Record<string, string>; online: string[];
   /** user → game they're playing right now */
   activities: Record<string, string> }
 export interface Msg {
@@ -22,16 +22,20 @@ export interface Presence { userId: string; channelId: string | null; muted: boo
 
 export type UiEvent =
   | { t: "conn"; state: "connecting" | "online" | "offline"; rttMs: number | null }
-  | { t: "session"; user: User | null; servers: Server[]; voice: Presence[] }
+  | { t: "session"; user: User | null; servers: Server[]; users: User[]; voice: Presence[] }
   | { t: "server"; server: Server }
   | { t: "channelCreated"; channel: Channel }
   | { t: "memberJoined"; serverId: string; user: User }
+  | { t: "memberPage"; serverId: string; offset: number; users: User[]; online: string[]; activities: Record<string, string> }
+  | { t: "memberSearch"; serverId: string; users: User[] }
   | { t: "userUpdated"; user: User }
   | { t: "serverRemoved"; serverId: string; reason: "deleted" | "kicked" | "left" }
   | { t: "channelDeleted"; serverId: string; channelId: string }
   | { t: "readUpdated"; channelId: string; lastRead: string }
+  | { t: "channelActivity"; channelId: string; lastId: string }
   | { t: "reaction"; channelId: string; messageId: string; emoji: string; userId: string; add: boolean }
   | { t: "mentioned"; channelId: string }
+  | { t: "incomingMessage"; channelId: string; msg: Msg }
   | { t: "typing"; channelId: string; userId: string }
   | { t: "prefs"; json: string }
   | { t: "userPresence"; userId: string; online: boolean }
@@ -41,6 +45,7 @@ export type UiEvent =
   | { t: "edited"; channelId: string; id: string; content: string; editedAt: number }
   | { t: "deleted"; channelId: string; id: string }
   | { t: "presence"; serverId: string; presence: Presence }
+  | { t: "screenShare"; serverId: string; channelId: string; userId: string; active: boolean }
   | { t: "voice"; channelId: string | null; state: string; muted: boolean; deafened: boolean; detail: string | null }
   | { t: "speaking"; userIds: string[] }
   | { t: "openChannel"; channelId: string }

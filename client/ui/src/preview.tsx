@@ -12,7 +12,7 @@ const me = { id: "1001", name: "ash", avatarV: 1 };
 const names = ["ash", "mira", "jun", "tobias", "nell", "kaito", "rosa", "ezra"];
 const members = names.map((n, i) => ({ id: String(1001 + i), name: n, avatarV: i % 3 === 2 ? 0 : 1 }));
 const server: Server = {
-  id: "9001", name: "Night Shift", ownerId: new URLSearchParams(location.search).has("member") ? "1002" : "1001", members,
+  id: "9001", name: "Night Shift", ownerId: new URLSearchParams(location.search).has("member") ? "1002" : "1001", memberIds: members.map((m) => m.id), memberCount: members.length,
   reads: { "7003": "1", "7001": "10001997" }, online: ["1001", "1002", "1003", "1005"], activities: { "1002": "VALORANT", "1005": "Counter-Strike 2" },
   channels: [
     { id: "7001", serverId: "9001", name: "general", voice: false, topic: "Anything goes. Be kind.", lastId: "0" },
@@ -97,7 +97,7 @@ const voice = scene === "voice" || scene === "chat"
   ? [{ userId: "1002", channelId: "7101", muted: false, deafened: false }, { userId: "1004", channelId: "7101", muted: true, deafened: false }, ...(scene === "voice" ? [{ userId: "1001", channelId: "7101", muted: false, deafened: false }] : [])]
   : [];
 onEvent({ t: "conn", state: "online", rttMs: 0.4 });
-onEvent({ t: "session", user, servers, voice });
+onEvent({ t: "session", user, servers, users: members, voice });
 if (scene === "voice") {
   onEvent({ t: "voice", channelId: "7101", state: "connected", muted: false, deafened: false, detail: null });
   if (!lk) import("./screen").then((m) => m.setScreen({ connected: true, shares: [{ userId: "1002", identity: "1002:screen", hasAudio: true }],

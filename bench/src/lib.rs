@@ -3,6 +3,7 @@
 use anyhow::{anyhow, bail, Result};
 use futures_util::{SinkExt, StreamExt};
 use hopon_shared::*;
+use std::collections::VecDeque;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -12,6 +13,7 @@ pub type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub struct Client {
     pub ws: Ws,
     req: u32,
+    events: VecDeque<ServerFrame>,
 }
 
 impl Client {
@@ -22,7 +24,7 @@ impl Client {
         let tcp = TcpStream::connect((u.host.as_str(), u.port)).await?;
         tcp.set_nodelay(true)?;
         let (ws, _) = tokio_tungstenite::client_async_tls(versioned_url(url), tcp).await?;
-        Ok(Self { ws, req: 0 })
+        Ok(Self { ws, req: 0, events: VecDeque::new() })
     }
 
     pub async fn send(&mut self, msg: C2S) -> Result<u32> {
@@ -33,6 +35,13 @@ impl Client {
     }
 
     pub async fn recv(&mut self) -> Result<ServerFrame> {
+        if let Some(event) = self.events.pop_front() {
+            return Ok(event);
+        }
+        self.read_frame().await
+    }
+
+    async fn read_frame(&mut self) -> Result<ServerFrame> {
         loop {
             match self.ws.next().await {
                 Some(Ok(WsMsg::Binary(b))) => return Ok(decode(&b)?),
@@ -43,16 +52,44 @@ impl Client {
         }
     }
 
-    /// Send a request and wait for its reply, skipping unrelated events.
+    /// Chat events as observed by a UI. User messages appear on the live path,
+    /// so their subsequent commit must not count as a second delivery.
+    pub async fn recv_chat(&mut self) -> Result<ServerFrame> {
+        loop {
+            let mut frame = self.recv().await?;
+            frame.msg = match frame.msg {
+                S2C::LiveMessage(message) => S2C::Message(message),
+                S2C::ChannelEvent(event) => match event.payload {
+                    DurablePayload::Message(m) if m.author_id == SYSTEM_USER => S2C::Message(m),
+                    DurablePayload::Message(_) => continue,
+                    DurablePayload::Edited { channel_id, id, content, edited_at } => {
+                        S2C::Edited { channel_id, id, content, edited_at }
+                    }
+                    DurablePayload::Deleted { channel_id, id } => S2C::Deleted { channel_id, id },
+                    DurablePayload::Reaction { channel_id, message_id, emoji, user_id, add } => {
+                        S2C::Reaction { channel_id, message_id, emoji, user_id, add }
+                    }
+                },
+                msg => msg,
+            };
+            return Ok(frame);
+        }
+    }
+
+    /// Send a request and wait for its reply. Keep unsolicited events that
+    /// arrive before the reply available to the caller.
     pub async fn call(&mut self, msg: C2S) -> Result<S2C> {
         let req = self.send(msg).await?;
         loop {
-            let f = self.recv().await?;
+            let f = self.read_frame().await?;
             if f.req == req {
                 if let S2C::Error { code, message } = f.msg {
                     return Err(anyhow!("{code:?}: {message}"));
                 }
                 return Ok(f.msg);
+            }
+            if f.req == 0 {
+                self.events.push_back(f);
             }
         }
     }

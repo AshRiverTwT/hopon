@@ -21,6 +21,34 @@ pub fn ui_subscribe(window: tauri::Window, core: C<'_>, events: Channel<UiEvent>
     core.attach_ui(window.label(), events);
 }
 
+#[tauri::command]
+pub fn ui_set_visibility(core: C<'_>, visible: bool) {
+    core.inner().set_ui_visible(visible);
+}
+
+#[tauri::command]
+pub fn ui_set_context(
+    core: C<'_>,
+    server_id: Option<String>,
+    joined_voice: Option<String>,
+) -> Res<()> {
+    core.inner().set_ui_context(
+        server_id.as_deref().map(pid).transpose()?,
+        joined_voice.as_deref().map(pid).transpose()?,
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn ui_set_visible_members(core: C<'_>, user_ids: Vec<String>) -> Res<()> {
+    let ids = user_ids
+        .iter()
+        .map(|id| pid(id))
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+    core.inner().set_visible_members(ids);
+    Ok(())
+}
+
 /// First frame painted: record cold-start timings. The window is visible from
 /// creation (a hidden webview does not run requestAnimationFrame, which would
 /// stall this signal); `backgroundColor` avoids a white flash.
@@ -30,7 +58,11 @@ pub fn ui_ready(app: tauri::AppHandle, core: C<'_>, t_paint_ms: f64) {
     let s = Startup {
         process_to_paint_ms: crate::perf::process_start_us().map(|p| (t_paint - p) as f64 / 1000.0),
         main_to_paint_ms: (t_paint - core.perf.t_main) as f64 / 1000.0,
-        main_to_connected_ms: match core.perf.t_connected.load(std::sync::atomic::Ordering::Relaxed) {
+        main_to_connected_ms: match core
+            .perf
+            .t_connected
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             0 => None,
             t => Some((t - core.perf.t_main) as f64 / 1000.0),
         },
@@ -54,7 +86,10 @@ pub struct Config {
 
 #[tauri::command]
 pub fn get_config(core: C<'_>) -> Config {
-    Config { url: core.url.lock().clone(), test_open_games: std::env::var("HOPON_TEST_OPEN_GAMES").is_ok() }
+    Config {
+        url: core.url.lock().clone(),
+        test_open_games: std::env::var("HOPON_TEST_OPEN_GAMES").is_ok(),
+    }
 }
 
 #[tauri::command]
@@ -73,12 +108,16 @@ pub fn set_server_url(core: C<'_>, url: String) -> Res<()> {
 
 #[tauri::command]
 pub async fn signup(core: C<'_>, username: String, password: String) -> Res<()> {
-    core.request(C2S::Signup { username, password }).await.map(|_| ())
+    core.request(C2S::Signup { username, password })
+        .await
+        .map(|_| ())
 }
 
 #[tauri::command]
 pub async fn login(core: C<'_>, username: String, password: String) -> Res<()> {
-    core.request(C2S::Login { username, password }).await.map(|_| ())
+    core.request(C2S::Login { username, password })
+        .await
+        .map(|_| ())
 }
 
 #[tauri::command]
@@ -113,10 +152,30 @@ pub async fn load_older(core: C<'_>, channel_id: String, before: String) -> Res<
     Ok(Page { msgs, more })
 }
 
+#[tauri::command]
+pub async fn load_members(core: C<'_>, server_id: String, offset: u32) -> Res<()> {
+    match core
+        .request(C2S::Members {
+            server_id: pid(&server_id)?,
+            offset,
+            limit: 100,
+        })
+        .await?
+    {
+        S2C::Members { .. } => Ok(()),
+        _ => Err("unexpected reply".into()),
+    }
+}
+
+#[tauri::command]
+pub async fn member_search(core: C<'_>, server_id: String, query: String) -> Res<Vec<UiUser>> {
+    core.member_search(pid(&server_id)?, query).await
+}
+
 /// The webview already painted its optimistic copy; this only transmits.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub fn send_message(
+pub async fn send_message(
     core: C<'_>,
     channel_id: String,
     content: String,
@@ -128,21 +187,46 @@ pub fn send_message(
 ) -> Res<()> {
     let nonce: u64 = nonce.parse().map_err(|_| "bad nonce")?;
     let reply_to = reply_to.as_deref().map(pid).transpose()?;
-    core.send_message(pid(&channel_id)?, content, nonce, ms_to_us(t_input_ms), reply_to, files.unwrap_or_default(), gifs.unwrap_or_default())
+    core.send_message(
+        pid(&channel_id)?,
+        content,
+        nonce,
+        ms_to_us(t_input_ms),
+        reply_to,
+        files.unwrap_or_default(),
+        gifs.unwrap_or_default(),
+    )
+    .await
 }
 
 /// Upload a file. The body is the raw bytes (no JSON encoding); the name
 /// (percent-encoded) and pixel size come in headers.
 #[tauri::command]
-pub async fn upload_file(core: C<'_>, request: tauri::ipc::Request<'_>) -> Res<hopon_shared::Attachment> {
+pub async fn upload_file(
+    core: C<'_>,
+    request: tauri::ipc::Request<'_>,
+) -> Res<hopon_shared::Attachment> {
     let tauri::ipc::InvokeBody::Raw(data) = request.body() else {
         return Err("bad upload".into());
     };
-    let h = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_owned();
+    let h = |k: &str| {
+        request
+            .headers()
+            .get(k)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_owned()
+    };
     let name = percent_decode(&h("x-name"));
     let w = h("x-w").parse().unwrap_or(0);
     let hgt = h("x-h").parse().unwrap_or(0);
-    core.upload(if name.is_empty() { "file" } else { &name }, data.clone(), w, hgt).await
+    core.upload(
+        if name.is_empty() { "file" } else { &name },
+        data.clone(),
+        w,
+        hgt,
+    )
+    .await
 }
 
 fn percent_decode(s: &str) -> String {
@@ -178,13 +262,20 @@ pub async fn gif_search(core: C<'_>, query: String) -> Res<GifResults> {
 /// UI scale (Ctrl +/-); 1.0 = 100 %.
 #[tauri::command]
 pub async fn set_zoom(window: tauri::WebviewWindow, scale: f64) -> Res<()> {
-    window.set_zoom(scale.clamp(0.5, 2.0)).map_err(|e| e.to_string())
+    window
+        .set_zoom(scale.clamp(0.5, 2.0))
+        .map_err(|e| e.to_string())
 }
 
 /// Fire-and-forget typing signal (the webview throttles to one per 3 s).
 #[tauri::command]
 pub fn typing(core: C<'_>, channel_id: String) -> Res<()> {
-    core.send_frame(0, C2S::Typing { channel_id: pid(&channel_id)? });
+    core.send_frame(
+        0,
+        C2S::Typing {
+            channel_id: pid(&channel_id)?,
+        },
+    );
     Ok(())
 }
 
@@ -194,8 +285,21 @@ pub async fn save_prefs(core: C<'_>, json: String) -> Res<()> {
 }
 
 #[tauri::command]
-pub async fn react(core: C<'_>, channel_id: String, message_id: String, emoji: String, add: bool) -> Res<()> {
-    core.request(C2S::React { channel_id: pid(&channel_id)?, message_id: pid(&message_id)?, emoji, add }).await.map(|_| ())
+pub async fn react(
+    core: C<'_>,
+    channel_id: String,
+    message_id: String,
+    emoji: String,
+    add: bool,
+) -> Res<()> {
+    core.request(C2S::React {
+        channel_id: pid(&channel_id)?,
+        message_id: pid(&message_id)?,
+        emoji,
+        add,
+    })
+    .await
+    .map(|_| ())
 }
 
 #[tauri::command]
@@ -206,12 +310,23 @@ pub fn mark_read(core: C<'_>, channel_id: String, message_id: String) -> Res<()>
 
 #[tauri::command]
 pub async fn edit_message(core: C<'_>, channel_id: String, id: String, content: String) -> Res<()> {
-    core.request(C2S::Edit { channel_id: pid(&channel_id)?, message_id: pid(&id)?, content }).await.map(|_| ())
+    core.request(C2S::Edit {
+        channel_id: pid(&channel_id)?,
+        message_id: pid(&id)?,
+        content,
+    })
+    .await
+    .map(|_| ())
 }
 
 #[tauri::command]
 pub async fn delete_message(core: C<'_>, channel_id: String, id: String) -> Res<()> {
-    core.request(C2S::Delete { channel_id: pid(&channel_id)?, message_id: pid(&id)? }).await.map(|_| ())
+    core.request(C2S::Delete {
+        channel_id: pid(&channel_id)?,
+        message_id: pid(&id)?,
+    })
+    .await
+    .map(|_| ())
 }
 
 #[tauri::command]
@@ -224,13 +339,28 @@ pub async fn create_server(core: C<'_>, name: String) -> Res<String> {
 
 #[tauri::command]
 pub async fn create_channel(core: C<'_>, server_id: String, name: String, voice: bool) -> Res<()> {
-    let kind = if voice { ChannelKind::Voice } else { ChannelKind::Text };
-    core.request(C2S::CreateChannel { server_id: pid(&server_id)?, name, kind }).await.map(|_| ())
+    let kind = if voice {
+        ChannelKind::Voice
+    } else {
+        ChannelKind::Text
+    };
+    core.request(C2S::CreateChannel {
+        server_id: pid(&server_id)?,
+        name,
+        kind,
+    })
+    .await
+    .map(|_| ())
 }
 
 #[tauri::command]
 pub async fn create_invite(core: C<'_>, server_id: String) -> Res<String> {
-    match core.request(C2S::CreateInvite { server_id: pid(&server_id)? }).await? {
+    match core
+        .request(C2S::CreateInvite {
+            server_id: pid(&server_id)?,
+        })
+        .await?
+    {
         S2C::Invite { code, .. } => Ok(format!("hopon://invite/{code}")),
         _ => Err("unexpected reply".into()),
     }
@@ -248,37 +378,74 @@ pub async fn join_invite(core: C<'_>, code: String) -> Res<String> {
 
 #[tauri::command]
 pub async fn rename_server(core: C<'_>, server_id: String, name: String) -> Res<()> {
-    core.request(C2S::RenameServer { server_id: pid(&server_id)?, name }).await.map(|_| ())
+    core.request(C2S::RenameServer {
+        server_id: pid(&server_id)?,
+        name,
+    })
+    .await
+    .map(|_| ())
 }
 
 #[tauri::command]
 pub async fn delete_server(core: C<'_>, server_id: String) -> Res<()> {
-    core.request(C2S::DeleteServer { server_id: pid(&server_id)? }).await.map(|_| ())
+    core.request(C2S::DeleteServer {
+        server_id: pid(&server_id)?,
+    })
+    .await
+    .map(|_| ())
 }
 
 #[tauri::command]
-pub async fn update_channel(core: C<'_>, channel_id: String, name: Option<String>, topic: Option<String>) -> Res<()> {
-    core.request(C2S::UpdateChannel { channel_id: pid(&channel_id)?, name, topic }).await.map(|_| ())
+pub async fn update_channel(
+    core: C<'_>,
+    channel_id: String,
+    name: Option<String>,
+    topic: Option<String>,
+) -> Res<()> {
+    core.request(C2S::UpdateChannel {
+        channel_id: pid(&channel_id)?,
+        name,
+        topic,
+    })
+    .await
+    .map(|_| ())
 }
 
 #[tauri::command]
 pub async fn delete_channel(core: C<'_>, channel_id: String) -> Res<()> {
-    core.request(C2S::DeleteChannel { channel_id: pid(&channel_id)? }).await.map(|_| ())
+    core.request(C2S::DeleteChannel {
+        channel_id: pid(&channel_id)?,
+    })
+    .await
+    .map(|_| ())
 }
 
 #[tauri::command]
 pub async fn kick_member(core: C<'_>, server_id: String, user_id: String) -> Res<()> {
-    core.request(C2S::Kick { server_id: pid(&server_id)?, user_id: pid(&user_id)? }).await.map(|_| ())
+    core.request(C2S::Kick {
+        server_id: pid(&server_id)?,
+        user_id: pid(&user_id)?,
+    })
+    .await
+    .map(|_| ())
 }
 
 #[tauri::command]
 pub async fn leave_server(core: C<'_>, server_id: String) -> Res<()> {
-    core.request(C2S::LeaveServer { server_id: pid(&server_id)? }).await.map(|_| ())
+    core.request(C2S::LeaveServer {
+        server_id: pid(&server_id)?,
+    })
+    .await
+    .map(|_| ())
 }
 
 #[tauri::command]
 pub async fn revoke_invites(core: C<'_>, server_id: String) -> Res<()> {
-    core.request(C2S::RevokeInvites { server_id: pid(&server_id)? }).await.map(|_| ())
+    core.request(C2S::RevokeInvites {
+        server_id: pid(&server_id)?,
+    })
+    .await
+    .map(|_| ())
 }
 
 // ---------- profile ----------
@@ -334,15 +501,31 @@ pub async fn voice_deafen(core: C<'_>, deafened: bool) -> Res<()> {
 pub async fn voice_ptt(core: C<'_>, enabled: bool, key_code: u32) -> Res<()> {
     let core = core.inner().clone();
     core.voice.set_ptt(&core, enabled, key_code).await;
-    core.cache.kv_set("ptt", Some(format!("{}:{key_code}", enabled as u8).into_bytes()));
+    core.cache.kv_set(
+        "ptt",
+        Some(format!("{}:{key_code}", enabled as u8).into_bytes()),
+    );
     Ok(())
 }
 
 /// Token for the UI's screen-share connection to the voice room you're in.
 #[tauri::command]
 pub async fn screen_grant(core: C<'_>, channel_id: String) -> Res<(String, String)> {
-    match core.request(C2S::ScreenGrant { channel_id: pid(&channel_id)? }).await? {
+    match core
+        .request(C2S::ScreenGrant {
+            channel_id: pid(&channel_id)?,
+        })
+        .await?
+    {
         S2C::VoiceGrant { url, token, .. } => Ok((url, token)),
+        _ => Err("unexpected reply".into()),
+    }
+}
+
+#[tauri::command]
+pub async fn screen_presence(core: C<'_>, active: bool) -> Res<()> {
+    match core.request(C2S::ScreenShare { active }).await? {
+        S2C::Ok => Ok(()),
         _ => Err("unexpected reply".into()),
     }
 }
@@ -363,19 +546,27 @@ pub async fn voice_volume(core: C<'_>, user_id: String, volume: f64) -> Res<()> 
 #[tauri::command]
 pub fn audio_processing(core: C<'_>, aec: bool, ns: bool, agc: bool) {
     core.voice.set_processing(aec, ns, agc);
-    core.cache.kv_set("apm", Some(format!("{}{}{}", aec as u8, ns as u8, agc as u8).into_bytes()));
+    core.cache.kv_set(
+        "apm",
+        Some(format!("{}{}{}", aec as u8, ns as u8, agc as u8).into_bytes()),
+    );
 }
 
 #[tauri::command]
 pub async fn audio_devices(core: C<'_>) -> Res<crate::voice::Devices> {
     let core = core.inner().clone();
-    tokio::task::spawn_blocking(move || core.voice.devices()).await.map_err(|e| e.to_string())?
+    tokio::task::spawn_blocking(move || core.voice.devices())
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub fn audio_set_device(core: C<'_>, input: bool, id: Option<String>) -> Res<()> {
     core.voice.set_device(input, id.clone())?;
-    core.cache.kv_set(if input { "dev_in" } else { "dev_out" }, id.map(String::into_bytes));
+    core.cache.kv_set(
+        if input { "dev_in" } else { "dev_out" },
+        id.map(String::into_bytes),
+    );
     Ok(())
 }
 

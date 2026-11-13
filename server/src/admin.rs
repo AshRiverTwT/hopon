@@ -61,7 +61,9 @@ async fn remove_member(st: &Arc<State>, server_id: Id, user: Id, reason: Removed
     let guild = st.guild(server_id).await.map_err(internal)?;
     guild.members.write().remove(&user);
     if let Some(ch) = st.clear_voice(user, server_id, None, Some(&guild)) {
-        livekit::remove_participant(st.clone(), voice::room_name(ch), user.to_string());
+        let room = voice::room_name(ch);
+        livekit::remove_participant(st.clone(), room.clone(), user.to_string());
+        livekit::remove_participant(st.clone(), room, voice::screen_identity(user));
     }
     let notice = frame(S2C::ServerRemoved { server_id, reason });
     st.to_user(user, || Out::Frame(notice.clone()));

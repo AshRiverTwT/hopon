@@ -3,7 +3,7 @@
 // you to type the name back.
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { call } from "../ipc";
-import { currentServer, isOwner, toast } from "../store";
+import { currentServer, isOwner, loadMoreMembers, serverUsers, toast } from "../store";
 import type { Channel } from "../types";
 import { Avatar } from "./Avatar";
 import { Overlay } from "./Overlay";
@@ -91,7 +91,7 @@ export function ServerSettingsSheet(p: { close: () => void }) {
               <section>
                 <div class="eyebrow">People</div>
                 <ol class="admin-list">
-                  <For each={server().members}>
+                  <For each={serverUsers(server())}>
                     {(m) => (
                       <li class="admin-row person">
                         <Avatar id={m.id} size={32} />
@@ -103,6 +103,9 @@ export function ServerSettingsSheet(p: { close: () => void }) {
                     )}
                   </For>
                 </ol>
+                <Show when={server().memberIds.length < server().memberCount}>
+                  <button class="link" onClick={() => loadMoreMembers(server().id)}>Load more members ({server().memberIds.length}/{server().memberCount})</button>
+                </Show>
               </section>
 
               <section>

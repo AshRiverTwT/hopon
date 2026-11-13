@@ -19,8 +19,12 @@ export const [s, set] = createStore({
   ready: false,
   user: null as User | null,
   servers: [] as Server[],
+  users: {} as Record<string, User>,
+  mentionCandidates: {} as Record<string, User[]>,
+  memberLoaded: {} as Record<string, number>,
   presence: {} as Record<string, Presence & { serverId: string }>,
   speaking: [] as string[],
+  screenShares: {} as Record<string, string>,
   voice: { channelId: null, state: "idle", muted: false, deafened: false, detail: null } as VoiceState,
   selServer: null as string | null,
   selChannel: null as string | null,
@@ -49,10 +53,28 @@ export const [s, set] = createStore({
 
 export const userName = (id: string) => {
   if (id === SYSTEM_USER) return "HopOn";
-  for (const sv of s.servers) for (const m of sv.members) if (m.id === id) return m.name;
-  return "unknown";
+  return s.users[id]?.name ?? "unknown";
 };
 export const currentServer = () => s.servers.find((x) => x.id === s.selServer) ?? null;
+export function serverUsers(server: Server | null | undefined, includeSearch = false): User[] {
+  if (!server) return [];
+  const users = new Map(server.memberIds.map((id) => s.users[id]).filter((u): u is User => !!u).map((u) => [u.id, u]));
+  if (includeSearch) for (const u of s.mentionCandidates[server.id] ?? []) users.set(u.id, u);
+  return [...users.values()];
+}
+export const currentServerUsers = (includeSearch = false) => serverUsers(currentServer(), includeSearch);
+const memberLoads = new Set<string>();
+export function loadMoreMembers(serverId: string) {
+  const server = s.servers.find((x) => x.id === serverId);
+  if (!server || memberLoads.has(serverId)) return;
+  const offset = s.memberLoaded[serverId] ?? 0;
+  if (offset >= server.memberCount) return;
+  memberLoads.add(serverId);
+  call("load_members", { serverId, offset }).catch((e) => toast(String(e))).finally(() => memberLoads.delete(serverId));
+}
+export function rememberMentionCandidates(serverId: string, users: User[]) {
+  set("mentionCandidates", serverId, users);
+}
 export const isOwner = () => !!s.user && currentServer()?.ownerId === s.user.id;
 
 // ---------- typing ----------
@@ -131,7 +153,7 @@ function bumpLastId(channelId: string, msgs: Msg[]) {
     const j = s.servers[i].channels.findIndex((c) => c.id === channelId);
     if (j < 0) continue;
     for (const m of msgs) {
-      if (m.id.startsWith("p")) continue;
+      if (m.id.startsWith("p") || m.state < 2) continue;
       if (cmpId(m.id, s.servers[i].channels[j].lastId) > 0) set("servers", i, "channels", j, "lastId", m.id);
       if (m.authorId === s.user?.id) setRead(channelId, m.id);
     }
@@ -149,7 +171,7 @@ export function maybeMarkRead() {
     const ch = s.selChannel;
     if (!ch || s.stage || !s.atBottom || !document.hasFocus() || document.hidden) return;
     let newest = "";
-    for (let i = s.msgs.length - 1; i >= 0; i--) if (!s.msgs[i].id.startsWith("p")) { newest = s.msgs[i].id; break; }
+    for (let i = s.msgs.length - 1; i >= 0; i--) if (!s.msgs[i].id.startsWith("p") && s.msgs[i].state === 2) { newest = s.msgs[i].id; break; }
     if (!newest || (s.reads[ch] && cmpId(newest, s.reads[ch]) <= 0)) return;
     setRead(ch, newest);
     call("mark_read", { channelId: ch, messageId: newest }).catch(() => {});
@@ -178,7 +200,10 @@ const notifyCtx = {
 export function onEvent(e: UiEvent) {
   // Notifications are decided on arrival: the frame queue below doesn't run
   // while the window is hidden (tray), and that's exactly when they matter.
-  if (e.t === "messages") onMessages(e.channelId, e.msgs, notifyCtx);
+  if (e.t === "incomingMessage") {
+    onMessages(e.channelId, [e.msg], notifyCtx);
+    return;
+  }
   queue.push(e);
   if (!scheduled) {
     scheduled = true;
@@ -209,6 +234,10 @@ function apply(e: UiEvent, painted: string[]) {
       const loggingOut = !e.user && !!s.user;
       set("user", e.user);
       set("servers", reconcile(e.servers, { key: "id" }));
+      const users = Object.fromEntries(e.users.map((u) => [u.id, u]));
+      set("users", reconcile(users));
+      set("mentionCandidates", {});
+      set("memberLoaded", {});
       const pres: Record<string, Presence & { serverId: string }> = {};
       for (const p of e.voice) {
         const sv = e.servers.find((x) => x.channels.some((c) => c.id === p.channelId));
@@ -218,7 +247,7 @@ function apply(e: UiEvent, painted: string[]) {
       absorbServers(e.servers, true);
       if (loggingOut) resetPrefs();
       if (changedUser) {
-        set({ selServer: null, selChannel: null, stage: null, msgs: [] });
+        set({ selServer: null, selChannel: null, stage: null, msgs: [], screenShares: {} });
       }
       if (e.user && !s.selServer && e.servers.length) {
         const last = prefs.lastServer;
@@ -241,11 +270,29 @@ function apply(e: UiEvent, painted: string[]) {
     }
     case "memberJoined": {
       const i = s.servers.findIndex((x) => x.id === e.serverId);
-      if (i >= 0 && !s.servers[i].members.some((m) => m.id === e.user.id))
-        set("servers", i, "members", (m) => [...m, e.user]);
+      set("users", e.user.id, e.user);
+      if (i >= 0 && !s.servers[i].memberIds.includes(e.user.id)) {
+        set("servers", i, "memberIds", (ids) => [...ids, e.user.id]);
+        set("servers", i, "memberCount", (n) => n + 1);
+      }
       set("online", e.user.id, true);
       break;
     }
+    case "memberPage": {
+      const i = s.servers.findIndex((x) => x.id === e.serverId);
+      for (const u of e.users) set("users", u.id, u);
+      if (i >= 0) {
+        set("servers", i, "memberIds", (ids) => [...new Set([...ids, ...e.users.map((u) => u.id)])]);
+        set("memberLoaded", e.serverId, Math.max(s.memberLoaded[e.serverId] ?? 0, e.offset + e.users.length));
+        for (const u of e.users) set("online", u.id, e.online.includes(u.id));
+        set("servers", i, "activities", (a) => ({ ...a, ...e.activities }));
+      }
+      break;
+    }
+    case "memberSearch":
+      for (const u of e.users) set("users", u.id, u);
+      set("mentionCandidates", e.serverId, e.users);
+      break;
     case "reaction": {
       if (e.channelId !== s.selChannel) break;
       const i = findId(s.msgs, e.messageId);
@@ -275,12 +322,20 @@ function apply(e: UiEvent, painted: string[]) {
     case "readUpdated":
       setRead(e.channelId, e.lastRead);
       break;
+    case "channelActivity": {
+      for (let i = 0; i < s.servers.length; i++) {
+        const j = s.servers[i].channels.findIndex((c) => c.id === e.channelId);
+        if (j >= 0 && cmpId(e.lastId, s.servers[i].channels[j].lastId) > 0)
+          set("servers", i, "channels", j, "lastId", e.lastId);
+      }
+      break;
+    }
     case "userPresence":
       set("online", e.userId, e.online);
       break;
     case "activity":
       s.servers.forEach((sv, i) => {
-        if (!sv.members.some((m) => m.id === e.userId)) return;
+        if (!sv.memberIds.includes(e.userId)) return;
         set("servers", i, "activities", produce((a: Record<string, string>) => { if (e.game) a[e.userId] = e.game; else delete a[e.userId]; }));
       });
       break;
@@ -307,10 +362,7 @@ function apply(e: UiEvent, painted: string[]) {
     case "userUpdated": {
       const u = e.user;
       if (s.user?.id === u.id) set("user", "avatarV", u.avatarV);
-      s.servers.forEach((sv, i) => {
-        const j = sv.members.findIndex((m) => m.id === u.id);
-        if (j >= 0) set("servers", i, "members", j, { name: u.name, avatarV: u.avatarV });
-      });
+      set("users", u.id, u);
       break;
     }
     case "messages":
@@ -326,7 +378,13 @@ function apply(e: UiEvent, painted: string[]) {
     case "msgState":
       if (e.channelId === s.selChannel) {
         const i = findId(s.msgs, e.id);
-        if (i >= 0) set("msgs", i, "state", (st) => Math.max(st, e.state));
+        if (i >= 0) {
+          set("msgs", i, "state", (st) => Math.max(st, e.state));
+          if (e.state === 2) {
+            if (s.msgs[i].authorId === s.user?.id) setRead(e.channelId, e.id);
+            else maybeMarkRead();
+          }
+        }
       }
       break;
     case "edited":
@@ -376,6 +434,10 @@ function apply(e: UiEvent, painted: string[]) {
       if (sv) queueMicrotask(() => { if (s.selServer !== sv.id) selectServer(sv.id); if (s.selChannel !== id || s.stage) void selectChannel(id); });
       break;
     }
+    case "screenShare":
+      if (e.active) set("screenShares", e.userId, e.channelId);
+      else if (s.screenShares[e.userId] === e.channelId) set("screenShares", e.userId, undefined!);
+      break;
     case "error":
       toast(e.message);
       break;
@@ -437,7 +499,7 @@ export async function loadOlder() {
 export function sendMessage(content: string, files: Attachment[] = [], gifs: Gif[] = []) {
   const ch = s.selChannel;
   const me = s.user;
-  const members = currentServer()?.members ?? [];
+  const members = currentServerUsers(true);
   const text = encodeMentions(content.trim(), members);
   if (!ch || !me || (!text && !files.length && !gifs.length)) return;
   // Optimistic attachments: GIFs show their preview until the server copy lands.
@@ -488,7 +550,7 @@ export function cycleServer(dir: 1 | -1) {
 export async function editMessage(id: string, content: string) {
   set("editing", null);
   if (!s.selChannel) return;
-  const text = encodeMentions(content, currentServer()?.members ?? []);
+  const text = encodeMentions(content, currentServerUsers(true));
   await call("edit_message", { channelId: s.selChannel, id, content: text }).catch((e) => toast(String(e)));
 }
 

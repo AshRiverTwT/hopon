@@ -1,6 +1,6 @@
 import { createSignal, For, Show } from "solid-js";
 import { call } from "../ipc";
-import { currentServer, isOwner, s, selectServer, toast } from "../store";
+import { currentServer, isOwner, loadMoreMembers, s, selectServer, serverUsers, toast } from "../store";
 import { Confirm } from "./ServerSettings";
 import { Overlay } from "./Overlay";
 import { Avatar } from "./Avatar";
@@ -23,7 +23,7 @@ export function ServersSheet(p: { close: () => void }) {
               <button class="index-row" classList={{ current: s.selServer === sv.id }} onClick={() => { selectServer(sv.id); p.close(); }}>
                 <span class="index-no">{String(i() + 1).padStart(2, "0")}</span>
                 <span class="index-name">{sv.name}</span>
-                <span class="index-meta">{sv.members.length} {sv.members.length === 1 ? "member" : "members"}</span>
+                <span class="index-meta">{sv.memberCount} {sv.memberCount === 1 ? "member" : "members"}</span>
               </button>
             </li>
           )}
@@ -58,7 +58,7 @@ export function MembersSheet(p: { close: () => void }) {
   return (
     <Overlay title="People" close={p.close}>
       <ol class="index">
-        <For each={[...(currentServer()?.members ?? [])].sort((a, b) => Number(!!s.online[b.id]) - Number(!!s.online[a.id]) || a.name.localeCompare(b.name))}>
+        <For each={[...serverUsers(currentServer())].sort((a, b) => Number(!!s.online[b.id]) - Number(!!s.online[a.id]) || a.name.localeCompare(b.name))}>
           {(m, i) => (
             <li class="index-row static">
               <span class="index-no">{String(i() + 1).padStart(2, "0")}</span>
@@ -71,6 +71,9 @@ export function MembersSheet(p: { close: () => void }) {
           )}
         </For>
       </ol>
+      <Show when={currentServer() && currentServer()!.memberIds.length < currentServer()!.memberCount}>
+        <button class="link" onClick={() => currentServer() && loadMoreMembers(currentServer()!.id)}>Load more people ({currentServer()!.memberIds.length}/{currentServer()!.memberCount})</button>
+      </Show>
       <Show when={!isOwner() && currentServer()}>
         {(sv) => (
           <div class="leave-row">

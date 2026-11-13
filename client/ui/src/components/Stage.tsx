@@ -1,6 +1,6 @@
 // Voice room view: who is here, who is speaking, join / leave.
 import { createSignal, For, Show } from "solid-js";
-import { attachLocalPreview, QUALITIES, screen, SELF, setFullscreen, setScreen, startShare, stopShare, viewerCount, watch, type Quality } from "../screen";
+import { attachLocalPreview, QUALITIES, screen, SELF, setFullscreen, setLowResourceMode, setScreen, startShare, stopShare, viewerCount, watch, type Quality } from "../screen";
 import { StreamTiles, Viewers } from "./Streams";
 import { FullIcon, PipIcon } from "./icons";
 import { call } from "../ipc";
@@ -30,6 +30,7 @@ function ShareControls() {
   const [audio, setAudio] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [bigPreview, setBigPreview] = createSignal(false);
+  const lowResource = () => screen.lowResource;
   let preview: HTMLVideoElement | undefined;
   const start = async () => {
     setBusy(true);
@@ -54,6 +55,12 @@ function ShareControls() {
           </div>
           <label class="check" title="Shares your computer's sound too. Voice chat may echo for viewers on speakers.">
             <input type="checkbox" checked={audio()} onChange={(e) => setAudio(e.currentTarget.checked)} /> Include audio <span class="muted small">(whole screen only)</span>
+          </label>
+          <label class="check" title="Use 720p30 and watch one screen stream at a time.">
+            <input type="checkbox" checked={lowResource()} onChange={(e) => {
+              setLowResourceMode(e.currentTarget.checked);
+              if (e.currentTarget.checked) setQuality("720p30");
+            }} /> Low resource
           </label>
         </div>
       }>
@@ -82,7 +89,7 @@ export default function Stage() {
   const join = () => { openAudio(); return call("voice_join", { channelId: s.stage }); };
   const joinNow = () => join().catch((e) => toast(String(e)));
   const leave = () => call("voice_leave").catch((e) => toast(String(e)));
-  const sharing = (u: string) => screen.shares.some((x) => x.userId === u) || (u === s.user?.id && screen.sharing);
+  const sharing = (u: string) => s.screenShares[u] === s.stage || screen.shares.some((x) => x.userId === u) || (u === s.user?.id && screen.sharing);
   return (
     <section class="stage">
       <header class="head">
@@ -100,8 +107,8 @@ export default function Stage() {
                 <Show when={sharing(p.userId)}><span class="live-badge">LIVE</span><Show when={viewerCount(p.userId)}><Viewers userId={p.userId} /></Show></Show>
               </span>
               <span class="index-meta">
-                <Show when={joined() && screen.shares.some((x) => x.userId === p.userId) && !screen.watching.includes(p.userId)}>
-                  <button class="pill" onClick={() => watch(p.userId)}>Watch</button>
+                <Show when={joined() && sharing(p.userId) && p.userId !== s.user?.id && !screen.watching.includes(p.userId)}>
+                  <button class="pill" onClick={() => void watch(p.userId).catch((e) => toast(String(e)))}>Watch</button>
                 </Show>
                 {[p.muted && "Mic off", p.deafened && "Sound off"].filter(Boolean).join(" · ")}
                 <Show when={joined() && p.userId !== s.user?.id}><VolumeSlider userId={p.userId} /></Show>
