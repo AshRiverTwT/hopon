@@ -28,6 +28,14 @@ async fn main() -> Result<()> {
         .connect(&cfg.database_url)
         .await?;
     sqlx::migrate!("./migrations").run(&db).await?;
+    // The released server validates its SQLx ledger through migration 7.
+    // Keep the additive schema for durable delivery outside that ledger so
+    // that binary can still start with the same database after a rollback.
+    let mut schema = db.begin().await?;
+    sqlx::raw_sql(include_str!("../schema/durable.sql"))
+        .execute(&mut *schema)
+        .await?;
+    schema.commit().await?;
     tokio::fs::create_dir_all(&cfg.files_dir).await?;
 
     let (ptx, prx) = mpsc::channel(persist::QUEUE);

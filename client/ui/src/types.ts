@@ -35,6 +35,7 @@ export type UiEvent =
   | { t: "channelActivity"; channelId: string; lastId: string }
   | { t: "reaction"; channelId: string; messageId: string; emoji: string; userId: string; add: boolean }
   | { t: "mentioned"; channelId: string }
+  | { t: "incomingMessage"; channelId: string; msg: Msg }
   | { t: "typing"; channelId: string; userId: string }
   | { t: "prefs"; json: string }
   | { t: "userPresence"; userId: string; online: boolean }

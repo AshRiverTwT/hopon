@@ -90,6 +90,7 @@ pub struct Store {
     user_lookups: HashSet<Id>,
     pub servers: Vec<ServerInfo>,
     pub recent: HashMap<Id, VecDeque<Message>>,
+    provisional: HashSet<(Id, Id)>,
     recent_lru: VecDeque<Id>,
     recent_bytes: usize,
     /// user → (server, presence)
@@ -322,6 +323,7 @@ impl Core {
                     | UiEvent::Session { .. }
                     | UiEvent::Prefs { .. }
                     | UiEvent::Mentioned { .. }
+                    | UiEvent::IncomingMessage { .. }
                     | UiEvent::ChannelActivity { .. }
                     | UiEvent::MsgState { .. }
                     | UiEvent::ReadUpdated { .. }
@@ -339,6 +341,9 @@ impl Core {
         let mut ui = self.ui.lock();
         let mut main_ok = false;
         ui.0.retain(|(label, ch)| {
+            if matches!(&ev, UiEvent::IncomingMessage { .. }) && label != "main" {
+                return true;
+            }
             if overlay_only && label != "overlay" {
                 return true;
             }
@@ -556,6 +561,7 @@ impl Core {
                 Err(_) => tracing::info!("connect {url}: timeout"),
             }
             *self.out.lock() = None;
+            self.clear_provisional();
             self.send_reqs.lock().clear();
             for (_, w) in self.waiters.lock().drain() {
                 drop(w);
@@ -603,7 +609,7 @@ impl Core {
 
         // Reader runs concurrently with the handshake below.
         let me = self.clone();
-        let reader = tokio::spawn(async move {
+        let mut reader = tokio::spawn(async move {
             loop {
                 let next = tokio::time::timeout(Duration::from_secs(25), stream.next()).await;
                 match next {
@@ -655,8 +661,11 @@ impl Core {
         };
 
         tokio::select! {
-            _ = reader => {}
-            _ = self.reconnect.notified() => {}
+            _ = &mut reader => {}
+            _ = self.reconnect.notified() => {
+                reader.abort();
+                let _ = reader.await;
+            }
         }
         keepalive.abort();
         writer.abort();
@@ -784,6 +793,7 @@ impl Core {
                     channel_id,
                     content,
                     nonce,
+                    retry: true,
                     t_input: t_input + off,
                     t_client_send: now_us() + off,
                     reply_to,
@@ -1030,7 +1040,8 @@ impl Core {
             S2C::Replay { events, .. } => {
                 for event in events { self.apply_durable_event(event, t_recv); }
             }
-            S2C::Message(m) => {
+            S2C::Message(m) | S2C::LiveMessage(m) => {
+                let provisional = matches!(msg, S2C::LiveMessage(_));
                 let t_emit = now_us();
                 let (own, t_input_local, missing_profile) = {
                     let mut s = self.store.lock();
@@ -1057,15 +1068,10 @@ impl Core {
                             t_in = Some(p.t_input);
                         }
                     }
-                    s.insert_recent(m.clone());
-                    if let Some(c) = s
-                        .servers
-                        .iter_mut()
-                        .flat_map(|sv| sv.channels.iter_mut())
-                        .find(|c| c.id == m.channel_id)
-                    {
-                        c.last_id = c.last_id.max(m.id);
+                    if provisional {
+                        s.provisional.insert((m.channel_id, m.id));
                     }
+                    s.insert_recent(m.clone());
                     (own, t_in, missing_profile)
                 };
                 if let Some((server_id, user_id)) = missing_profile {
@@ -1091,28 +1097,29 @@ impl Core {
                         own,
                     );
                 }
-                self.cache.put(vec![Message {
-                    trace: None,
-                    ..m.clone()
-                }]);
+                if !provisional {
+                    self.cache.put(vec![Message { trace: None, ..m.clone() }]);
+                }
                 let open = self.store.lock().open_channel == Some(m.channel_id);
-                self.emit(UiEvent::ChannelActivity {
-                    channel_id: sid(m.channel_id),
-                    last_id: sid(m.id),
-                });
+                if !provisional {
+                    self.mark_channel_activity(m.channel_id, m.id);
+                }
                 if open {
                     self.emit(UiEvent::Messages {
                         channel_id: sid(m.channel_id),
-                        msgs: vec![UiMsg::from_msg(m, 1)],
+                        msgs: vec![UiMsg::from_msg(m, if provisional { 1 } else { 2 })],
                     });
                 }
-                if !own {
+                if provisional && !own {
+                    self.emit(UiEvent::IncomingMessage {
+                        channel_id: sid(m.channel_id),
+                        msg: UiMsg::from_msg(m, 1),
+                    });
                     if let Some(me) = self.store.lock().me.as_ref().map(|u| u.id) {
                         if hopon_shared::mentions(&m.content).contains(&me) {
                             self.emit(UiEvent::Mentioned {
                                 channel_id: sid(m.channel_id),
                             });
-                            self.attention();
                         }
                     }
                 }
@@ -1159,7 +1166,10 @@ impl Core {
                 }
             }
             S2C::Deleted { channel_id, id } => {
-                self.store.lock().delete_recent(*channel_id, *id);
+                let mut store = self.store.lock();
+                store.provisional.remove(&(*channel_id, *id));
+                store.delete_recent(*channel_id, *id);
+                drop(store);
                 self.cache.delete(*channel_id, *id);
                 if self.store.lock().open_channel == Some(*channel_id) {
                     self.emit(UiEvent::Deleted {
@@ -1544,6 +1554,23 @@ impl Core {
     }
 
     fn apply_durable_event(self: &Arc<Self>, event: &DurableEvent, t_recv: i64) {
+        if let DurablePayload::Message(message) = &event.payload {
+            let was_live = self.store.lock().provisional.remove(&(message.channel_id, message.id));
+            if was_live {
+                self.cache.put(vec![Message { trace: None, ..message.clone() }]);
+                self.mark_channel_activity(message.channel_id, message.id);
+                if self.store.lock().open_channel == Some(message.channel_id) {
+                    self.emit(UiEvent::MsgState {
+                        channel_id: sid(message.channel_id),
+                        nonce: message.nonce.to_string(),
+                        id: sid(message.id),
+                        state: 2,
+                    });
+                }
+                self.record_event_cursor(message.channel_id, event.cursor);
+                return;
+            }
+        }
         let channel_id = match &event.payload {
             DurablePayload::Message(message) => message.channel_id,
             DurablePayload::Edited { channel_id, .. }
@@ -1565,6 +1592,31 @@ impl Core {
         };
         self.apply(&msg, t_recv);
         self.record_event_cursor(channel_id, event.cursor);
+    }
+
+    fn clear_provisional(self: &Arc<Self>) {
+        let (open, provisional) = {
+            let mut store = self.store.lock();
+            let provisional = std::mem::take(&mut store.provisional);
+            for &(channel, id) in &provisional {
+                store.delete_recent(channel, id);
+            }
+            (store.open_channel, provisional)
+        };
+        for (channel_id, id) in provisional {
+            if open == Some(channel_id) {
+                self.emit(UiEvent::Deleted { channel_id: sid(channel_id), id: sid(id) });
+            }
+        }
+    }
+
+    fn mark_channel_activity(self: &Arc<Self>, channel_id: Id, message_id: Id) {
+        if let Some(channel) = self.store.lock().servers.iter_mut()
+            .flat_map(|server| server.channels.iter_mut()).find(|channel| channel.id == channel_id)
+        {
+            channel.last_id = channel.last_id.max(message_id);
+        }
+        self.emit(UiEvent::ChannelActivity { channel_id: sid(channel_id), last_id: sid(message_id) });
     }
 
     /// Flash the taskbar if the window isn't focused (no plugin needed).
@@ -1686,6 +1738,7 @@ impl Core {
                 channel_id,
                 content,
                 nonce,
+                retry: false,
                 t_input: t_input + off,
                 t_client_send: now_us() + off,
                 reply_to,
@@ -1812,7 +1865,10 @@ impl Core {
             msgs = older;
         }
         self.clone().refresh_latest(ch);
-        msgs.iter().map(|m| UiMsg::from_msg(m, 2)).collect()
+        let store = self.store.lock();
+        msgs.iter()
+            .map(|m| UiMsg::from_msg(m, if store.provisional.contains(&(ch, m.id)) { 1 } else { 2 }))
+            .collect()
     }
 
     /// Avatar as a data URL, cached in SQLite by (user, version).

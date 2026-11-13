@@ -1,6 +1,5 @@
-//! Asynchronous, batched persistence. Messages are fanned out before they are
-//! written; this single ordered queue writes them in batches (one `UNNEST`
-//! insert per transaction) and acks the author once committed.
+//! Asynchronous, batched persistence. User messages are delivered before this
+//! queue commits the message and its replay event and acknowledges the author.
 //!
 //! Ordering: within a batch all inserts run first, then edits/deletes in
 //! arrival order. An edit can only target a message that was enqueued before
@@ -27,7 +26,19 @@ pub struct AckTo {
 pub enum PersistOp {
     /// `attachments` is the JSON array stored with the row. `ack = None` for
     /// server-authored messages (no one to acknowledge).
-    Insert { channel_id: Id, id: Id, author_id: Id, client_nonce: Option<i64>, content: String, reply_to: Option<Id>, attachments: Option<String>, durable_event: Option<hopon_shared::Message>, t_enqueue: i64, ack: Option<AckTo> },
+    Insert {
+        channel_id: Id,
+        id: Id,
+        author_id: Id,
+        client_nonce: Option<i64>,
+        content: String,
+        reply_to: Option<Id>,
+        attachments: Option<String>,
+        durable_event: Option<hopon_shared::Message>,
+        nonce_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+        t_enqueue: i64,
+        ack: Option<AckTo>,
+    },
     /// Add/remove a reaction. `reply` gets whether anything changed
     /// (Err = message missing or reaction limit reached).
     React { channel_id: Id, message_id: Id, user_id: Id, emoji: String, add: bool, reply: oneshot::Sender<Result<bool, &'static str>> },
@@ -61,6 +72,15 @@ pub async fn run(st: Arc<State>, mut rx: mpsc::Receiver<PersistOp>) {
                     tracing::error!(attempt, "persist batch failed: {e:#}");
                     if attempt >= 6 {
                         st.metrics.persist_failures.fetch_add(1, Ordering::Relaxed);
+                        for op in &batch {
+                            if let PersistOp::Insert { durable_event: Some(message), .. } = op {
+                                let ids = message.attachments.iter()
+                                    .filter(|attachment| attachment.url.is_empty())
+                                    .map(|attachment| attachment.id.clone())
+                                    .collect();
+                                crate::files::release(&st, ids).await;
+                            }
+                        }
                         finish(&st, batch.drain(..), None);
                         break;
                     }
@@ -132,8 +152,8 @@ async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<Writ
             let actual_id = if inserted {
                 Some(*id)
             } else if let Some(nonce) = client_nonce {
-                sqlx::query_scalar::<_, Id>("SELECT id FROM messages WHERE author_id = $1 AND client_nonce = $2")
-                    .bind(author_id).bind(nonce).fetch_optional(&mut *tx).await?
+                sqlx::query_scalar::<_, Id>("SELECT id FROM messages WHERE author_id = $1 AND client_nonce = $2 AND channel_id = $3")
+                    .bind(author_id).bind(nonce).bind(channel_id).fetch_optional(&mut *tx).await?
             } else {
                 None
             };
@@ -260,15 +280,19 @@ async fn write_batch(st: &State, batch: &[PersistOp]) -> anyhow::Result<Vec<Writ
     st.metrics.batch_rows.lock().record_us(batch.len() as i64 * 1000);
     Ok(results)
 }
-fn publish_event(st: &State, channel_id: Id, cursor: Id, payload: DurablePayload) {
+fn publish(st: &State, channel_id: Id, msg: S2C) {
     if let Some(chan) = st.chans.get(&channel_id) {
         if let Some(guild) = st.guilds.get(&chan.server_id) {
             guild.publish(Bytes::from(encode(&ServerFrame {
                 req: 0,
-                msg: S2C::ChannelEvent(DurableEvent { cursor, payload }),
+                msg,
             })));
         }
     }
+}
+
+fn publish_event(st: &State, channel_id: Id, cursor: Id, payload: DurablePayload) {
+    publish(st, channel_id, S2C::ChannelEvent(DurableEvent { cursor, payload }));
 }
 
 fn finish(st: &State, ops: impl Iterator<Item = PersistOp>, results: Option<Vec<WriteResult>>) {
@@ -278,9 +302,12 @@ fn finish(st: &State, ops: impl Iterator<Item = PersistOp>, results: Option<Vec<
         let write = results.as_ref().and_then(|r| r.get(i)).copied();
         let ok = write.map(|r| r.outcome);
         match op {
-            PersistOp::Insert { channel_id, id, t_enqueue, ack, durable_event, .. } => {
+            PersistOp::Insert { channel_id, id, t_enqueue, ack, durable_event, nonce_guard, .. } => {
                 hist.record_us(t - t_enqueue);
                 let actual_id = write.and_then(|r| r.message_id).unwrap_or(id);
+                if ack.is_some() && !write.is_some_and(|result| result.inserted || result.message_id == Some(id)) {
+                    publish(st, channel_id, S2C::Deleted { channel_id, id });
+                }
                 let msg = match ok {
                     Some(Ok(true)) => S2C::Ack { channel_id, nonce: 0, id: actual_id, t_server_recv: 0, t_persisted: t },
                     None => S2C::Error { code: ErrorCode::Internal, message: "message could not be saved".into() },
@@ -318,6 +345,7 @@ fn finish(st: &State, ops: impl Iterator<Item = PersistOp>, results: Option<Vec<
                     };
                     let _ = ack.conn.try_send(Out::Frame(Bytes::from(encode(&ServerFrame { req: ack.req, msg }))));
                 }
+                drop(nonce_guard);
             }
             PersistOp::Edit { channel_id, id, content, edited_at, reply, .. } => {
                 if matches!(ok, Some(Ok(true))) {

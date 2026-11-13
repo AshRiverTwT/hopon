@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
 
     // --- setup ---
     let mut author = Client::connect(&url).await?;
-    author.signup("bencha").await?;
+    let author_id = author.signup("bencha").await?.id;
     let (server_id, channel_id) = match author.call(C2S::CreateServer { name: "bench".into() }).await? {
         S2C::ServerJoined(s) => (s.id, s.channels.iter().find(|c| c.kind == ChannelKind::Text).unwrap().id),
         o => bail!("unexpected {o:?}"),
@@ -55,10 +55,14 @@ async fn main() -> Result<()> {
             let mut one_way = Latency::new("author send->receiver decoded");
             let mut got = 0usize;
             while got < total {
-                if let S2C::Message(m) = c.recv().await?.msg {
+                if let S2C::LiveMessage(m) = c.recv().await?.msg {
+                    if m.channel_id != channel_id || m.author_id != author_id {
+                        continue;
+                    }
                     let t = now_us();
-                    if (m.nonce as usize) >= warmup {
-                        one_way.record_us(t - m.trace.unwrap().t_client_send);
+                    if m.nonce as usize > warmup {
+                        let trace = m.trace.ok_or_else(|| anyhow::anyhow!("message trace missing"))?;
+                        one_way.record_us(t - trace.t_client_send);
                     }
                     got += 1;
                 }
@@ -90,10 +94,10 @@ async fn main() -> Result<()> {
             let f: ServerFrame = decode(&b)?;
             let t = now_us();
             match f.msg {
-                S2C::Message(m) => {
+                S2C::LiveMessage(m) if m.channel_id == channel_id && m.author_id == author_id => {
                     echoes += 1;
-                    if (m.nonce as usize) >= warmup {
-                        let tr = m.trace.unwrap();
+                    if m.nonce as usize > warmup {
+                        let tr = m.trace.ok_or_else(|| anyhow::anyhow!("message trace missing"))?;
                         echo.record_us(t - tr.t_client_send);
                         up.record_us(tr.t_server_recv - tr.t_client_send);
                         fanout.record_us(tr.t_server_send - tr.t_server_recv);
@@ -101,8 +105,9 @@ async fn main() -> Result<()> {
                 }
                 S2C::Ack { nonce, .. } => {
                     acks += 1;
-                    if (nonce as usize) >= warmup {
-                        ack.record_us(t - sent_r[nonce as usize].load(Ordering::Relaxed));
+                    if nonce as usize > warmup {
+                        let start = sent_r.get(nonce as usize - 1).ok_or_else(|| anyhow::anyhow!("unexpected ack nonce {nonce}"))?;
+                        ack.record_us(t - start.load(Ordering::Relaxed));
                     }
                 }
                 S2C::Error { message, .. } => bail!("server error: {message}"),
@@ -122,7 +127,7 @@ async fn main() -> Result<()> {
         sent[i].store(t, Ordering::Relaxed);
         let f = ClientFrame {
             req: 1_000 + i as u32,
-            msg: C2S::Send { channel_id, content: format!("bench message {i}"), nonce: i as u64, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] },
+            msg: C2S::Send { channel_id, content: format!("bench message {i}"), nonce: i as u64 + 1, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] },
         };
         sink.send(WsMsg::Binary(encode(&f).into())).await?;
     }

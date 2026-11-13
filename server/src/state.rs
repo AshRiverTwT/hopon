@@ -90,6 +90,9 @@ pub struct State {
     /// (author, nonce) → (message, accepted at µs). Makes client resends after
     /// a reconnect idempotent. Entries live `NONCE_TTL_US`.
     pub nonces: DashMap<(Id, u64), (hopon_shared::Message, i64)>,
+    /// Serializes concurrent retries of the same author nonce until its write
+    /// is committed, preventing two live fan-outs for one message key.
+    pub nonce_locks: DashMap<(Id, u64), Arc<tokio::sync::Mutex<()>>>,
     /// GIF id → (attachment, fetched at), from this server's own searches.
     pub gifs: DashMap<String, (hopon_shared::Attachment, std::time::Instant)>,
     /// What each connected user is playing (cleared when they go offline).
@@ -133,6 +136,7 @@ impl State {
             metrics: Metrics::new(),
             http: reqwest::Client::new(),
             nonces: DashMap::new(),
+            nonce_locks: DashMap::new(),
             gifs: DashMap::new(),
             activities: DashMap::new(),
             next_conn: AtomicU64::new(1),
@@ -143,6 +147,7 @@ impl State {
     pub fn prune_nonces(&self) {
         let cutoff = hopon_shared::time::now_us() - NONCE_TTL_US;
         self.nonces.retain(|_, (_, t)| *t > cutoff);
+        self.nonce_locks.retain(|_, lock| Arc::strong_count(lock) > 1);
     }
 
     pub fn conn_id(&self) -> u64 {

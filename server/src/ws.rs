@@ -507,6 +507,7 @@ impl Session {
                 channel_id,
                 content,
                 nonce,
+                retry,
                 t_input,
                 t_client_send,
                 reply_to,
@@ -532,19 +533,28 @@ impl Session {
                         "message must be 1-4000 characters".into(),
                     ));
                 }
-                let (chan, _guild) = self.member_chan(channel_id, uid).await?;
+                let (chan, guild) = self.member_chan(channel_id, uid).await?;
                 if chan.kind != ChannelKind::Text {
                     return Err((ErrorCode::BadRequest, "not a text channel".into()));
                 }
                 if nonce > i64::MAX as u64 {
                     return Err((ErrorCode::BadRequest, "message nonce is out of range".into()));
                 }
-                // A resend after reconnect or server restart resolves to the
-                // already committed row and never claims its attachments twice.
+                let nonce_guard = if nonce == 0 {
+                    None
+                } else {
+                    let lock = self.st.nonce_locks.entry((uid, nonce)).or_default().clone();
+                    Some(lock.lock_owned().await)
+                };
                 if nonce != 0 {
-                    let prev = self.st.nonces.get(&(uid, nonce)).map(|e| e.0.clone())
-                        .or(message_by_nonce(&self.st, uid, nonce).await);
+                    let mut prev = self.st.nonces.get(&(uid, nonce)).map(|e| e.0.clone());
+                    if retry && prev.is_none() {
+                        prev = message_by_nonce(&self.st, uid, nonce).await.map_err(internal)?;
+                    }
                     if let Some(prev) = prev {
+                        if prev.channel_id != channel_id {
+                            return Err((ErrorCode::Conflict, "message nonce belongs to a different channel".into()));
+                        }
                         self.st.nonces.insert((uid, nonce), (prev.clone(), now_us()));
                         self.send(0, S2C::Message(prev.clone())).await;
                         self.send(req, S2C::Ack {
@@ -557,6 +567,9 @@ impl Session {
                         return Ok(());
                     }
                 }
+                let permit = self.st.persist.try_reserve().map_err(|_| {
+                    (ErrorCode::RateLimited, "message store is busy; retry shortly".into())
+                })?;
                 // Attachments resolve before the hot path (only messages that
                 // have them pay for the lookup).
                 let mut attachments =
@@ -566,9 +579,8 @@ impl Session {
                     .map_err(|e| (ErrorCode::NotFound, e))?;
                 let file_ids: Vec<String> = claimed.iter().map(|a| a.id.clone()).collect();
                 attachments.splice(0..0, claimed);
-                // Assign and serialize under the channel ordering lock. The
-                // persister commits both the row and event before fan-out.
-                let msg = {
+                // Preserve the same order in live delivery and the write queue.
+                {
                     let _order = chan.order.lock();
                     if chan.deleted.load(Ordering::Relaxed) {
                         drop(_order);
@@ -594,32 +606,28 @@ impl Session {
                         reactions: vec![],
                         attachments: attachments.clone(),
                     };
+                    guild.publish(frame(0, S2C::LiveMessage(msg.clone())));
                     self.st.metrics.fanout.lock().record_us(t_send - t_recv);
-                    msg
-                };
-                let id = msg.id;
-                self.st.metrics.messages.fetch_add(1, Ordering::Relaxed);
-                let op = PersistOp::Insert {
-                    channel_id,
-                    id,
-                    author_id: uid,
-                    client_nonce: i64::try_from(nonce).ok().filter(|n| *n != 0),
-                    content,
-                    reply_to,
-                    attachments: attachments_json(&attachments),
-                    durable_event: Some(msg),
-                    t_enqueue: now_us(),
-                    ack: Some(AckTo {
-                        conn: self.tx.clone(),
-                        req,
-                        nonce,
-                        t_server_recv: t_recv,
-                    }),
-                };
-                self.st.persist.send(op).await.map_err(internal)?;
-                // Attachment rows are linked by the same persistence
-                // transaction as the message.  Keeping the link out of a
-                // detached task closes the crash window between the two.
+                    self.st.metrics.messages.fetch_add(1, Ordering::Relaxed);
+                    permit.send(PersistOp::Insert {
+                        channel_id,
+                        id,
+                        author_id: uid,
+                        client_nonce: i64::try_from(nonce).ok().filter(|n| *n != 0),
+                        content,
+                        reply_to,
+                        attachments: attachments_json(&attachments),
+                        durable_event: Some(msg),
+                        nonce_guard,
+                        t_enqueue: now_us(),
+                        ack: Some(AckTo {
+                            conn: self.tx.clone(),
+                            req,
+                            nonce,
+                            t_server_recv: t_recv,
+                        }),
+                    });
+                }
                 Ok(())
             }
             C2S::SetActivity { game } => {
@@ -1366,7 +1374,7 @@ impl Session {
 
 type R = Result<(), (ErrorCode, String)>;
 
-async fn message_by_nonce(st: &State, author_id: Id, nonce: u64) -> Option<Message> {
+async fn message_by_nonce(st: &State, author_id: Id, nonce: u64) -> anyhow::Result<Option<Message>> {
     let row: Option<(Id, Id, Id, String, Option<Id>, Option<Id>, Option<String>)> = sqlx::query_as(
         "SELECT id, channel_id, author_id, content, edited_at, reply_to, attachments \
          FROM messages WHERE author_id = $1 AND client_nonce = $2",
@@ -1374,9 +1382,10 @@ async fn message_by_nonce(st: &State, author_id: Id, nonce: u64) -> Option<Messa
     .bind(author_id)
     .bind(nonce as i64)
     .fetch_optional(&st.db)
-    .await
-    .ok()?;
-    let (id, channel_id, author_id, content, edited_at, reply_to, attachments) = row?;
+    .await?;
+    let Some((id, channel_id, author_id, content, edited_at, reply_to, attachments)) = row else {
+        return Ok(None);
+    };
     let rows: Vec<(String, Vec<Id>)> = sqlx::query_as(
         "SELECT emoji, array_agg(user_id ORDER BY user_id) FROM reactions \
          WHERE channel_id = $1 AND message_id = $2 GROUP BY emoji ORDER BY emoji",
@@ -1384,9 +1393,8 @@ async fn message_by_nonce(st: &State, author_id: Id, nonce: u64) -> Option<Messa
     .bind(channel_id)
     .bind(id)
     .fetch_all(&st.db)
-    .await
-    .ok()?;
-    Some(Message {
+    .await?;
+    Ok(Some(Message {
         id,
         channel_id,
         author_id,
@@ -1397,7 +1405,7 @@ async fn message_by_nonce(st: &State, author_id: Id, nonce: u64) -> Option<Messa
         reply_to,
         reactions: rows.into_iter().map(|(emoji, users)| Reaction { emoji, users }).collect(),
         attachments: attachments.and_then(|value| serde_json::from_str(&value).ok()).unwrap_or_default(),
-    })
+    }))
 }
 
 /// Newest-first page plus its reactions (two queries for the whole page).
@@ -1595,6 +1603,7 @@ pub async fn welcome(st: &Arc<State>, server_id: Id, user: Id) {
             reply_to: None,
             attachments: None,
             durable_event: Some(msg),
+            nonce_guard: None,
             t_enqueue: now_us(),
             ack: None,
         })

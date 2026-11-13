@@ -11,7 +11,7 @@ pub type Id = i64;
 /// Bumped on every wire-incompatible change. Sent as `?v=` on the WebSocket
 /// URL; the server answers HTTP 426 to any other version before any
 /// MessagePack is exchanged, so old and new builds fail loudly, not silently.
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// Append the protocol version to a chat URL (`ws://host:port/ws`).
 pub fn versioned_url(url: &str) -> String {
@@ -252,6 +252,8 @@ pub enum C2S {
         channel_id: Id,
         content: String,
         nonce: u64,
+        /// Outbox resend that may already be saved by a previous process.
+        retry: bool,
         t_input: i64,
         t_client_send: i64,
         reply_to: Option<Id>,
@@ -519,6 +521,9 @@ pub enum S2C {
     PrefsUpdated {
         json: String,
     },
+    /// A user message delivered before its database commit. The durable
+    /// channel event follows on success; a deletion retracts a failed write.
+    LiveMessage(Message),
     /// Someone is typing (show for ~6 s unless refreshed).
     Typing {
         channel_id: Id,

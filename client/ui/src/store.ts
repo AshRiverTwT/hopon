@@ -153,7 +153,7 @@ function bumpLastId(channelId: string, msgs: Msg[]) {
     const j = s.servers[i].channels.findIndex((c) => c.id === channelId);
     if (j < 0) continue;
     for (const m of msgs) {
-      if (m.id.startsWith("p")) continue;
+      if (m.id.startsWith("p") || m.state < 2) continue;
       if (cmpId(m.id, s.servers[i].channels[j].lastId) > 0) set("servers", i, "channels", j, "lastId", m.id);
       if (m.authorId === s.user?.id) setRead(channelId, m.id);
     }
@@ -171,7 +171,7 @@ export function maybeMarkRead() {
     const ch = s.selChannel;
     if (!ch || s.stage || !s.atBottom || !document.hasFocus() || document.hidden) return;
     let newest = "";
-    for (let i = s.msgs.length - 1; i >= 0; i--) if (!s.msgs[i].id.startsWith("p")) { newest = s.msgs[i].id; break; }
+    for (let i = s.msgs.length - 1; i >= 0; i--) if (!s.msgs[i].id.startsWith("p") && s.msgs[i].state === 2) { newest = s.msgs[i].id; break; }
     if (!newest || (s.reads[ch] && cmpId(newest, s.reads[ch]) <= 0)) return;
     setRead(ch, newest);
     call("mark_read", { channelId: ch, messageId: newest }).catch(() => {});
@@ -200,7 +200,10 @@ const notifyCtx = {
 export function onEvent(e: UiEvent) {
   // Notifications are decided on arrival: the frame queue below doesn't run
   // while the window is hidden (tray), and that's exactly when they matter.
-  if (e.t === "messages") onMessages(e.channelId, e.msgs, notifyCtx);
+  if (e.t === "incomingMessage") {
+    onMessages(e.channelId, [e.msg], notifyCtx);
+    return;
+  }
   queue.push(e);
   if (!scheduled) {
     scheduled = true;
@@ -375,7 +378,13 @@ function apply(e: UiEvent, painted: string[]) {
     case "msgState":
       if (e.channelId === s.selChannel) {
         const i = findId(s.msgs, e.id);
-        if (i >= 0) set("msgs", i, "state", (st) => Math.max(st, e.state));
+        if (i >= 0) {
+          set("msgs", i, "state", (st) => Math.max(st, e.state));
+          if (e.state === 2) {
+            if (s.msgs[i].authorId === s.user?.id) setRead(e.channelId, e.id);
+            else maybeMarkRead();
+          }
+        }
       }
       break;
     case "edited":

@@ -241,6 +241,11 @@ pub enum UiEvent {
     Mentioned {
         channel_id: String,
     },
+    /// Live message metadata for notifications in any channel.
+    IncomingMessage {
+        channel_id: String,
+        msg: UiMsg,
+    },
     UserPresence {
         user_id: String,
         online: bool,
