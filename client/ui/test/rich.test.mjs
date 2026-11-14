@@ -82,3 +82,9 @@ test("jumbo emoji: emoji-only messages", () => {
   assert.equal(jumboEmoji("😄".repeat(28)), false, "too many");
   assert.equal(jumboEmoji("😄".repeat(27)), true);
 });
+
+test("polls preview as their question, not raw data", async () => {
+  const { encodePoll } = await import("../src/polls.ts");
+  const text = encodePoll({ question: "Pizza or tacos?", options: ["Pizza", "Tacos"] });
+  assert.equal(preview(text, () => "x"), "Poll: Pizza or tacos?");
+});

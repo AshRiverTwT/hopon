@@ -31,7 +31,11 @@ function render(n: Node): JSX.Element {
   }
 }
 
+import { decodePoll } from "../polls";
+
 export default function Rich(p: { text: string }) {
-  const out = createMemo(() => (SPECIAL.test(p.text) ? parse(p.text).map(render) : p.text));
+  // A poll shown somewhere without the poll card (overlay, quotes): its question.
+  const text = () => { const poll = decodePoll(p.text); return poll ? `Poll: ${poll.question}` : p.text; };
+  const out = createMemo(() => (SPECIAL.test(text()) ? parse(text()).map(render) : text()));
   return <>{out()}</>;
 }

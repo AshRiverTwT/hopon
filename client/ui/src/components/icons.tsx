@@ -27,3 +27,7 @@ export const MicIcon = () => <I d="M6 4a2 2 0 014 0v4a2 2 0 01-4 0zM3.5 7.5a4.5 
 export const ScreenIcon = () => <I d="M2 3h12v8H2zM8 11v2m-3 0h6" />;
 export const BellIcon = () => <I d="M4 11V7a4 4 0 018 0v4l1.2 1.5H2.8zM6.5 14h3" />;
 export const BellOffIcon = () => <I d="M4 11V7a4 4 0 016.7-3M12 7v4l1.2 1.5H5M6.5 14h3M2 2l12 12" />;
+export const ListIcon = () => <I d="M2.5 4h11M2.5 8h11M2.5 12h11" />;
+export const TilesIcon = () => <I d="M2 2.5h5v5H2zM9 2.5h5v5H9zM2 9.5h5v4H2zM9 9.5h5v4H9z" />;
+export const MicOffIcon = () => <I d="M6 4a2 2 0 014 0v4a2 2 0 01-4 0zM3.5 7.5a4.5 4.5 0 009 0M8 12v2m-2 0h4M2.5 2.5l11 11" />;
+export const PollIcon = () => <I d="M3 13.5V8M8 13.5V3M13 13.5V6M1.5 13.5h13" />;

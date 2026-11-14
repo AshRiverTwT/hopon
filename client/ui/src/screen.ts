@@ -18,12 +18,15 @@ import { prefs, setPrefs } from "./prefs";
 import type { MediaSource } from "./types";
 import type { LocalTrack, LocalVideoTrack, RemoteAudioTrack, RemoteTrack, RemoteVideoTrack, Room } from "livekit-client";
 
-export type Quality = "720p30" | "720p60" | "1080p60";
-export const QUALITIES: Record<Quality, { label: string; width: number; height: number; fps: number; bitrate: number }> = {
-  "720p30": { label: "720p · 30 fps · Low resource", width: 1280, height: 720, fps: 30, bitrate: 2_000_000 },
-  "720p60": { label: "720p · 60 fps", width: 1280, height: 720, fps: 60, bitrate: 4_500_000 },
-  "1080p60": { label: "1080p · 60 fps", width: 1920, height: 1080, fps: 60, bitrate: 8_000_000 },
+export type Quality = "720p30" | "720p60" | "1080p60" | "1440p60";
+export const QUALITIES: Record<Quality, { label: string; note: string; width: number; height: number; fps: number; bitrate: number }> = {
+  "720p30": { label: "720p · 30 fps", note: "Lightest on your PC and connection", width: 1280, height: 720, fps: 30, bitrate: 2_000_000 },
+  "720p60": { label: "720p · 60 fps", note: "Smooth, light on bandwidth", width: 1280, height: 720, fps: 60, bitrate: 4_500_000 },
+  "1080p60": { label: "1080p · 60 fps", note: "Sharp and smooth", width: 1920, height: 1080, fps: 60, bitrate: 8_000_000 },
+  "1440p60": { label: "1440p · 60 fps", note: "Sharpest; needs a fast upload", width: 2560, height: 1440, fps: 60, bitrate: 14_000_000 },
 };
+/** Stream sound volume goes past 100 % through a Web Audio gain node. */
+export const MAX_STREAM_VOLUME = 200;
 
 /** Stream audio: stereo Opus at a music bitrate (the default is ~32 kb/s speech). */
 const AUDIO_BITRATE = 192_000;
@@ -46,6 +49,8 @@ export const [screen, setScreen] = createStore({
   shares: [] as Share[],
   /** user ids you're watching */
   watching: [] as string[],
+  /** user ids whose stream is still connecting after Watch */
+  pending: [] as string[],
   /** streams whose video has arrived (user id → true) */
   live: {} as Record<string, boolean>,
   /** sharer's user id → user ids watching them (you included) */
@@ -83,6 +88,10 @@ let target: string | null = null;
 const audios = new Map<string, RemoteAudioTrack>();
 /** The screen participant, rather than the same user's separate voice participant. */
 const watchedParticipants = new Map<string, string>();
+/** Bumped by every Watch and Stop watching: a Watch still connecting gives up
+ * when it's no longer the latest request for that person. */
+const watchEpoch = new Map<string, number>();
+const bumpWatch = (userId: string) => { const n = (watchEpoch.get(userId) ?? 0) + 1; watchEpoch.set(userId, n); return n; };
 type CameraTrack = LocalVideoTrack | RemoteVideoTrack;
 const [cameraTracks, setCameraTracks] = createSignal<Record<string, CameraTrack>>({});
 
@@ -222,7 +231,11 @@ function attach(track: RemoteTrack, identity: string) {
     place(user);
     setScreen("live", user, true);
   } else {
-    track.attach(); // stream audio plays through its own hidden element
+    if (!screen.watching.includes(user)) { detachTrack(track); return; }
+    const old = audios.get(user);
+    if (old === track) return; // already playing (Watch and TrackSubscribed both land here)
+    if (old) detachTrack(old);
+    track.attach(); // stream audio plays through its own hidden element (and a gain node, for > 100 %)
     const a = track as RemoteAudioTrack;
     audios.set(user, a);
     a.setVolume(streamVolume(user) / 100);
@@ -268,7 +281,8 @@ async function connectScreens(channelId: string) {
       const sdk = lk ??= await import("livekit-client");
       const [url, token] = await call<[string, string]>("screen_grant", { channelId });
       if (!current()) return null;
-      const r = connected = new sdk.Room({ adaptiveStream: true, dynacast: true });
+      // webAudioMix: stream sound goes through a gain node, so volume can exceed 100 %.
+      const r = connected = new sdk.Room({ adaptiveStream: true, dynacast: true, webAudioMix: true });
       const E = sdk.RoomEvent;
       const changed = () => {
         if (room !== r) return;
@@ -325,7 +339,8 @@ function resetState(channelId: string | null) {
   if (screen.full) setFullscreen(null);
   setCameraTracks({});
   watchedParticipants.clear();
-  setScreen({ channelId, connected: false, sharing: false, sharingAudio: false, cameraOn: false, viewingCameras: false, shares: [], watching: [], live: {}, viewers: {}, popped: false });
+  watchEpoch.clear();
+  setScreen({ channelId, connected: false, sharing: false, sharingAudio: false, cameraOn: false, viewingCameras: false, shares: [], watching: [], pending: [], live: {}, viewers: {}, popped: false });
 }
 
 export function disconnectScreens(clearContext = false) {
@@ -356,7 +371,7 @@ export function disconnectScreens(clearContext = false) {
 }
 
 /** Pick a screen/window (the system picker) and stream it. */
-export async function startShare(quality: Quality, audio: boolean) {
+export async function startShare(quality: Quality, audio = true) {
   const channelId = voiceChannel;
   if (!channelId) throw new Error("Join voice first");
   if (local.length || shareStarting !== null) return;
@@ -530,21 +545,26 @@ export async function setViewingCameras(enabled: boolean) {
 export async function watch(userId: string) {
   const channelId = voiceChannel;
   if (!channelId) throw new Error("Join voice first");
+  if (screen.watching.includes(userId) || screen.pending.includes(userId)) return;
   const request = generation;
+  const mine = bumpWatch(userId);
+  const live = () => request === generation && watchEpoch.get(userId) === mine;
   watchRequests++;
+  setScreen("pending", (l) => [...l, userId]);
   try {
     const viewer = await connectScreens(channelId);
+    void viewer?.startAudio().catch(() => {});
     const sdk = lk;
-    if (!viewer || !sdk || request !== generation) return;
+    if (!viewer || !sdk || !live()) return;
     const findShare = () => [...viewer.remoteParticipants.values()].find((p) =>
       userOf(p.identity) === userId && p.getTrackPublication(sdk.Track.Source.ScreenShare));
     const deadline = Date.now() + 5000;
     let participant = findShare();
-    while (!participant && Date.now() < deadline && request === generation) {
+    while (!participant && Date.now() < deadline && live()) {
       await new Promise((resolve) => setTimeout(resolve, 100));
       participant = findShare();
     }
-    if (request !== generation) return;
+    if (!live()) return;
     if (!participant) throw new Error("This screen share is no longer available");
     if (screen.lowResource) for (const user of [...screen.watching]) if (user !== userId) unwatch(user);
     watchedParticipants.set(userId, participant.identity);
@@ -560,11 +580,14 @@ export async function watch(userId: string) {
     }
   } finally {
     watchRequests--;
+    setScreen("pending", (l) => l.filter((u) => u !== userId));
     disconnectIfIdle();
   }
 }
 
 export function unwatch(userId: string) {
+  bumpWatch(userId); // cancels a Watch that's still connecting
+  setScreen("pending", (l) => l.filter((u) => u !== userId));
   if (screen.full === userId) setFullscreen(null);
   // Clear the watch first so late TrackSubscribed callbacks cannot restart audio.
   const identity = watchedParticipants.get(userId);
@@ -606,7 +629,7 @@ export function unbindVideo(userId: string, slot: HTMLElement) {
   place(userId);
 }
 
-/** Stream sound, 0–100 %, remembered per person. */
+/** Stream sound, 0–200 %, remembered per person. */
 export function setStreamVolume(userId: string, pct: number) {
   setPrefs({ streamVolumes: { ...prefs.streamVolumes, [userId]: pct } });
   audios.get(userId)?.setVolume(pct / 100);

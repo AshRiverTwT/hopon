@@ -7,6 +7,7 @@ import { applyOverlayKeys, applyScale, prefs, SCALES, setPrefs } from "../prefs"
 import { ACTIONS, comboLabel, comboOf, RESERVED, type Action } from "../hotkeys";
 import { toAvatarBytes } from "./Avatar";
 import { checkUpdate, installUpdate, upd } from "../update";
+import { screen, setLowResourceMode } from "../screen";
 
 interface Devices {
   processing: { aec: boolean; ns: boolean; agc: boolean };
@@ -138,6 +139,7 @@ export default function Settings(p: { close: () => void }) {
     { name: "Display", opts: [
       { label: "Close button · hides to the tray", value: () => (prefs.closeToTray ? "Tray" : "Quit"), step: () => { setPrefs({ closeToTray: !prefs.closeToTray }); call("close_to_tray", { enabled: prefs.closeToTray }).catch(err); } },
       { label: "Mini player · streams follow you out of the voice room", value: () => onOff(prefs.autoPip), step: () => setPrefs({ autoPip: !prefs.autoPip }) },
+      { label: "Low resource streams · watch one at a time", value: () => onOff(screen.lowResource), step: () => setLowResourceMode(!screen.lowResource) },
       { label: "Scale · Ctrl + / Ctrl − / Ctrl 0", value: () => `${Math.round(prefs.scale * 100)}%`, step: (d) => stepScale(d) },
     ] },
     { name: "Hotkeys", opts: ACTIONS.map((a) => ({

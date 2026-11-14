@@ -110,3 +110,5 @@ if (scene === "chat") onEvent({ t: "messages", channelId: "7003", msgs: [{ ...hi
 
 // Test hook (preview only).
 (window as unknown as { __push: typeof onEvent }).__push = onEvent;
+// The app's own module instances (a test's import() can get a stale copy after edits).
+Object.assign(window, { __store: await import("./store"), __scr: await import("./screen") });

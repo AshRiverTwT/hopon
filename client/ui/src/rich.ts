@@ -2,6 +2,7 @@
 // Supports: ```code blocks```, `inline code`, **bold**, *italic* / _italic_,
 // ~~strike~~, http(s) links, and <@id> mentions. Unbalanced markers stay
 // literal text. Kept free of Solid so it can be unit tested with node.
+import { decodePoll } from "./polls.ts";
 
 export type Node =
   | { t: "text"; v: string }
@@ -139,6 +140,8 @@ export function decodeMentions(text: string, nameOf: (id: string) => string): st
 
 /** Plain one-line preview for reply quotes. */
 export function preview(src: string, nameOf: (id: string) => string, max = 120): string {
+  const poll = decodePoll(src);
+  if (poll) src = `Poll: ${poll.question}`;
   const flat = decodeMentions(src, nameOf)
     .replace(/```[\s\S]*?```/g, "[code]")
     .replace(/\*\*|~~|`/g, "")

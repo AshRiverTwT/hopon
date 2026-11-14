@@ -7,7 +7,8 @@ import { GifPicker } from "./GifPicker";
 import { preview } from "../rich";
 import { Avatar } from "./Avatar";
 import { EmojiPicker } from "./EmojiPicker";
-import { encodePoll } from "../polls";
+import { PollSheet } from "./Polls";
+import { PollIcon } from "./icons";
 
 const MAX_FILES = 10;
 interface Pending { key: number; name: string; size: number; thumb: string | null; att: Attachment | null; error: string | null }
@@ -102,6 +103,7 @@ export default function Composer() {
   });
   const uploading = () => files().some((f) => !f.att && !f.error);
   const name = () => currentServer()?.channels.find((c) => c.id === s.selChannel)?.name ?? "";
+  const [pollOpen, setPollOpen] = createSignal(false);
 
   // "@que" right before the caret → member suggestions.
   const query = createMemo(() => {
@@ -236,14 +238,7 @@ export default function Composer() {
       <button class="attach-btn" title="Attach files" aria-label="Attach files" onClick={() => fileInput.click()}>
         <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
       </button>
-      <button class="gif-btn poll-btn" title="Create a poll" aria-label="Create a poll" onClick={() => {
-        const question = window.prompt("What should people vote on?")?.trim();
-        if (!question) return;
-        const raw = window.prompt("Enter 2–5 choices separated by commas") ?? "";
-        const options = raw.split(",").map((option) => option.trim()).filter(Boolean).slice(0, 5);
-        if (options.length < 2) { toast("A poll needs at least two choices"); return; }
-        sendMessage(encodePoll({ question, options }));
-      }}>Poll</button>
+      <button class="emoji-btn poll-btn" classList={{ on: pollOpen() }} title="New poll" aria-label="New poll" onClick={() => setPollOpen(true)}><PollIcon /></button>
       <input ref={fileInput} type="file" multiple hidden onChange={(e) => { addFiles([...(e.currentTarget.files ?? [])]); e.currentTarget.value = ""; }} />
       <textarea
         ref={ta}
@@ -258,6 +253,7 @@ export default function Composer() {
         autofocus
       />
       <button class="gif-btn" classList={{ on: gif() }} title="GIFs" aria-label="GIFs" onClick={() => { setEmoji(false); setGif((v) => !v); }}>GIF</button>
+      <Show when={pollOpen()}><PollSheet channel={name()} close={() => { setPollOpen(false); ta.focus(); }} /></Show>
       <Show when={gif()}>
         <GifPicker pick={(g) => { setGif(false); sendMessage("", [], [g]); ta.focus(); }} close={() => setGif(false)} />
       </Show>

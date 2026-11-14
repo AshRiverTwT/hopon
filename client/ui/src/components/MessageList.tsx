@@ -17,6 +17,7 @@ import { fitBox } from "../media";
 import { SYSTEM_USER } from "../types";
 import { isBookmarked, toggleBookmark } from "../localFeatures";
 import { decodePoll, POLL_EMOJI } from "../polls";
+import { PollCard } from "./Polls";
 
 const OVERSCAN = 800; // px above and below the viewport
 const EST_HEADER = 70;
@@ -226,6 +227,11 @@ function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean;
   // Actions are only built while hovered: most rows never need them.
   const [hover, setHover] = createSignal(false);
   const real = () => !p.m.id.startsWith("p");
+  // A poll's 1️⃣–5️⃣ votes are drawn in the poll itself, not as reaction chips.
+  const chips = () => {
+    const poll = decodePoll(p.m.content);
+    return poll ? p.m.reactions.filter((r) => !POLL_EMOJI.slice(0, poll.options.length).includes(r.emoji)) : p.m.reactions;
+  };
   onMount(() => { node.dataset.id = p.m.id; p.measure(p.m.id, node); p.observe(node); });
   onCleanup(() => p.unobserve(node));
   createEffect(on(
@@ -293,20 +299,14 @@ function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean;
           )}
         </Show>
         }>
-          {(poll) => <div class="poll-card"><strong>{poll().question}</strong><For each={poll().options}>{(option, index) => {
-            const emoji = POLL_EMOJI[index()];
-            const votes = () => p.m.reactions.find((reaction) => reaction.emoji === emoji)?.users ?? [];
-            return <button class="poll-option" classList={{ mine: !!s.user && votes().includes(s.user.id) }} onClick={() => toggleReaction(p.m, emoji)}>
-              <span>{emoji} {option}</span><span>{votes().length}</span>
-            </button>;
-          }}</For><span class="muted small">{p.m.reactions.filter((reaction) => POLL_EMOJI.slice(0, poll().options.length).includes(reaction.emoji)).reduce((total, reaction) => total + reaction.users.length, 0)} votes</span></div>}
+          {(poll) => <PollCard poll={poll()} m={p.m} />}
         </Show>
       }>
         <Editor m={p.m} />
       </Show>
-      <Show when={p.m.reactions.length}>
+      <Show when={chips().length}>
         <div class="reactions">
-          <For each={p.m.reactions}>
+          <For each={chips()}>
             {(r) => (
               <button class="chip" classList={{ mine: !!s.user && r.users.includes(s.user.id) }}
                 title={r.users.map(userName).join(", ")} onClick={() => toggleReaction(p.m, r.emoji)}>
