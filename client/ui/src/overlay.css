@@ -3,6 +3,12 @@
    letters, digits, (c) (R) TM in the text font, and the file only loads when an
    emoji is on screen. Graphics CC-BY 4.0 (fonts/TWEMOJI-FONT-LICENSE.txt). */
 @font-face {
+  font-family: "Geist Mono";
+  src: url("./fonts/geist-mono.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-display: block;
+}
+@font-face {
   font-family: "Twemoji";
   src: url("./fonts/twemoji.woff2") format("woff2");
   font-display: swap;
@@ -18,8 +24,8 @@
   font-display: block;
 }
 @font-face {
-  font-family: "Inter Tight";
-  src: url("./fonts/inter-tight.woff2") format("woff2-variations");
+  font-family: "Geist";
+  src: url("./fonts/geist.woff2") format("woff2-variations");
   font-weight: 100 900;
   font-display: block;
 }
@@ -41,8 +47,8 @@
   --shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.6);
   --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.7), 0 2px 8px rgba(0, 0, 0, 0.5);
   color-scheme: dark;
-  font: 400 15px/1.5 "Twemoji", "Inter Tight", "Segoe UI", system-ui, sans-serif;
-  font-feature-settings: "ss01", "cv11";
+  font: 400 15px/1.5 "Twemoji", "Geist", "Segoe UI", system-ui, sans-serif;
+  font-feature-settings: "ss01", "ss02", "calt";
   -webkit-font-smoothing: antialiased;
 }
 * { box-sizing: border-box; }
@@ -111,3 +117,6 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 
 /* ---------- moon: sharp, monochrome, lit by shadows ---------- */
 *, *::before, *::after { border-radius: 0 !important; }
+
+:root { --mono: "Geist Mono", "Cascadia Mono", Consolas, ui-monospace, monospace; }
+.ov-author, .ov-time, .eyebrow { font-family: var(--mono); }

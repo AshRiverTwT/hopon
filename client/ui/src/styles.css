@@ -5,6 +5,12 @@
    letters, digits, (c) (R) TM in the text font, and the file only loads when an
    emoji is on screen. Graphics CC-BY 4.0 (fonts/TWEMOJI-FONT-LICENSE.txt). */
 @font-face {
+  font-family: "Geist Mono";
+  src: url("./fonts/geist-mono.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-display: block;
+}
+@font-face {
   font-family: "Twemoji";
   src: url("./fonts/twemoji.woff2") format("woff2");
   font-display: swap;
@@ -20,8 +26,8 @@
   font-display: block;
 }
 @font-face {
-  font-family: "Inter Tight";
-  src: url("./fonts/inter-tight.woff2") format("woff2-variations");
+  font-family: "Geist";
+  src: url("./fonts/geist.woff2") format("woff2-variations");
   font-weight: 100 900;
   font-display: block;
 }
@@ -47,8 +53,8 @@
   --rail: clamp(200px, 15vw, 260px);
   --games: clamp(340px, 30vw, 440px);
   color-scheme: dark;
-  font: 400 15px/1.5 "Twemoji", "Inter Tight", "Segoe UI", system-ui, sans-serif;
-  font-feature-settings: "ss01", "cv11";
+  font: 400 15px/1.5 "Twemoji", "Geist", "Segoe UI", system-ui, sans-serif;
+  font-feature-settings: "ss01", "ss02", "calt";
   -webkit-font-smoothing: antialiased;
 }
 
@@ -783,7 +789,7 @@ video.media { background: #000; }
   font-weight: 900; font-size: 15px; text-transform: uppercase; letter-spacing: 0.01em; color: var(--cream-55); text-align: left; }
 .dm-home:hover { color: var(--cream); background: var(--cream-05); }
 .dm-home.on { color: var(--cream); background: var(--cream-10); }
-.count-badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 0; background: var(--hot); color: var(--on-hot); font-family: "Inter Tight", sans-serif; font-stretch: 100%;
+.count-badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 0; background: var(--hot); color: var(--on-hot); font-family: "Geist", sans-serif; font-stretch: 100%;
   font-size: 12px; font-weight: 700; line-height: 20px; text-align: center; }
 .dm-nav-head { margin: 18px 12px 4px; }
 .dm-nav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -1061,7 +1067,7 @@ button.ss-line:hover .ss-name, .ss-item.open .ss-name { color: var(--cream); }
    the frame. The big Archivo titles stay as the voice of the brand.
    ===================================================================== */
 :root {
-  --mono: "Cascadia Mono", "SF Mono", "JetBrains Mono", Consolas, ui-monospace, monospace;
+  --mono: "Geist Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
   --hair: rgba(255, 255, 255, 0.09);
   --key: #161617;
   --key-hi: #1e1e20;
@@ -1210,3 +1216,33 @@ input:focus-visible, textarea:focus-visible { outline: none; }
   .frame { grid-template-rows: auto minmax(0, 1fr) 92px; }
   .viewhead .head > .eyebrow { display: none; }
 }
+
+/* type: Geist for text (a touch tighter), Geist Mono for the HUD */
+body { letter-spacing: -0.006em; }
+.body { letter-spacing: -0.003em; }
+
+/* ---------- server rail: a straight dial through the monogram ---------- */
+.server-rail {
+  position: absolute; left: var(--gutter); top: var(--dial-y, 50%); z-index: 1;
+  font-size: 44px; line-height: 1; color: var(--cream); transform-origin: 0 50%; white-space: nowrap;
+  transition: transform 0.42s cubic-bezier(.2,.8,.2,1), opacity 0.42s ease;
+  display: inline-flex; align-items: flex-start; gap: 6px;
+}
+.server-rail:hover { opacity: 0.9 !important; }
+.server-rail.hidden { pointer-events: none; }
+.rail-unread { width: 10px; height: 10px; background: var(--cream); margin-top: 2px; box-shadow: 0 0 10px rgba(255, 255, 255, 0.6); }
+.monogram { overflow: hidden; display: inline-block; }
+.mono-txt { display: inline-block; animation: mono-in 0.48s cubic-bezier(.2,.8,.2,1) both; }
+.mono-txt.from-below { --from: 70%; }
+.mono-txt.from-above { --from: -70%; }
+@keyframes mono-in { from { transform: translateY(var(--from)); opacity: 0; filter: blur(6px); } to { transform: none; opacity: 1; filter: none; } }
+/* a new server's channels blur into place, nearest first */
+.dial-item { animation: dial-in 0.5s cubic-bezier(.2,.8,.2,1) both; }
+.dial-item[data-k="1"] { animation-delay: 40ms; } .dial-item[data-k="2"] { animation-delay: 80ms; } .dial-item[data-k="3"] { animation-delay: 120ms; }
+.dial-item[data-k="4"] { animation-delay: 160ms; } .dial-item[data-k="5"], .dial-item[data-k="6"] { animation-delay: 200ms; }
+@keyframes dial-in { from { opacity: 0; filter: blur(8px); } }
+.dial-readout span { display: inline-block; }
+@media (prefers-reduced-motion: reduce) { .mono-txt, .dial-item { animation: none; } .server-rail { transition: none; } }
+.server-rails { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.server-rails .server-rail { pointer-events: auto; }
+.server-rails .server-rail.hidden { pointer-events: none; }

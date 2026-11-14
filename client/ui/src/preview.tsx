@@ -97,7 +97,13 @@ const { onEvent } = await import("./store");
 await import("./main");
 
 const user = scene === "login" ? null : me;
-const servers = scene === "empty" || scene === "login" ? [] : [server];
+const mk = (id: string, name: string, unread = false): Server => ({ id, name, ownerId: "1001", memberIds: ["1001"], memberCount: 1, reads: {}, online: ["1001"], activities: {}, statuses: {},
+  channels: [{ id: `${id}1`, serverId: id, name: "general", voice: false, topic: "", lastId: unread ? "30000001" : "0" }, { id: `${id}2`, serverId: id, name: "Voice", voice: true, topic: "", lastId: "0" }] } as unknown as Server);
+// ?servers: a few more servers to try the server rail.
+const extra = new URLSearchParams(location.search).has("servers");
+const servers = scene === "empty" || scene === "login" ? [] : extra
+  ? [mk("8990", "Arcade Club"), mk("8995", "Late Lab", true), server, mk("9010", "Tea Break"), mk("9020", "Bug Bash"), mk("9030", "The Basement")]
+  : [server];
 // Friends: mira (a DM), nell (friend, no DM yet), jun asked you, you asked rosa.
 const dmServer: Server = { id: "9901", name: "", ownerId: "1001", members: [], channels: [{ id: "7901", serverId: "9901", name: "dm", voice: false, topic: "", lastId: "20000003" }],
   reads: { "7901": "20000001" }, online: ["1002"], activities: { "1002": "VALORANT" }, dmWith: "1002", memberIds: ["1001", "1002"], memberCount: 2 } as unknown as Server;
