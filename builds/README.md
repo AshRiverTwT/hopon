@@ -1,4 +1,4 @@
-# HopOn Moon (0.7b, experimental)
+# HopOn Moon (0.7c, experimental)
 
 [Download HopOn-Moon-setup.exe](https://github.com/AshRiverTwT/hopon/raw/moon/builds/HopOn-Moon-setup.exe)
 

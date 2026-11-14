@@ -1053,3 +1053,160 @@ button.ss-line:hover .ss-name, .ss-item.open .ss-name { color: var(--cream); }
 .mention.me { background: var(--cream); color: var(--on-hot); }
 .live-badge { box-shadow: var(--shadow-sm); }
 .md-link { text-decoration-color: var(--cream-35); }
+
+/* =====================================================================
+   moon 0.7c: INSTRUMENT
+   HopOn as a precision device: a rotary encoder for channels, hardware
+   keys, a monospace HUD for every number and label, viewfinder marks on
+   the frame. The big Archivo titles stay as the voice of the brand.
+   ===================================================================== */
+:root {
+  --mono: "Cascadia Mono", "SF Mono", "JetBrains Mono", Consolas, ui-monospace, monospace;
+  --hair: rgba(255, 255, 255, 0.09);
+  --key: #161617;
+  --key-hi: #1e1e20;
+  --dial: 320px;
+}
+
+/* ---------- HUD type: labels and numbers in mono ---------- */
+.eyebrow, .time, .day-sep, .new-sep, .rail-head, .status, .count-badge, .top-count, .vol-n, .handle-chip,
+.live-badge, .score-game, .poll-head, .poll-foot, .typing, .viewers, .pedit-count, .ss-meta, .call-name, .dm-online,
+.pcard-sub, .quality-menu .eyebrow, .mention-badge, .badge, .count, .muted.small {
+  font-family: var(--mono);
+}
+.eyebrow { font-size: 10.5px; letter-spacing: 0.16em; }
+.time { font-size: 10.5px; letter-spacing: 0.06em; color: var(--cream-35); }
+.author { font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: 0.12em; }
+.day-sep, .new-sep { font-size: 10px; letter-spacing: 0.2em; }
+.status { font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cream-35); gap: 16px; }
+.status-voice { color: var(--cream); }
+.rail-head { font-size: 10px; }
+
+/* ---------- keys (every button that used to be a pill) ---------- */
+.pill {
+  font-family: var(--mono); font-size: 11.5px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase;
+  background: var(--key); color: var(--cream-80); border: 1px solid var(--hair);
+}
+.pill:hover:not(:disabled) { background: var(--key-hi); color: var(--cream); border-color: var(--cream-20); }
+.pill.solid { background: var(--cream); color: var(--ink); border-color: var(--cream); font-weight: 700; }
+.pill.solid:hover:not(:disabled) { background: #fff; color: var(--ink); border-color: #fff; }
+.pill.ghost { background: transparent; border-color: transparent; }
+.pill.on { background: var(--cream); color: var(--ink); border-color: var(--cream); }
+.pill.big { font-size: 12.5px; height: 44px; line-height: 42px; padding: 0 24px; }
+.pill.danger { background: var(--cream); color: var(--ink); }
+.update-pill { background: var(--cream); color: var(--ink); border-color: var(--cream); }
+
+/* ---------- Friends | Servers: a two-position switch ---------- */
+.topnav { flex-direction: row; flex-wrap: wrap; align-content: flex-start; gap: 0; padding-top: 24px; }
+.topnav .nav-item {
+  flex: 1 1 0; justify-content: center; gap: 10px; height: 36px; padding: 0 10px;
+  font-family: var(--mono); font-stretch: 100%; font-weight: 600; font-size: 11px; letter-spacing: 0.18em;
+  background: var(--key); color: var(--cream-55); border: 1px solid var(--hair); box-shadow: var(--shadow-sm);
+}
+.topnav .nav-item + .nav-item { margin-left: -1px; }
+.topnav .nav-item:hover { color: var(--cream); background: var(--key-hi); }
+.topnav .nav-item.on { background: var(--cream); color: var(--ink); border-color: var(--cream); box-shadow: var(--shadow); position: relative; z-index: 1; }
+.topnav .nav-item.on .count-badge { background: var(--ink); color: var(--cream); }
+.topnav .nav-item.on .dm-unread { background: var(--ink); }
+.topnav .nav-update { flex-basis: 100%; margin-top: 12px; }
+
+/* ---------- the rotary encoder ---------- */
+.dial::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.085) 1px, transparent 1.4px); background-size: 12px 12px;
+  -webkit-mask-image: radial-gradient(circle at 0 var(--dial-y, 50%), #000 0, #000 28%, transparent 72%);
+  mask-image: radial-gradient(circle at 0 var(--dial-y, 50%), #000 0, #000 28%, transparent 72%);
+}
+.dial-scale { position: absolute; pointer-events: none; overflow: visible; transition: transform 0.28s cubic-bezier(.2,.7,.2,1); }
+.scale-arc { fill: none; stroke: var(--hair); stroke-width: 1; }
+.scale-arc.inner { stroke: var(--cream-20); stroke-dasharray: 1 6; }
+.tick { stroke: var(--cream-20); stroke-width: 1; }
+.tick.major { stroke: var(--cream-55); }
+.tick.on { stroke: #fff; stroke-width: 2; filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.8)); }
+.dial-readout {
+  position: absolute; left: var(--gutter); top: calc(var(--dial-y, 50%) + 30px); display: flex; align-items: baseline;
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; color: var(--cream); pointer-events: none; font-variant-numeric: tabular-nums;
+}
+.dial-readout .of { color: var(--cream-35); }
+.dial-readout .kind { margin-left: 12px; color: var(--cream-35); }
+.dial-item.cursor { background: var(--key); color: #fff; border: 1px solid var(--cream-20); box-shadow: var(--shadow); }
+.dial-item.cursor::after { color: var(--cream-55); }
+.monogram { text-shadow: 0 4px 24px rgba(0, 0, 0, 0.8); }
+
+/* ---------- viewfinder marks on the frame ---------- */
+.frame { position: relative; }
+.frame::after {
+  content: ""; position: absolute; inset: 10px; pointer-events: none; z-index: 0;
+  --m: var(--cream-35);
+  background:
+    linear-gradient(var(--m), var(--m)) left top / 14px 1px no-repeat,
+    linear-gradient(var(--m), var(--m)) left top / 1px 14px no-repeat,
+    linear-gradient(var(--m), var(--m)) right top / 14px 1px no-repeat,
+    linear-gradient(var(--m), var(--m)) right top / 1px 14px no-repeat,
+    linear-gradient(var(--m), var(--m)) left bottom / 14px 1px no-repeat,
+    linear-gradient(var(--m), var(--m)) left bottom / 1px 14px no-repeat,
+    linear-gradient(var(--m), var(--m)) right bottom / 14px 1px no-repeat,
+    linear-gradient(var(--m), var(--m)) right bottom / 1px 14px no-repeat;
+}
+
+/* ---------- toolbar (top right): one strip of joined keys ---------- */
+.side-bar { gap: 0; padding-top: 2px; }
+.side-bar > .icon-btn, .side-bar > .games-btn {
+  height: 34px; min-width: 36px; margin-left: -1px; background: var(--key); border: 1px solid var(--hair); box-shadow: var(--shadow-sm); color: var(--cream-55);
+}
+.side-bar > .people { margin-left: 0; margin-right: auto; padding: 0 10px; }
+.side-bar > .icon-btn:hover, .side-bar > .games-btn:hover { background: var(--key-hi); color: var(--cream); }
+.games-btn { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600; }
+.games-btn.on { background: var(--cream); color: var(--ink); border-color: var(--cream); position: relative; z-index: 1; }
+
+/* ---------- Mic / Sound: toggle keys with an LED ---------- */
+.tog {
+  display: inline-flex; align-items: center; gap: 9px; height: 30px; padding: 0 12px;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  background: var(--key); color: var(--cream-80); border: 1px solid var(--hair); box-shadow: var(--shadow-sm);
+}
+.tog::before { content: ""; width: 6px; height: 6px; background: #fff; box-shadow: 0 0 8px rgba(255, 255, 255, 0.85); }
+.tog:hover { background: var(--key-hi); }
+.tog.off { background: transparent; color: var(--cream-35); box-shadow: none; }
+.tog.off::before { background: transparent; box-shadow: inset 0 0 0 1px var(--cream-35); }
+
+/* ---------- composer: a framed input with depth ---------- */
+.composer textarea { border: 1px solid var(--hair); background: var(--key); padding-top: 14px; padding-bottom: 12px; box-shadow: var(--shadow); }
+.composer textarea:focus { border-color: var(--cream-35); }
+.gif-btn { font-family: var(--mono); border-width: 1px; }
+
+/* ---------- people, rows, surfaces ---------- */
+.rail li:hover, .rail li.rail-click:hover { background: var(--key); box-shadow: inset 0 0 0 1px var(--hair); }
+.msg:hover { background: rgba(255, 255, 255, 0.025); }
+.sheet-bar { border-bottom: 1px solid var(--hair); }
+.icon-btn:hover, .icon-btn.on { background: var(--key-hi); }
+:focus-visible { outline: 1px solid var(--cream); outline-offset: 2px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--cream-10); border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--cream-20); background-clip: padding-box; }
+.login-mark span:last-child { color: var(--cream-35); }
+.side-bar > * { flex: none; }
+.side-bar > .people { padding: 0 9px; gap: 6px; }
+.side-bar > .games-btn { padding: 0 10px; gap: 7px; font-size: 10.5px; letter-spacing: 0.1em; }
+input:focus-visible, textarea:focus-visible { outline: none; }
+.login { position: relative; }
+.login::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1.4px); background-size: 12px 12px;
+  -webkit-mask-image: radial-gradient(ellipse at 22% 50%, #000 0, transparent 60%); mask-image: radial-gradient(ellipse at 22% 50%, #000 0, transparent 60%);
+}
+.login::after {
+  content: ""; position: absolute; inset: 10px; pointer-events: none; --m: var(--cream-35);
+  background:
+    linear-gradient(var(--m), var(--m)) left top / 14px 1px no-repeat, linear-gradient(var(--m), var(--m)) left top / 1px 14px no-repeat,
+    linear-gradient(var(--m), var(--m)) right top / 14px 1px no-repeat, linear-gradient(var(--m), var(--m)) right top / 1px 14px no-repeat,
+    linear-gradient(var(--m), var(--m)) left bottom / 14px 1px no-repeat, linear-gradient(var(--m), var(--m)) left bottom / 1px 14px no-repeat,
+    linear-gradient(var(--m), var(--m)) right bottom / 14px 1px no-repeat, linear-gradient(var(--m), var(--m)) right bottom / 1px 14px no-repeat;
+}
+.login > * { position: relative; }
+.login-form .muted, .login-form .small { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; }
+@media (max-width: 900px) {
+  .frame { grid-template-rows: auto minmax(0, 1fr) 92px; }
+  .viewhead .head > .eyebrow { display: none; }
+}

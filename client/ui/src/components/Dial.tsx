@@ -14,8 +14,37 @@ const VISIBLE = 6;
  *  any initials fit) and the pills narrow with the column: nothing overlaps
  *  or runs off the edge in a small window. */
 function geometry(w: number, monoRight: number) {
-  const x0 = Math.max(monoRight + 12, Math.min(150, w * 0.4));
+  // Room between the monogram and the pills for the encoder's tick scale.
+  const x0 = Math.max(monoRight + 34, Math.min(160, w * 0.42));
   return { centerX: x0 - RADIUS, maxW: Math.max(72, w - x0 - 8) };
+}
+
+/** The encoder's scale: a tick per channel (the selected one long and lit),
+ *  minor ticks between, on an arc just inside the pills. Turns with the dial. */
+function Scale(p: { count: number; pos: number; centerX: number }) {
+  const R = RADIUS - 10;
+  const S = R + 4;
+  const ticks = () => {
+    const out: { a: number; major: boolean; i: number }[] = [];
+    for (let i = 0; i < p.count; i++) {
+      out.push({ a: i * STEP_DEG, major: true, i });
+      if (i < p.count - 1) for (let k = 1; k < 4; k++) out.push({ a: i * STEP_DEG + (k * STEP_DEG) / 4, major: false, i });
+    }
+    return out;
+  };
+  return (
+    <svg class="dial-scale" aria-hidden="true" width={S * 2} height={S * 2} viewBox={`${-S} ${-S} ${S * 2} ${S * 2}`}
+      style={{ left: `${p.centerX - S}px`, top: `calc(var(--dial-y, 50%) - ${S}px)`, transform: `rotate(${-p.pos * STEP_DEG}deg)` }}>
+      <circle r={R} class="scale-arc" />
+      <circle r={R - 26} class="scale-arc inner" />
+      {ticks().map((t) => {
+        const r = (t.a * Math.PI) / 180;
+        const on = t.major && t.i === p.pos;
+        const len = on ? 20 : t.major ? 11 : 5;
+        return <line class={on ? "tick on" : t.major ? "tick major" : "tick"} x1={Math.cos(r) * (R - len)} y1={Math.sin(r) * (R - len)} x2={Math.cos(r) * R} y2={Math.sin(r) * R} />;
+      })}
+    </svg>
+  );
 }
 
 type Item = { kind: "ch"; ch: Channel } | { kind: "new"; voice: boolean };
@@ -94,7 +123,12 @@ export default function Dial(p: { onNewChannel: (voice: boolean) => void; onServ
 
   return (
     <nav ref={nav} class="dial" onWheel={onWheel} onKeyDown={onKey} tabIndex={0} role="listbox" aria-label="Channels">
+      <Scale count={items().length} pos={pos()} centerX={geo().centerX} />
       <button ref={mono} class="monogram display" title="Switch server" onClick={p.onServers}>{monogram()}</button>
+      <div class="dial-readout" aria-hidden="true">
+        <span>{String(pos() + 1).padStart(2, "0")}</span><span class="of">/{String(items().length).padStart(2, "0")}</span>
+        <span class="kind">{(() => { const it = items()[pos()]; return !it ? "" : it.kind === "new" ? "NEW" : it.ch.voice ? "VOX" : "TXT"; })()}</span>
+      </div>
       <For each={items()}>
         {(it, i) => {
           const off = () => i() - pos();
