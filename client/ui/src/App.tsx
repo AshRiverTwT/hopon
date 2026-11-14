@@ -2,7 +2,7 @@ import { Match, Show, Switch, createEffect, createSignal, onCleanup, onMount } f
 import { call } from "./ipc";
 import { closeFriends, currentDm, currentServer, cycleChannel, cycleServer, friendOf, friendsAttention, isOwner, maybeMarkRead, openFriends, s, toast } from "./store";
 import { DmClosed, DmHeader, FriendsHome, FriendsNav, FriendsRail } from "./components/Friends";
-import { BookmarkIcon, SearchIcon, StarIcon } from "./components/icons";
+import { BookmarkIcon, GamesIcon, GearIcon, InviteIcon, PeopleIcon, SearchIcon, SlidersIcon, StarIcon } from "./components/icons";
 import { comboOf, type Action } from "./hotkeys";
 import { applyScale, prefs, SCALES, setPrefs } from "./prefs";
 import { addFilesToComposer } from "./components/Composer";
@@ -13,20 +13,24 @@ import Login from "./components/Login";
 import MessageList from "./components/MessageList";
 import Composer from "./components/Composer";
 import Dial from "./components/Dial";
-import Stage from "./components/Stage";
+import Stage, { StageHeader } from "./components/Stage";
 import Settings from "./components/Settings";
 import PerfOverlay from "./components/PerfOverlay";
 import { AudioToggles, Status } from "./components/Corners";
 import GamesPanel from "./components/GamesPanel";
 import PeopleRail from "./components/PeopleRail";
-import { setScreenContext, disconnectScreens } from "./screen";
+import { screen, setScreenContext, disconnectScreens } from "./screen";
 import UpdatePrompt from "./components/UpdatePrompt";
-import { FullStream, MiniPlayer } from "./components/Streams";
+import { MiniPlayer } from "./components/Streams";
+import CallView from "./components/CallView";
 import { Banners, ChannelBell } from "./components/Banners";
 import { installUpdate, startUpdateChecks, upd } from "./update";
 import { ServerSettingsSheet } from "./components/ServerSettings";
 import { BookmarksSheet, InviteSheet, MembersSheet, NewChannelSheet, SearchSheet, ServersSheet } from "./components/Sheets";
 import { isFavorite, toggleFavorite } from "./localFeatures";
+
+/** Friend requests waiting for you. */
+const incoming = () => s.friends.filter((f) => f.state === "incoming").length;
 
 type Sheet = null | { k: "servers" } | { k: "server" } | { k: "members" } | { k: "settings" } | { k: "invite"; link: string } | { k: "new"; voice: boolean } | { k: "bookmarks" } | { k: "search" };
 
@@ -154,32 +158,60 @@ export default function App() {
       <Show when={s.ready} fallback={<div class="splash" />}>
         <Show when={s.user} fallback={<Login />}>
           <div class="frame" classList={{ "with-games": games() && !!currentServer() && !s.friendsOpen }}>
-            <header class="topbar">
-              <span class="wordmark"><span class="mark" aria-hidden="true">H</span><span class="wordmark-text">HopOn</span></span>
-              <button class="pill ghost" title={s.friendsOpen ? "Your servers" : currentServer()?.name} onClick={() => setSheet({ k: "servers" })}>{(!s.friendsOpen && currentServer()?.name) || "Servers"}</button>
-              <button class="pill ghost friends-pill" classList={{ active: s.friendsOpen }} onClick={() => (s.friendsOpen ? closeFriends() : openFriends())}>
-                Friends<Show when={friendsAttention() && !s.friendsOpen}><i class="pill-dot" aria-label="Something new" /></Show>
+            {/* Top-left: where you are (Friends or your servers). */}
+            <nav class="topnav" aria-label="Friends and servers">
+              <button class="nav-item" classList={{ on: s.friendsOpen }} aria-current={s.friendsOpen ? "page" : undefined} onClick={openFriends}>
+                <span>Friends</span>
+                <Show when={incoming()} fallback={<Show when={friendsAttention() && !s.friendsOpen}><i class="dm-unread" aria-label="New messages" /></Show>}>
+                  <span class="count-badge" title={`${incoming()} friend request${incoming() === 1 ? "" : "s"}`}>{incoming()}</span>
+                </Show>
               </button>
+              <button class="nav-item" classList={{ on: !s.friendsOpen }} aria-current={!s.friendsOpen ? "page" : undefined}
+                title={s.friendsOpen ? "Back to your servers" : "Switch, create or join a server"} onClick={() => (s.friendsOpen ? closeFriends() : setSheet({ k: "servers" }))}>
+                <span>Servers</span>
+              </button>
+            </nav>
+            {/* Top row: the open view's header, with the few buttons on the right. */}
+            <header class="viewhead">
+              <div class="head">
+                <Switch>
+                  <Match when={s.friendsOpen && currentDm()}><DmHeader search={() => setSheet({ k: "search" })} saved={() => setSheet({ k: "bookmarks" })} /></Match>
+                  <Match when={s.friendsOpen}><div class="eyebrow">People you know</div><h1 class="display title">Friends</h1></Match>
+                  <Match when={!currentServer()}>{null}</Match>
+                  <Match when={s.stage}><StageHeader /></Match>
+                  <Match when={s.selChannel}>
+                    <div class="head-row">
+                      <h1 class="display title" title={channel()?.name}>{channel()?.name}</h1>
+                      <button class="icon-btn fav" classList={{ on: isFavorite(s.selChannel!) }} aria-pressed={isFavorite(s.selChannel!)} title={isFavorite(s.selChannel!) ? "Favorite channel (click to remove)" : "Favorite channel"} aria-label="Favorite channel" onClick={() => toggleFavorite(s.selChannel!)}><StarIcon filled={isFavorite(s.selChannel!)} /></button>
+                      <ChannelBell channelId={s.selChannel!} />
+                      <button class="icon-btn" title="Search this channel" aria-label="Search this channel" onClick={() => setSheet({ k: "search" })}><SearchIcon /></button>
+                      <button class="icon-btn" title="Saved messages" aria-label="Saved messages" onClick={() => setSheet({ k: "bookmarks" })}><BookmarkIcon /></button>
+                    </div>
+                    <Show when={channel()?.topic}><p class="topic">{channel()!.topic}</p></Show>
+                  </Match>
+                </Switch>
+              </div>
               <div class="topbar-right">
                 <Show when={currentServer() && !s.friendsOpen}>
-                  <button class="pill ghost" onClick={() => setSheet({ k: "members" })}>People {currentServer()!.memberIds.length}/{currentServer()!.memberCount}</button>
-                  <Show when={isOwner()}><button class="pill ghost" onClick={() => setSheet({ k: "server" })}>Server<span class="long"> settings</span></button></Show>
-                  <button class="pill ghost" onClick={invite}>Invite</button>
-                  <button class="pill ghost" classList={{ active: games() }} onClick={() => setGames((v) => !v)}>Games</button>
+                  <button class="icon-btn top-icon people" title={`People: ${currentServer()!.memberCount} in this server`} aria-label="People" onClick={() => setSheet({ k: "members" })}>
+                    <PeopleIcon /><span class="top-count">{currentServer()!.memberCount}</span>
+                  </button>
+                  <button class="icon-btn top-icon" title="Invite people" aria-label="Invite" onClick={invite}><InviteIcon /></button>
+                  <button class="icon-btn top-icon" classList={{ on: games() }} title="Games" aria-label="Games" aria-pressed={games()} onClick={() => setGames((v) => !v)}><GamesIcon /></button>
+                  <Show when={isOwner()}><button class="icon-btn top-icon" title="Server settings" aria-label="Server settings" onClick={() => setSheet({ k: "server" })}><SlidersIcon /></button></Show>
                 </Show>
                 <Show when={upd.available}>
                   <button class="pill update-pill" disabled={upd.installing} title={`Update to HopOn ${upd.latest} (installs and reopens)`} onClick={() => installUpdate()}>
                     {upd.installing ? "Updating…" : `Update to ${upd.latest}`}
                   </button>
                 </Show>
-                <button class="pill" onClick={() => setSheet({ k: "settings" })}>Settings</button>
+                <button class="icon-btn top-icon" title="Settings" aria-label="Settings" onClick={() => setSheet({ k: "settings" })}><GearIcon /></button>
               </div>
             </header>
             <Show when={!s.friendsOpen} fallback={<>
               <FriendsNav />
               <main class="main">
                 <Show when={currentDm()} fallback={<FriendsHome />}>
-                  <DmHeader search={() => setSheet({ k: "search" })} saved={() => setSheet({ k: "bookmarks" })} />
                   <MessageList />
                   <Show when={friendOf(currentDm()!.dmWith!)?.state === "friends"} fallback={<DmClosed />}><Composer /></Show>
                 </Show>
@@ -198,16 +230,6 @@ export default function App() {
                 <Match when={s.stage}><main class="main"><Stage /></main></Match>
                 <Match when={s.selChannel}>
                   <main class="main">
-                    <header class="head">
-                      <div class="head-row">
-                        <h1 class="display title" title={channel()?.name}>{channel()?.name}</h1>
-                        <button class="icon-btn fav" classList={{ on: isFavorite(s.selChannel!) }} aria-pressed={isFavorite(s.selChannel!)} title={isFavorite(s.selChannel!) ? "Favorite channel (click to remove)" : "Favorite channel"} aria-label="Favorite channel" onClick={() => toggleFavorite(s.selChannel!)}><StarIcon filled={isFavorite(s.selChannel!)} /></button>
-                        <ChannelBell channelId={s.selChannel!} />
-                        <button class="icon-btn" title="Search this channel" aria-label="Search this channel" onClick={() => setSheet({ k: "search" })}><SearchIcon /></button>
-                        <button class="icon-btn" title="Saved messages" aria-label="Saved messages" onClick={() => setSheet({ k: "bookmarks" })}><BookmarkIcon /></button>
-                      </div>
-                      <Show when={channel()?.topic}><p class="topic">{channel()!.topic}</p></Show>
-                    </header>
                     <MessageList />
                     <Composer />
                   </main>
@@ -231,7 +253,7 @@ export default function App() {
           </Switch>
         </Show>
       </Show>
-      <Show when={s.user}><MiniPlayer /><FullStream /><Banners /></Show>
+      <Show when={s.user}><MiniPlayer /><Show when={screen.full}><CallView /></Show><Banners /></Show>
       <Show when={perf()}><PerfOverlay close={() => setPerf(false)} /></Show>
       <UpdatePrompt />
       <Show when={dropping()}><div class="drop-hint"><span class="display">Drop to attach</span></div></Show>

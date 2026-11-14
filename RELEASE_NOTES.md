@@ -2,6 +2,35 @@
 
 **Download the latest:** [HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe)
 
+## HopOn 0.6.1
+
+App only: no server update needed.
+
+### New
+
+- **Call view.** In a voice room, the fullscreen button opens the room
+  fullscreen. Switch between **everyone** (a tile per person: their stream,
+  else their camera, else their picture, with *Watch stream* on anyone
+  sharing) and **focus** (one picture big, everyone else in a strip). Camera,
+  Stream, Mic and Leave along the bottom; stream volume, picture in picture
+  and Exit on the right. Esc leaves.
+- **Real picture in picture** for streams (and your own): the stream floats
+  over your other windows and games. HopOn's own mini player is still there
+  as a fallback.
+
+### Changed
+
+- **Friends** and **Servers** sit at the top left; the channel's name, icons
+  and topic moved up into the top row. The app buttons on the right are now
+  quiet icons (people, invite, games, server settings, settings).
+- The selected channel on the wheel is a full-width bar with the › at its end.
+
+### Fixed
+
+- The stream quality menu was cut off at the top in the voice room.
+- Stream tiles lost their picture-in-picture and fullscreen buttons when the
+  tiles view was on (that view is now the call view).
+
 ## HopOn 0.6.0
 
 **Update the app and the server together** (new protocol: a 0.5 app shows

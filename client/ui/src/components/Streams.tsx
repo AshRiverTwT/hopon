@@ -3,7 +3,7 @@
 // and fullscreen. All three only bind a <video> to a stream that stays
 // subscribed (screen.ts), so switching between them is instant.
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { attachLocalPreview, bindVideo, MAX_STREAM_VOLUME, screen, SELF, setFullscreen, setScreen, setStreamVolume, streamVolume, unbindVideo, unwatch, viewerCount } from "../screen";
+import { attachLocalPreview, bindVideo, MAX_STREAM_VOLUME, pictureInPicture, popOut, screen, SELF, setFullscreen, setScreen, setStreamVolume, streamVolume, unbindVideo, unwatch, viewerCount } from "../screen";
 import { s, showStage, userName } from "../store";
 import { prefs } from "../prefs";
 import { CloseIcon, DockIcon, EyeIcon, ExitFullIcon, FullIcon, PipIcon, SpeakerIcon } from "./icons";
@@ -66,7 +66,7 @@ export function StreamTile(p: { userId: string }) {
         <Viewers userId={p.userId} />
         <span class="stream-actions">
           <StreamVolume userId={p.userId} />
-          <button class="icon-btn" title="Picture in picture" aria-label="Picture in picture" onClick={() => setScreen("popped", true)}><PipIcon /></button>
+          <button class="icon-btn" title="Picture in picture: floats over your other windows and games" aria-label="Picture in picture" onClick={() => void popOut(p.userId)}><PipIcon /></button>
           <button class="icon-btn" title="Fullscreen (double-click the picture)" aria-label="Fullscreen" onClick={() => setFullscreen(p.userId)}><FullIcon /></button>
           <button class="link" onClick={() => unwatch(p.userId)}>Stop watching</button>
         </span>
@@ -145,6 +145,7 @@ export function MiniPlayer() {
           </Show>
           <span class="stream-actions">
             <button class="icon-btn" title="Back to the voice room" aria-label="Back to the voice room" onClick={back}><DockIcon /></button>
+            <button class="icon-btn" title="Pop out: float over your other windows and games" aria-label="Pop out" onClick={() => void pictureInPicture(cur())}><PipIcon /></button>
             <button class="icon-btn" title="Fullscreen" aria-label="Fullscreen" onClick={() => setFullscreen(cur())}><FullIcon /></button>
             <button class="icon-btn" title="Stop watching" aria-label="Stop watching" onClick={() => unwatch(cur())}><CloseIcon /></button>
           </span>
@@ -152,41 +153,6 @@ export function MiniPlayer() {
         <div class="pip-vol"><StreamVolume userId={cur()} /></div>
         <div class="pip-grip" title="Drag to resize" onPointerDown={grip} />
       </div>
-    </Show>
-  );
-}
-
-/** Fullscreen stream: the window goes fullscreen; Esc or the button leaves. */
-export function FullStream() {
-  const [idle, setIdle] = createSignal(false);
-  let t = 0;
-  const poke = () => { setIdle(false); clearTimeout(t); t = window.setTimeout(() => setIdle(true), 2500); };
-  const key = (e: KeyboardEvent) => {
-    if (!screen.full) return;
-    if (e.key === "Escape" || e.key === "f" || e.key === "F") { e.preventDefault(); e.stopPropagation(); setFullscreen(null); }
-  };
-  onMount(() => { window.addEventListener("keydown", key, true); poke(); });
-  onCleanup(() => { window.removeEventListener("keydown", key, true); clearTimeout(t); });
-  createEffect(on(() => screen.full, poke));
-  return (
-    <Show when={screen.full} keyed>
-      {(u) => (
-        <div class="fullstream" classList={{ idle: idle() }} onPointerMove={poke} role="dialog" aria-label={`${nameOf(u)} fullscreen`}>
-          <StreamVideo userId={u} onDblClick={() => setFullscreen(null)} />
-          <div class="full-bar">
-            <span class="live-badge">LIVE</span>
-            <span class="stream-name">{u === SELF ? "Your screen" : userName(u)}</span>
-            <Viewers userId={u === SELF ? s.user?.id ?? "" : u} />
-            <span class="stream-actions">
-              <Show when={u !== SELF}><StreamVolume userId={u} /></Show>
-              <button class="icon-btn" title="Exit fullscreen (Esc)" aria-label="Exit fullscreen" onClick={() => setFullscreen(null)}><ExitFullIcon /></button>
-              <Show when={u !== SELF}>
-                <button class="link" onClick={() => unwatch(u)}>Stop watching</button>
-              </Show>
-            </span>
-          </div>
-        </div>
-      )}
     </Show>
   );
 }

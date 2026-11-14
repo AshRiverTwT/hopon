@@ -1,11 +1,11 @@
-// Voice room view: who is here, who is speaking, join / leave.
-// Two ways to look at the room: the list (default; names, volume, Watch) and
-// tiles (everyone as a picture: their screen, else their camera, else their
-// avatar). Controls stay minimal: Leave, Camera, Stream.
-import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
-import { attachLocalPreview, cameraTrack, disconnectScreens, QUALITIES, screen, SELF, setCameraEnabled, setFullscreen, setScreen, setViewingCameras, startShare, stopShare, unwatch, viewerCount, watch, type Quality } from "../screen";
-import { StreamTiles, StreamVideo, Viewers } from "./Streams";
-import { CameraIcon, FullIcon, ListIcon, MicOffIcon, PipIcon, ScreenIcon, TilesIcon } from "./icons";
+// Voice room view: who is here, who is speaking, join / leave. Controls stay
+// minimal (Leave, Camera, Stream); the fullscreen call view (CallView.tsx)
+// shows everyone as tiles or one picture big.
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
+import { Portal } from "solid-js/web";
+import { attachLocalPreview, disconnectScreens, GRID, popOut, QUALITIES, screen, SELF, setCameraEnabled, setFullscreen, setScreen, startShare, stopShare, viewerCount, watch, type Quality } from "../screen";
+import { StreamTiles, Viewers } from "./Streams";
+import { CameraIcon, FullIcon, GrowIcon, PipIcon, ScreenIcon, ShrinkIcon } from "./icons";
 import { call } from "../ipc";
 import { currentServer, s, toast, userName } from "../store";
 import { Avatar } from "./Avatar";
@@ -28,15 +28,30 @@ function VolumeSlider(p: { userId: string }) {
   );
 }
 
-const err = (e: unknown) => { const m = String(e); if (!/NotAllowed|Permission|denied|AbortError/i.test(m)) toast(m); };
+export const mediaErr = (e: unknown) => { const m = String(e); if (!/NotAllowed|Permission|denied|AbortError/i.test(m)) toast(m); };
 
 /** Stream button: pick a quality, then it becomes Stop streaming. */
-function StreamButton(p: { disabled: boolean }) {
-  const [menu, setMenu] = createSignal(false);
+export function StreamButton(p: { disabled: boolean; round?: boolean }) {
+  const [menu, setMenuOpen] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
+  // The menu lives at the window level (a scrolling or contained column would
+  // clip it), anchored to the button: above it if there's room, else below.
+  const [at, setAt] = createSignal<Record<string, string>>({});
+  const MENU_H = 330, MENU_W = 270;
+  const setMenu = (v: boolean | ((x: boolean) => boolean)) => {
+    const open = typeof v === "function" ? v(menu()) : v;
+    if (open) {
+      const r = box.getBoundingClientRect();
+      const left = `${Math.max(8, Math.min(window.innerWidth - MENU_W - 8, r.right - MENU_W))}px`;
+      const below = window.innerHeight - r.bottom >= MENU_H + 16;
+      setAt(below || r.top < MENU_H + 16 ? { left, top: `${r.bottom + 8}px` } : { left, bottom: `${window.innerHeight - r.top + 8}px` });
+    }
+    setMenuOpen(open);
+  };
   let box!: HTMLDivElement;
-  const close = (e: PointerEvent) => { if (!box.contains(e.target as Node)) setMenu(false); };
-  const key = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(false); };
+  let menuEl: HTMLDivElement | undefined;
+  const close = (e: PointerEvent) => { if (!box.contains(e.target as Node) && !menuEl?.contains(e.target as Node)) setMenu(false); };
+  const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setMenu(false); } };
   createEffect(() => {
     if (!menu()) return;
     document.addEventListener("pointerdown", close, true);
@@ -47,20 +62,27 @@ function StreamButton(p: { disabled: boolean }) {
     setMenu(false);
     setBusy(true);
     try { await startShare(q); }
-    catch (e) { err(e); }
+    catch (e) { mediaErr(e); }
     finally { setBusy(false); }
   };
   return (
     <div class="stream-btn" ref={box}>
       <Show when={screen.sharing} fallback={
-        <button class="pill" aria-haspopup="menu" aria-expanded={menu()} disabled={p.disabled || busy()} onClick={() => setMenu((v) => !v)}>
-          <ScreenIcon /> {busy() ? "Starting…" : "Stream"}
-        </button>
+        <Show when={p.round} fallback={
+          <button class="pill" aria-haspopup="menu" aria-expanded={menu()} disabled={p.disabled || busy()} onClick={() => setMenu((v) => !v)}>
+            <ScreenIcon /> {busy() ? "Starting…" : "Stream"}
+          </button>
+        }>
+          <button class="call-btn" title="Stream your screen" aria-label="Stream" aria-haspopup="menu" aria-expanded={menu()} disabled={p.disabled || busy()} onClick={() => setMenu((v) => !v)}><ScreenIcon /></button>
+        </Show>
       }>
-        <button class="pill on" onClick={() => void stopShare()}><span class="live-dot" /> Stop streaming</button>
+        <Show when={p.round} fallback={<button class="pill on" onClick={() => void stopShare()}><span class="live-dot" /> Stop streaming</button>}>
+          <button class="call-btn on" title="Stop streaming" aria-label="Stop streaming" onClick={() => void stopShare()}><ScreenIcon /></button>
+        </Show>
       </Show>
       <Show when={menu()}>
-        <div class="quality-menu" role="menu" aria-label="Stream quality">
+        <Portal>
+        <div class="quality-menu" ref={menuEl} role="menu" aria-label="Stream quality" style={at()}>
           <div class="eyebrow">Stream quality</div>
           <For each={Object.keys(QUALITIES) as Quality[]}>
             {(q) => (
@@ -72,6 +94,7 @@ function StreamButton(p: { disabled: boolean }) {
           </For>
           <p class="quality-foot">Sound is shared too when you pick a whole screen.</p>
         </div>
+        </Portal>
       </Show>
     </div>
   );
@@ -90,7 +113,8 @@ function SharePreview() {
       <div class="share-preview" classList={{ big: big() }}>
         <video ref={(el) => attachLocalPreview(el)} autoplay playsinline muted onDblClick={() => setFullscreen(SELF)} />
         <div class="preview-actions">
-          <button class="icon-btn" title={big() ? "Smaller preview" : "Bigger preview"} aria-label="Preview size" onClick={() => setBig((v) => !v)}><PipIcon /></button>
+          <button class="icon-btn" title={big() ? "Smaller preview" : "Bigger preview"} aria-label="Preview size" onClick={() => setBig((v) => !v)}><Show when={big()} fallback={<GrowIcon />}><ShrinkIcon /></Show></button>
+          <button class="icon-btn" title="Picture in picture: your stream floats over other windows" aria-label="Picture in picture" onClick={() => void popOut(SELF)}><PipIcon /></button>
           <button class="icon-btn" title="View your screen fullscreen" aria-label="Fullscreen" onClick={() => setFullscreen(SELF)}><FullIcon /></button>
         </div>
       </div>
@@ -98,20 +122,24 @@ function SharePreview() {
   );
 }
 
-function CameraVideo(p: { userId: string; own: boolean }) {
-  let video!: HTMLVideoElement;
-  createEffect(() => {
-    const track = cameraTrack(p.userId);
-    if (!track) return;
-    track.attach(video);
-    void video.play().catch(() => {});
-    onCleanup(() => { track.detach(video); video.srcObject = null; });
-  });
-  return <video ref={video} classList={{ mirrored: p.own }} autoplay playsinline muted aria-label={`Camera for ${userName(p.userId)}`} />;
+/** Voice room header (drawn in the top row): name, plus the fullscreen call view. */
+export function StageHeader() {
+  const ch = () => currentServer()?.channels.find((c) => c.id === s.stage);
+  const connected = () => s.conn.state === "online" && s.voice.channelId === s.stage && s.voice.state === "connected";
+  return (
+    <>
+      <div class="eyebrow">Voice room</div>
+      <div class="head-row">
+        <h1 class="display title" title={ch()?.name}>{ch()?.name}</h1>
+        <Show when={connected()}>
+          <button class="icon-btn" title="Fullscreen call view: everyone as tiles, or one picture big" aria-label="Open call view" onClick={() => setFullscreen(GRID)}><FullIcon /></button>
+        </Show>
+      </div>
+    </>
+  );
 }
 
 export default function Stage() {
-  const ch = () => currentServer()?.channels.find((c) => c.id === s.stage);
   const here = createMemo(() => {
     const members = Object.values(s.presence).filter((p) => p.channelId === s.stage).map((p) => p.userId);
     if (s.user && s.voice.channelId === s.stage && !members.includes(s.user.id)) members.unshift(s.user.id);
@@ -122,7 +150,6 @@ export default function Stage() {
   const connected = () => online() && joined() && s.voice.state === "connected";
   const [joining, setJoining] = createSignal(false);
   const [cameraBusy, setCameraBusy] = createSignal(false);
-  const tiles = () => prefs.voiceTiles;
   const join = async () => {
     if (!s.stage || joining()) return;
     openAudio();
@@ -130,46 +157,20 @@ export default function Stage() {
     try {
       if (s.voice.channelId && s.voice.channelId !== s.stage) void disconnectScreens(true);
       await call("voice_join", { channelId: s.stage });
-    } catch (e) { err(e); }
+    } catch (e) { mediaErr(e); }
     finally { setJoining(false); }
   };
-  const leave = () => { void disconnectScreens(true); void call("voice_leave").catch(err); };
+  const leave = () => { void disconnectScreens(true); void call("voice_leave").catch(mediaErr); };
   const toggleCamera = async () => {
     setCameraBusy(true);
     try { await setCameraEnabled(!screen.cameraOn); }
-    catch (e) { err(e); }
+    catch (e) { mediaErr(e); }
     finally { setCameraBusy(false); }
   };
   const localMedia = () => screen.channelId === s.stage;
   const sharing = (u: string) => s.media.screen[u] === s.stage || (localMedia() &&
     (screen.shares.some((x) => x.userId === u) || (u === s.user?.id && screen.sharing)));
   const camera = (u: string) => s.media.camera[u] === s.stage || (u === s.user?.id && screen.cameraOn);
-
-  // Tiles view shows everyone's pictures: subscribe to cameras and watch every
-  // screen while it's open, and give back only what the view itself started.
-  const autoWatched = new Set<string>();
-  createEffect(on(() => [tiles(), connected()] as const, ([t, c]) => {
-    if (!c) return;
-    if (t) void setViewingCameras(true).catch(() => {});
-    else {
-      void setViewingCameras(false).catch(() => {});
-      for (const u of autoWatched) unwatch(u);
-      autoWatched.clear();
-    }
-  }));
-  createEffect(() => {
-    if (!tiles() || !connected()) return;
-    for (const u of here()) {
-      if (u === s.user?.id || !sharing(u) || screen.watching.includes(u) || screen.pending.includes(u) || autoWatched.has(u)) continue;
-      autoWatched.add(u);
-      void watch(u).catch(() => autoWatched.delete(u));
-    }
-  });
-  onCleanup(() => {
-    for (const u of autoWatched) unwatch(u);
-    if (screen.viewingCameras) void setViewingCameras(false).catch(() => {});
-  });
-
   const status = (u: string) => {
     const p = u === s.user?.id ? s.voice : s.presence[u];
     return [p?.muted && "Mic off", p?.deafened && "Sound off"].filter(Boolean).join(" · ");
@@ -177,80 +178,37 @@ export default function Stage() {
 
   return (
     <section class="stage">
-      <header class="head stage-head">
-        <div>
-          <div class="eyebrow">Voice room</div>
-          <h1 class="display title" title={ch()?.name}>{ch()?.name}</h1>
-        </div>
-        <div class="view-toggle" role="radiogroup" aria-label="Room view">
-          <button role="radio" aria-checked={!tiles()} classList={{ on: !tiles() }} title="List" aria-label="List" onClick={() => setPrefs({ voiceTiles: false })}><ListIcon /></button>
-          <button role="radio" aria-checked={tiles()} classList={{ on: tiles() }} title="Tiles: everyone's screen, camera or picture" aria-label="Tiles" onClick={() => setPrefs({ voiceTiles: true })}><TilesIcon /></button>
-        </div>
-      </header>
-
-      <Show when={!tiles()} fallback={
-        <ul class="room-tiles">
-          <For each={here()} fallback={<li class="muted lede">Nobody is here yet.</li>}>
-            {(id) => {
-              const own = () => id === s.user?.id;
-              const speaking = () => s.speaking.includes(id);
-              const showScreen = () => joined() && (own() ? screen.sharing : screen.watching.includes(id));
-              const showCam = () => joined() && localMedia() && camera(id) && !!cameraTrack(id);
-              return (
-                <li class="room-tile" classList={{ speaking: speaking() }}>
-                  <Show when={showScreen()} fallback={
-                    <Show when={showCam()} fallback={<div class="room-tile-av"><Avatar id={id} size={72} class={speaking() ? "speaking" : ""} /></div>}>
-                      <CameraVideo userId={id} own={own()} />
-                    </Show>
-                  }>
-                    <StreamVideo userId={own() ? SELF : id} onDblClick={() => setFullscreen(own() ? SELF : id)} />
-                    <Show when={showCam()}><div class="room-tile-inset"><CameraVideo userId={id} own={own()} /></div></Show>
-                  </Show>
-                  <div class="room-tile-name">
-                    <Show when={status(id)}><span class="room-tile-mic" title={status(id)}><MicOffIcon /></span></Show>
-                    <span>{userName(id)}</span>
-                    <Show when={sharing(id)}><span class="live-badge">LIVE</span></Show>
-                  </div>
-                </li>
-              );
-            }}
-          </For>
-        </ul>
-      }>
-        <ol class="index people">
-          <For each={here()} fallback={<li class="muted lede">Nobody is here yet.</li>}>
-            {(id) => (
-              <li class="index-row static" classList={{ speaking: s.speaking.includes(id) }}>
-                <span class="index-name">
-                  <Avatar id={id} size={40} class={s.speaking.includes(id) ? "speaking" : ""} />
-                  {userName(id)}
-                  <Show when={s.speaking.includes(id)}><span class="live-dot" /></Show>
-                  <Show when={camera(id)}><span class="cam-mark" title="Camera on"><CameraIcon /></span></Show>
-                  <Show when={sharing(id)}><span class="live-badge">LIVE</span><Show when={localMedia() && viewerCount(id)}><Viewers userId={id} /></Show></Show>
-                </span>
-                <span class="index-meta">
-                  <Show when={connected() && id !== s.user?.id && sharing(id) && !screen.watching.includes(id)}>
-                    <button class="pill" disabled={screen.pending.includes(id)} onClick={() => void watch(id).catch(err)}>
-                      {screen.pending.includes(id) ? "Connecting…" : "Watch"}
-                    </button>
-                  </Show>
-                  {status(id)}
-                  <Show when={joined() && id !== s.user?.id}><VolumeSlider userId={id} /></Show>
-                </span>
-              </li>
-            )}
-          </For>
-        </ol>
-      </Show>
+      <ol class="index people">
+        <For each={here()} fallback={<li class="muted lede">Nobody is here yet.</li>}>
+          {(id) => (
+            <li class="index-row static" classList={{ speaking: s.speaking.includes(id) }}>
+              <span class="index-name">
+                <Avatar id={id} size={40} class={s.speaking.includes(id) ? "speaking" : ""} />
+                {userName(id)}
+                <Show when={s.speaking.includes(id)}><span class="live-dot" /></Show>
+                <Show when={camera(id)}><span class="cam-mark" title="Camera on"><CameraIcon /></span></Show>
+                <Show when={sharing(id)}><span class="live-badge">LIVE</span><Show when={localMedia() && viewerCount(id)}><Viewers userId={id} /></Show></Show>
+              </span>
+              <span class="index-meta">
+                <Show when={connected() && id !== s.user?.id && sharing(id) && !screen.watching.includes(id)}>
+                  <button class="pill" disabled={screen.pending.includes(id)} onClick={() => void watch(id).catch(mediaErr)}>
+                    {screen.pending.includes(id) ? "Connecting…" : "Watch"}
+                  </button>
+                </Show>
+                {status(id)}
+                <Show when={joined() && id !== s.user?.id}><VolumeSlider userId={id} /></Show>
+              </span>
+            </li>
+          )}
+        </For>
+      </ol>
 
       <Show when={joined()}>
-        <Show when={!tiles()}>
-          <StreamTiles />
-          <Show when={screen.popped && screen.watching.length}>
-            <p class="muted small">Playing in the mini player. <button class="link inline" onClick={() => setScreen("popped", false)}>Put it back here</button></p>
-          </Show>
+        <StreamTiles />
+        <Show when={screen.popped && screen.watching.length}>
+          <p class="muted small">Playing in the mini player. <button class="link inline" onClick={() => setScreen("popped", false)}>Put it back here</button></p>
         </Show>
-        <Show when={screen.sharing && !tiles()}><SharePreview /></Show>
+        <Show when={screen.sharing}><SharePreview /></Show>
       </Show>
 
       <div class="stage-actions">

@@ -335,3 +335,20 @@ test("camera and screen video publish, render, and stop through local LiveKit", 
     tracks: window.syntheticMedia.map(({ stream }) => stream.getVideoTracks()[0].readyState),
   })), { connected: false, camera: false, tracks: ["ended", "ended"] });
 });
+
+test("call view: opens fullscreen from the voice room, switches everyone/focus, Esc leaves", async (t) => {
+  const p = await fixture(t, "voice");
+  await p.getByRole("option", { name: /^Lounge/ }).click();
+  await p.getByRole("button", { name: "Open call view" }).click();
+  await p.locator(".call").waitFor();
+  assert.equal(await p.locator(".call-grid .call-tile").count(), 3, "everyone as a tile");
+  assert.equal(await p.locator(".call-watch").count(), 1, "Watch stream on the person sharing");
+  await p.getByRole("radio", { name: "Focus" }).click();
+  await p.locator(".call-main .call-tile").waitFor();
+  assert.equal(await p.locator(".call-strip .call-tile").count(), 2, "the others in the strip");
+  await p.getByRole("radio", { name: "Everyone" }).click();
+  await p.locator(".call-grid").waitFor();
+  await p.keyboard.press("Escape");
+  await p.waitForFunction(() => !document.querySelector(".call"));
+  assert.equal(await p.evaluate(() => window.testCalls.filter((x) => x.cmd === "set_fullscreen").map((x) => x.args.on).join()), "true,false");
+});

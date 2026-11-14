@@ -39,8 +39,6 @@ export interface Prefs {
   streamVolumes: Record<string, number>;
   /** Watched streams keep playing in a floating mini player when you leave the voice room. */
   autoPip: boolean;
-  /** Voice room shows everyone as tiles (screen, camera or avatar) instead of the list. */
-  voiceTiles: boolean;
   /** Last quality picked for streaming. */
   streamQuality: "720p30" | "720p60" | "1080p60" | "1440p60";
 }
@@ -57,7 +55,7 @@ export const DEFAULT_PREFS: Prefs = {
   game: "wordle", recentEmoji: [], lastServer: null, lastChannel: {},
   scale: 1, hotkeys: { ...DEFAULT_HOTKEYS }, showActivity: true, userVolumes: {}, closeToTray: true,
   systemNotify: true, appNotify: true, notifySound: true, channelNotify: {}, streamVolumes: {}, autoPip: true,
-  voiceTiles: false, streamQuality: "1080p60",
+  streamQuality: "1080p60",
 };
 
 export const SCALES = [0.8, 0.9, 1, 1.1, 1.25, 1.4, 1.5];

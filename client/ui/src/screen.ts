@@ -33,6 +33,8 @@ const AUDIO_BITRATE = 192_000;
 
 /** Your own stream, in places that take a user id (fullscreen). */
 export const SELF = "self";
+/** The call view's grid of everyone (screen.full = GRID); a user id (or SELF) focuses one picture. */
+export const GRID = "grid";
 
 export interface Share { userId: string; identity: string; hasAudio: boolean }
 
@@ -55,7 +57,7 @@ export const [screen, setScreen] = createStore({
   live: {} as Record<string, boolean>,
   /** sharer's user id → user ids watching them (you included) */
   viewers: {} as Record<string, string[]>,
-  /** user id (or SELF) shown fullscreen */
+  /** Fullscreen call view: GRID (everyone as tiles) or the user id (or SELF) shown big. null = closed. */
   full: null as string | null,
   /** the floating mini player was opened by hand (shows even in the voice room) */
   popped: false,
@@ -149,7 +151,8 @@ function refresh() {
     setScreen("watching", (w) => w.filter((u) => !ended.includes(u)));
     publishWatching();
   }
-  if (screen.full && screen.full !== SELF && !out.some((s) => s.userId === screen.full)) setFullscreen(null);
+  // A focused stream that ended: back to everyone's tiles (the call view stays open).
+  if (screen.full && ended.includes(screen.full)) setScreen("full", GRID);
   if (!screen.watching.length && screen.popped) setScreen("popped", false);
   recountViewers();
   if (ended.length) disconnectIfIdle();
@@ -451,12 +454,13 @@ export async function startShare(quality: Quality, audio = true) {
 }
 
 export async function stopShare() {
+  if (selfPip) { selfPip.srcObject = null; if ((document as Document & { pictureInPictureElement?: Element | null }).pictureInPictureElement === selfPip) void document.exitPictureInPicture?.().catch(() => {}); }
   const tracks = local;
   const publisher = room;
   const channelId = screen.channelId;
   const request = generation;
   local = [];
-  if (screen.full === SELF) setFullscreen(null);
+  if (screen.full === SELF) setScreen("full", GRID);
   setScreen({ sharing: false, sharingAudio: false });
   if (!tracks.length) return;
   for (const track of tracks) track.stop();
@@ -588,7 +592,7 @@ export async function watch(userId: string) {
 export function unwatch(userId: string) {
   bumpWatch(userId); // cancels a Watch that's still connecting
   setScreen("pending", (l) => l.filter((u) => u !== userId));
-  if (screen.full === userId) setFullscreen(null);
+  if (screen.full === userId) setScreen("full", GRID);
   // Clear the watch first so late TrackSubscribed callbacks cannot restart audio.
   const identity = watchedParticipants.get(userId);
   watchedParticipants.delete(userId);
@@ -633,6 +637,47 @@ export function unbindVideo(userId: string, slot: HTMLElement) {
 export function setStreamVolume(userId: string, pct: number) {
   setPrefs({ streamVolumes: { ...prefs.streamVolumes, [userId]: pct } });
   audios.get(userId)?.setVolume(pct / 100);
+}
+
+/** Your own stream in a hidden player, for picture in picture. */
+let selfPip: HTMLVideoElement | null = null;
+async function selfPipPlayer() {
+  const v = local.find((t) => t.kind === "video");
+  if (!v) return null;
+  if (!selfPip) {
+    selfPip = document.createElement("video");
+    selfPip.muted = true;
+    selfPip.playsInline = true;
+    selfPip.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:0;top:0";
+    document.body.appendChild(selfPip);
+  }
+  if ((selfPip.srcObject as MediaStream | null)?.getVideoTracks()[0] !== v.mediaStreamTrack) selfPip.srcObject = new MediaStream([v.mediaStreamTrack]);
+  await selfPip.play().catch(() => {});
+  if (selfPip.readyState < 1) await new Promise((r) => selfPip!.addEventListener("loadedmetadata", r, { once: true }));
+  return selfPip;
+}
+
+/** Real picture in picture: the stream floats over other apps and games.
+ * Returns false where the webview can't (the caller falls back to the mini player). */
+export async function pictureInPicture(userId: string): Promise<boolean> {
+  const doc = document as Document & { pictureInPictureEnabled?: boolean; pictureInPictureElement?: Element | null; exitPictureInPicture?: () => Promise<void> };
+  if (!doc.pictureInPictureEnabled) return false;
+  const el = userId === SELF ? await selfPipPlayer() : players.get(userId);
+  if (!el || !("requestPictureInPicture" in el)) return false;
+  try {
+    if (doc.pictureInPictureElement === el) { await doc.exitPictureInPicture?.(); return true; }
+    if (el.paused) await el.play().catch(() => {});
+    await (el as HTMLVideoElement & { requestPictureInPicture: () => Promise<unknown> }).requestPictureInPicture();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** PiP button: the system's floating window, else HopOn's own mini player. */
+export async function popOut(userId: string) {
+  if (await pictureInPicture(userId)) return;
+  if (userId !== SELF) setScreen("popped", true);
 }
 
 /** Fullscreen a stream: the window goes fullscreen with the stream filling it. */

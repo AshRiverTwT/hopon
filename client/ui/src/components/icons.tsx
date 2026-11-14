@@ -46,3 +46,12 @@ export const EMOJI_TAB_ICONS: Record<string, () => ReturnType<typeof I>> = {
   Objects: () => <I d="M6 12.5h4M6.5 14.5h3M8 1.5a4.5 4.5 0 00-2.5 8.2c.3.3.5.7.5 1.1v.2h4v-.2c0-.4.2-.8.5-1.1A4.5 4.5 0 008 1.5z" />,
   Symbols: () => <I d="M6 2L4.5 14M11.5 2L10 14M2.5 5.5h11M2 10.5h11" />,
 };
+export const FocusIcon = () => <I d="M1.5 2.5h13v8h-13zM2 13.5h3M6.5 13.5h3M11 13.5h3" />;
+export const PhoneOffIcon = () => <I d="M2 9.5c3.6-3.3 8.4-3.3 12 0l-1.6 2.1-2.4-1v-1.9a7 7 0 00-4 0v1.9l-2.4 1z" />;
+export const GrowIcon = () => <I d="M9.5 2.5h4v4M13.5 2.5L9 7M6.5 13.5h-4v-4M2.5 13.5L7 9" />;
+export const ShrinkIcon = () => <I d="M13 7H9V3M9 7l4.5-4.5M3 9h4v4M7 9l-4.5 4.5" />;
+export const PeopleIcon = () => <I d="M6 7a2.3 2.3 0 100-4.6A2.3 2.3 0 006 7zM1.8 13.5c.5-2.5 2.2-4 4.2-4s3.7 1.5 4.2 4M10.5 2.6a2.3 2.3 0 010 4.3M12.2 9.8c1 .6 1.7 1.9 2 3.7" />;
+export const InviteIcon = () => <I d="M6.5 7a2.3 2.3 0 100-4.6 2.3 2.3 0 000 4.6zM2.2 13.5c.5-2.5 2.2-4 4.3-4 1 0 1.9.3 2.6 1M12.5 8.5v5M10 11h5" />;
+export const GamesIcon = () => <I d="M4.5 4.5h7a3 3 0 013 3v1.5a2.5 2.5 0 01-4.3 1.7L9.5 10h-3l-.7.7A2.5 2.5 0 011.5 9V7.5a3 3 0 013-3zM5 6.5v2.5M3.8 7.8h2.4M10.5 7.3v.1M11.8 8.6v.1" />;
+export const SlidersIcon = () => <I d="M2.5 4.5h7M12.5 4.5h1M2.5 11.5h1M6.5 11.5h7M11 3v3M5 10v3" />;
+export const GearIcon = () => <I d="M8 10.2a2.2 2.2 0 100-4.4 2.2 2.2 0 000 4.4zM8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1" />;

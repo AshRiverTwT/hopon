@@ -25,10 +25,6 @@ export function FriendsNav() {
   const incoming = () => s.friends.filter((f) => f.state === "incoming").length;
   return (
     <nav class="dm-nav" aria-label="Direct messages">
-      <button class="dm-home" classList={{ on: !currentDm() }} onClick={openFriends}>
-        <span>Friends</span>
-        <Show when={incoming()}><span class="count-badge" title={`${incoming()} friend request${incoming() === 1 ? "" : "s"}`}>{incoming()}</span></Show>
-      </button>
       <div class="eyebrow dm-nav-head">Direct messages</div>
       <ul>
         <For each={dms()} fallback={<li class="dm-empty muted small">Message a friend and it shows up here.</li>}>
@@ -46,7 +42,6 @@ export function FriendsNav() {
           }}
         </For>
       </ul>
-      <button class="link dm-back" onClick={closeFriends}>← Back to servers</button>
     </nav>
   );
 }
@@ -79,11 +74,6 @@ export function FriendsHome() {
   const copy = () => navigator.clipboard?.writeText(s.username).then(() => toast("Username copied")).catch(() => {});
   return (
     <section class="friends">
-      <header class="head">
-        <div class="eyebrow">People you know</div>
-        <h1 class="display title">Friends</h1>
-      </header>
-
       <div class="friend-add">
         <div class="field-row">
           <input class="line big" placeholder="Add a friend by username" value={name()} spellcheck={false} autocomplete="off"
@@ -146,7 +136,7 @@ export function DmHeader(p: { search: () => void; saved: () => void }) {
   const other = () => currentDm()?.dmWith ?? "";
   const f = () => friendOf(other());
   return (
-    <header class="head">
+    <>
       <div class="eyebrow">Direct message{f() ? ` · @${f()!.username}` : ""}</div>
       <div class="head-row">
         <Avatar id={other()} size={40} />
@@ -155,7 +145,7 @@ export function DmHeader(p: { search: () => void; saved: () => void }) {
         <button class="icon-btn" title="Search this conversation" aria-label="Search this conversation" onClick={p.search}><SearchIcon /></button>
         <button class="icon-btn" title="Saved messages" aria-label="Saved messages" onClick={p.saved}><BookmarkIcon /></button>
       </div>
-    </header>
+    </>
   );
 }
 
