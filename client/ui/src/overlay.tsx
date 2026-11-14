@@ -24,7 +24,10 @@ import Attachments from "./components/Attachments";
 import { prefs } from "./prefs";
 import { comboLabel } from "./hotkeys";
 import { SYSTEM_USER, type Msg, type Presence, type Server, type UiEvent, type User } from "./types";
+import { MicOffIcon, VoiceGlyph } from "./components/icons";
 import "./overlay.css";
+
+const fmtTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 const KEEP = 40;
 
@@ -141,8 +144,8 @@ function Overlay() {
     <div class="ov">
       <section class="ov-chat">
         <header class="ov-head">
-          <span class="ov-mark">H</span>
-          <span class="ov-title">{channel() ? `# ${channel()!.c.name}` : "No channel open"}</span>
+          <span class="mark" aria-hidden="true">H</span>
+          <span class="ov-title">{channel() ? channel()!.c.name : "No channel open"}</span>
           <span class="ov-sub">{channel()?.sv.name}</span>
           <span class="ov-hint">{typing() ? "Enter to send · Esc to cancel" : `${comboLabel(prefs.hotkeys.overlayType)} to type · ${comboLabel(prefs.hotkeys.overlay)} to hide`}</span>
         </header>
@@ -153,7 +156,7 @@ function Overlay() {
               return (
                 <div class="ov-msg" classList={{ sys: m.authorId === SYSTEM_USER, cont: !head() }}>
                   <Show when={head() && m.authorId !== SYSTEM_USER}>
-                    <div class="ov-meta"><Avatar id={m.authorId} size={20} /><b>{userName(m.authorId)}</b></div>
+                    <div class="ov-meta"><Avatar id={m.authorId} size={24} class="ov-gutter" /><span class="ov-author">{userName(m.authorId)}</span><span class="ov-time">{fmtTime(m.ts)}</span></div>
                   </Show>
                   <div class="ov-body">
                     <Show when={m.content}><Rich text={m.content} /></Show>
@@ -170,14 +173,14 @@ function Overlay() {
       </section>
       <Show when={o.voiceCh}>
         <aside class="ov-voice">
-          <div class="ov-vhead"><span class="ov-live" />{voiceName() ?? "Voice"}</div>
+          <div class="ov-vhead"><VoiceGlyph /><span>{voiceName() ?? "Voice"}</span></div>
           <ul>
             <For each={inVoice()}>
               {(p) => (
                 <li classList={{ speaking: o.speaking.includes(p.userId), muted: p.muted || p.deafened }}>
-                  <span class="ov-av"><Avatar id={p.userId} size={34} /></span>
+                  <Avatar id={p.userId} size={30} class={o.speaking.includes(p.userId) ? "speaking" : ""} />
                   <span class="ov-name">{userName(p.userId)}</span>
-                  <Show when={p.muted || p.deafened}><span class="ov-state">{p.deafened ? "deaf" : "muted"}</span></Show>
+                  <Show when={p.muted || p.deafened}><span class="ov-state" title={p.deafened ? "Sound off" : "Mic off"}><MicOffIcon /></span></Show>
                 </li>
               )}
             </For>
