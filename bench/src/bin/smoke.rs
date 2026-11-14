@@ -8,7 +8,7 @@ use hopon_shared::*;
 
 async fn next_msg(c: &mut Client) -> Result<S2C> {
     loop {
-        let f = tokio::time::timeout(std::time::Duration::from_secs(5), c.recv()).await??;
+        let f = tokio::time::timeout(std::time::Duration::from_secs(5), c.recv_chat()).await??;
         if f.req == 0 {
             return Ok(f.msg);
         }
@@ -30,7 +30,7 @@ async fn wait_for<T>(c: &mut Client, f: impl Fn(&S2C) -> Option<T>) -> Result<T>
 async fn quiet(c: &mut Client, ms: u64, f: impl Fn(&S2C) -> bool) -> bool {
     let end = tokio::time::Instant::now() + std::time::Duration::from_millis(ms);
     loop {
-        match tokio::time::timeout_at(end, c.recv()).await {
+        match tokio::time::timeout_at(end, c.recv_chat()).await {
             Err(_) => return true,
             Ok(Ok(fr)) if fr.req == 0 && f(&fr.msg) => return false,
             Ok(Ok(_)) => {}
@@ -108,7 +108,8 @@ fn jwt_claims(t: &str) -> Result<serde_json::Value> {
 
 macro_rules! check {
     ($name:expr, $e:expr) => {{
-        let r: Result<()> = async { $e }.await;
+        let r: Result<()> = tokio::time::timeout(std::time::Duration::from_secs(30), Box::pin(async { $e }))
+            .await.unwrap_or_else(|_| Err(anyhow::anyhow!("check timed out after 30 seconds")));
         match &r {
             Ok(()) => println!("ok    {}", $name),
             Err(e) => println!("FAIL  {}: {e:#}", $name),
@@ -144,7 +145,7 @@ async fn main() -> Result<()> {
     });
     pass &= check!("unauthenticated send rejected", {
         let mut c = Client::connect(&url).await?;
-        ensure!(c.call(C2S::Send { channel_id: 1, content: "x".into(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] }).await.is_err());
+        ensure!(c.call(C2S::Send { channel_id: 1, content: "x".into(), nonce: 1, retry: false, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] }).await.is_err());
         Ok(())
     });
     pass &= check!("resume with access token", {
@@ -177,17 +178,36 @@ async fn main() -> Result<()> {
     b.signup("smokeb").await?;
     pass &= check!("non-member cannot read or send", {
         ensure!(b.call(C2S::History { channel_id: text, before: None, limit: 10 }).await.is_err());
-        ensure!(b.call(C2S::Send { channel_id: text, content: "x".into(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] }).await.is_err());
+        ensure!(b.call(C2S::Send { channel_id: text, content: "x".into(), nonce: 1, retry: false, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] }).await.is_err());
         Ok(())
     });
     pass &= check!("invite link join + member event", {
         let S2C::Invite { code, .. } = a.call(C2S::CreateInvite { server_id }).await? else { bail!("no invite") };
         ensure!(matches!(b.call(C2S::JoinInvite { code: format!("hopon://invite/{code}") }).await?, S2C::ServerJoined(_)));
-        ensure!(matches!(next_msg(&mut a).await?, S2C::MemberJoined { .. }));
+        wait_for(&mut a, |event| matches!(event, S2C::MemberJoined { .. }).then_some(())).await?;
         Ok(())
     });
     pass &= check!("bad invite rejected", {
         ensure!(b.call(C2S::JoinInvite { code: "notacode".into() }).await.is_err());
+        Ok(())
+    });
+    pass &= check!("display name: validates, broadcasts, persists, and resets", {
+        ensure!(a.call(C2S::SetDisplayName { name: "a".repeat(33) }).await.is_err());
+        let S2C::UserUpdated(updated) = a.call(C2S::SetDisplayName { name: "  HopOn Tester  ".into() }).await? else { bail!("name update") };
+        ensure!(updated.name == "HopOn Tester");
+        wait_for(&mut b, |event| match event {
+            S2C::UserUpdated(user) if user.id == updated.id && user.name == updated.name => Some(()),
+            _ => None,
+        }).await?;
+        let mut c = Client::connect(&url).await?;
+        let S2C::Authed { user, .. } = c.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("sign in with username") };
+        ensure!(user.name == updated.name);
+        let S2C::UserUpdated(reset) = a.call(C2S::SetDisplayName { name: String::new() }).await? else { bail!("name reset") };
+        ensure!(reset.name == name);
+        wait_for(&mut b, |event| match event {
+            S2C::UserUpdated(user) if user.id == reset.id && user.name == reset.name => Some(()),
+            _ => None,
+        }).await?;
         Ok(())
     });
 
@@ -195,11 +215,14 @@ async fn main() -> Result<()> {
     pass &= check!("send: realtime delivery, echo, durable ack, ordering", {
         for i in 0..20u64 {
             let t = now_us();
-            a.send(C2S::Send { channel_id: text, content: format!("m{i}"), nonce: 100 + i, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
+            a.send(C2S::Send { channel_id: text, content: format!("m{i}"), nonce: 100 + i, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
         }
         let mut last = 0;
         for i in 0..20u64 {
-            let S2C::Message(m) = next_msg(&mut b).await? else { bail!("expected message") };
+            let m = wait_for(&mut b, |event| match event {
+                S2C::Message(message) if message.channel_id == text && message.author_id != SYSTEM_USER => Some(message.clone()),
+                _ => None,
+            }).await?;
             ensure!(m.content == format!("m{i}"), "order: got {} at {i}", m.content);
             ensure!(m.id > last, "ids not increasing");
             if i == 0 { first_id = m.id; }
@@ -207,8 +230,12 @@ async fn main() -> Result<()> {
         }
         let (mut echoes, mut acks) = (0, 0);
         while echoes < 20 || acks < 20 {
-            let f = tokio::time::timeout(std::time::Duration::from_secs(5), a.recv()).await??;
-            match f.msg { S2C::Message(_) => echoes += 1, S2C::Ack { .. } => acks += 1, _ => {} }
+            let f = tokio::time::timeout(std::time::Duration::from_secs(5), a.recv_chat()).await??;
+            match f.msg {
+                S2C::Message(m) if m.channel_id == text && (100..120).contains(&m.nonce) => echoes += 1,
+                S2C::Ack { nonce, .. } if (100..120).contains(&nonce) => acks += 1,
+                _ => {}
+            }
         }
         Ok(())
     });
@@ -216,14 +243,17 @@ async fn main() -> Result<()> {
         let t = now_us();
         let mut a2 = Client::connect(&url).await?;
         a2.call(C2S::Refresh { refresh_token: refresh.clone() }).await.map(|r| if let S2C::Authed { refresh_token, .. } = r { refresh = refresh_token; }).ok();
-        let send = C2S::Send { channel_id: text, content: "once".into(), nonce: 4242, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] };
-        a.send(send.clone()).await?;
-        let S2C::Message(first) = next_msg(&mut b).await? else { bail!("expected message") };
+        let send = |retry| C2S::Send { channel_id: text, content: "once".into(), nonce: 4242, retry, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] };
+        a.send(send(false)).await?;
+        let first = wait_for(&mut b, |event| match event {
+            S2C::Message(message) if message.nonce == 4242 => Some(message.clone()),
+            _ => None,
+        }).await?;
         // Same nonce from another socket of the same user (as after a reconnect).
-        a2.send(send).await?;
+        a2.send(send(true)).await?;
         let (mut echo_id, mut acked) = (0, false);
         while echo_id == 0 || !acked {
-            let f = tokio::time::timeout(std::time::Duration::from_secs(5), a2.recv()).await??;
+            let f = tokio::time::timeout(std::time::Duration::from_secs(5), a2.recv_chat()).await??;
             match f.msg {
                 S2C::Message(m) if m.nonce == 4242 => echo_id = m.id,
                 S2C::Ack { id, nonce: 4242, .. } => { ensure!(id == first.id, "ack id differs"); acked = true }
@@ -232,16 +262,17 @@ async fn main() -> Result<()> {
         }
         ensure!(echo_id == first.id, "resend got a new id");
         // b must not see a second copy.
-        if let Ok(Ok(f)) = tokio::time::timeout(std::time::Duration::from_millis(300), b.recv()).await {
-            if let S2C::Message(m) = f.msg { bail!("duplicate broadcast: {}", m.content); }
-        }
+        ensure!(quiet(&mut b, 300, |event| matches!(event, S2C::Message(m) if m.nonce == 4242)).await, "duplicate broadcast");
         let S2C::History { messages, .. } = b.call(C2S::History { channel_id: text, before: None, limit: 5 }).await? else { bail!("h") };
         ensure!(messages.iter().filter(|m| m.content == "once").count() == 1, "duplicate row");
+        let S2C::Replay { events, snapshot_required, .. } = b.call(C2S::Replay { channel_id: text, after_cursor: 0, limit: 100 }).await? else { bail!("expected replay") };
+        ensure!(!snapshot_required, "fresh channel required a snapshot");
+        ensure!(events.iter().filter(|event| matches!(&event.payload, DurablePayload::Message(m) if m.id == first.id)).count() == 1, "expected one durable event for the live message");
         Ok(())
     });
     pass &= check!("empty and oversized messages rejected", {
-        ensure!(a.call(C2S::Send { channel_id: text, content: "   ".into(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] }).await.is_err());
-        ensure!(a.call(C2S::Send { channel_id: text, content: "x".repeat(4001), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] }).await.is_err());
+        ensure!(a.call(C2S::Send { channel_id: text, content: "   ".into(), nonce: 1, retry: false, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] }).await.is_err());
+        ensure!(a.call(C2S::Send { channel_id: text, content: "x".repeat(4001), nonce: 1, retry: false, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] }).await.is_err());
         Ok(())
     });
     pass &= check!("edit own message (broadcast)", {
@@ -284,17 +315,30 @@ async fn main() -> Result<()> {
         ensure!(a.call(C2S::VoiceGrant { channel_id: text }).await.is_err());
         ensure!(a.call(C2S::ScreenGrant { channel_id: voice }).await.is_err(), "screen grant before joining voice");
         a.call(C2S::VoiceState { channel_id: Some(voice), muted: true, deafened: false }).await?;
-        // In the room: screen token with its own identity, screen sources only.
+        // The webview has its own identity and can publish video and screen audio.
         let S2C::VoiceGrant { token, .. } = a.call(C2S::ScreenGrant { channel_id: voice }).await? else { bail!("screen grant") };
         let claims = jwt_claims(&token)?;
         ensure!(claims["sub"].as_str().unwrap_or("").ends_with(":screen"), "identity {}", claims["sub"]);
-        ensure!(claims["video"]["canPublishSources"] == serde_json::json!(["screen_share", "screen_share_audio"]), "{}", claims["video"]);
+        ensure!(claims["video"]["canPublishSources"] == serde_json::json!(["screen_share", "screen_share_audio", "camera"]), "{}", claims["video"]);
         let S2C::VoiceGrant { token, .. } = a.call(C2S::VoiceGrant { channel_id: voice }).await? else { bail!("voice grant") };
         ensure!(jwt_claims(&token)?["video"]["canPublishSources"] == serde_json::json!(["microphone"]), "voice token not mic-only");
         loop { if let S2C::VoicePresence { channel_id, muted, .. } = next_msg(&mut b).await? { ensure!(channel_id == Some(voice) && muted); break; } }
+        ensure!(b.call(C2S::MediaState { channel_id: voice, source: MediaSource::Camera, active: true }).await.is_err());
+        for (source, active) in [(MediaSource::Camera, true), (MediaSource::Screen, true), (MediaSource::Screen, false)] {
+            a.call(C2S::MediaState { channel_id: voice, source, active }).await?;
+            wait_for(&mut b, |event| match event {
+                S2C::MediaPresence(p) if p.channel_id == voice && p.source == source && p.active == active => Some(()),
+                _ => None,
+            }).await?;
+        }
         let mut c = Client::connect(&url).await?;
-        c.call(C2S::Refresh { refresh_token: refresh.clone() }).await.map(|_| ()).ok();
+        let S2C::Authed { media, .. } = c.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("media snapshot") };
+        ensure!(media.iter().filter(|p| p.channel_id == voice).map(|p| p.source).collect::<Vec<_>>() == [MediaSource::Camera]);
         drop(a);
+        wait_for(&mut b, |event| match event {
+            S2C::MediaPresence(p) if p.channel_id == voice && p.source == MediaSource::Camera && !p.active => Some(()),
+            _ => None,
+        }).await?;
         loop { if let S2C::VoicePresence { channel_id, .. } = next_msg(&mut b).await? { ensure!(channel_id.is_none()); break; } }
         Ok(())
     });
@@ -339,19 +383,19 @@ async fn main() -> Result<()> {
     pass &= check!("admin: owner can delete anyone's message", {
         let (mut o, mut m, _, text, _, _) = admin_setup(&url).await?;
         let t = now_us();
-        m.send(C2S::Send { channel_id: text, content: "spam".into(), nonce: 9, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
-        let id = wait_for(&mut o, |e| if let S2C::Message(x) = e { Some(x.id) } else { None }).await?;
+        m.send(C2S::Send { channel_id: text, content: "spam".into(), nonce: 9, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
+        let id = wait_for(&mut o, |e| if let S2C::Message(x) = e { (x.nonce == 9).then_some(x.id) } else { None }).await?;
         ensure!(matches!(o.call(C2S::Delete { channel_id: text, message_id: id }).await?, S2C::Ok));
         Ok(())
     });
     pass &= check!("admin: delete text channel (gone for sends and history)", {
         let (mut o, mut m, _, text, _, _) = admin_setup(&url).await?;
         let t = now_us();
-        m.send(C2S::Send { channel_id: text, content: "before".into(), nonce: 1, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
-        wait_for(&mut o, |e| matches!(e, S2C::Message(_)).then_some(())).await?;
+        m.send(C2S::Send { channel_id: text, content: "before".into(), nonce: 1, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
+        wait_for(&mut o, |e| matches!(e, S2C::Message(m) if m.content == "before").then_some(())).await?;
         o.call(C2S::DeleteChannel { channel_id: text }).await?;
         wait_for(&mut m, |e| matches!(e, S2C::ChannelDeleted { channel_id, .. } if *channel_id == text).then_some(())).await?;
-        ensure!(m.call(C2S::Send { channel_id: text, content: "after".into(), nonce: 2, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await.is_err(), "send into deleted channel");
+        ensure!(m.call(C2S::Send { channel_id: text, content: "after".into(), nonce: 2, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await.is_err(), "send into deleted channel");
         ensure!(m.call(C2S::History { channel_id: text, before: None, limit: 10 }).await.is_err(), "history of deleted channel");
         Ok(())
     });
@@ -371,9 +415,9 @@ async fn main() -> Result<()> {
         ensure!(r == RemovedReason::Kicked);
         wait_for(&mut o, |e| matches!(e, S2C::MemberLeft { user_id, .. } if *user_id == mid).then_some(())).await?;
         let t = now_us();
-        ensure!(m.call(C2S::Send { channel_id: text, content: "still here?".into(), nonce: 3, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await.is_err(), "kicked user can send");
-        o.send(C2S::Send { channel_id: text, content: "secret".into(), nonce: 4, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
-        ensure!(quiet(&mut m, 400, |e| matches!(e, S2C::Message(_))).await, "kicked user still receives messages");
+        ensure!(m.call(C2S::Send { channel_id: text, content: "still here?".into(), nonce: 3, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await.is_err(), "kicked user can send");
+        o.send(C2S::Send { channel_id: text, content: "secret".into(), nonce: 4, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
+        ensure!(quiet(&mut m, 400, |e| matches!(e, S2C::Message(m) if m.content == "secret")).await, "kicked user still receives messages");
         ensure!(o.call(C2S::Kick { server_id: sid, user_id: mid }).await.is_err(), "double kick");
         Ok(())
     });
@@ -417,7 +461,7 @@ async fn main() -> Result<()> {
         let mut newest = 0;
         for i in 0..3u64 {
             let t = now_us();
-            o.send(C2S::Send { channel_id: text, content: format!("r{i}"), nonce: 50 + i, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
+            o.send(C2S::Send { channel_id: text, content: format!("r{i}"), nonce: 50 + i, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
             newest = wait_for(&mut m, |e| if let S2C::Message(x) = e { (x.author_id != SYSTEM_USER).then_some(x.id) } else { None }).await?;
         }
         // Second device of the member sees the marker move.
@@ -427,7 +471,6 @@ async fn main() -> Result<()> {
         let lr = wait_for(&mut m2, |e| if let S2C::ReadUpdated { last_read, .. } = e { Some(*last_read) } else { None }).await?;
         ensure!(lr == newest, "other device not told");
         m.call(C2S::MarkRead { channel_id: text, message_id: newest - 1 }).await?;
-        // (m's own copy is skipped by call() while it waits for the reply.)
         let lr2 = wait_for(&mut m2, |e| if let S2C::ReadUpdated { last_read, .. } = e { Some(*last_read) } else { None }).await?;
         ensure!(lr2 == newest, "marker moved backwards");
         // Fresh login: snapshot carries last_id and the marker.
@@ -442,7 +485,8 @@ async fn main() -> Result<()> {
         let S2C::Authed { servers, .. } = o2.call(C2S::Login { username: ou.name.clone(), password: "benchmark-pass".into() }).await? else { bail!("login") };
         let so = servers.iter().find(|x| x.id == sv.id).unwrap();
         ensure!(so.reads.contains(&(text, newest)), "own sends not read: {:?}", so.reads);
-        ensure!(so.online.contains(&mu.id), "member not listed online");
+        let S2C::Members { online, .. } = o2.call(C2S::Members { server_id: sv.id, offset: 0, limit: 20 }).await? else { bail!("member page") };
+        ensure!(online.contains(&mu.id), "member not listed online");
         Ok(())
     });
     pass &= check!("presence: offline announced after the last connection closes", {
@@ -455,13 +499,13 @@ async fn main() -> Result<()> {
     pass &= check!("replies + reactions (broadcast, idempotent, in history, limits, ordering)", {
         let (mut o, mut m, _, text, _, _) = admin_setup(&url).await?;
         let t = now_us();
-        o.send(C2S::Send { channel_id: text, content: "root".into(), nonce: 70, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
+        o.send(C2S::Send { channel_id: text, content: "root".into(), nonce: 70, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
         let root = wait_for(&mut m, |e| if let S2C::Message(x) = e { (x.content == "root").then_some(x.id) } else { None }).await?;
-        m.send(C2S::Send { channel_id: text, content: "re".into(), nonce: 71, t_input: t, t_client_send: t, reply_to: Some(root), files: vec![], gifs: vec![] }).await?;
+        m.send(C2S::Send { channel_id: text, content: "re".into(), nonce: 71, retry: false, t_input: t, t_client_send: t, reply_to: Some(root), files: vec![], gifs: vec![] }).await?;
         let rep = wait_for(&mut o, |e| if let S2C::Message(x) = e { (x.content == "re").then(|| x.clone()) } else { None }).await?;
         ensure!(rep.reply_to == Some(root), "reply_to not delivered");
         // React immediately after sending: the reaction must wait for the insert.
-        o.send(C2S::Send { channel_id: text, content: "fresh".into(), nonce: 72, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
+        o.send(C2S::Send { channel_id: text, content: "fresh".into(), nonce: 72, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
         let fresh = wait_for(&mut m, |e| if let S2C::Message(x) = e { (x.content == "fresh").then_some(x.id) } else { None }).await?;
         ensure!(matches!(m.call(C2S::React { channel_id: text, message_id: fresh, emoji: "🔥".into(), add: true }).await?, S2C::Ok), "react on fresh message");
         m.call(C2S::React { channel_id: text, message_id: root, emoji: "👍".into(), add: true }).await?;
@@ -487,6 +531,53 @@ async fn main() -> Result<()> {
         o.call(C2S::Delete { channel_id: text, message_id: root }).await?;
         let n: Vec<_> = { let S2C::History { messages, .. } = o.call(C2S::History { channel_id: text, before: None, limit: 10 }).await? else { bail!("h") }; messages };
         ensure!(!n.iter().any(|x| x.id == root));
+        Ok(())
+    });
+    pass &= check!("poll votes: numbered emoji broadcast, persist, and can be removed", {
+        let (mut o, mut m, _, text, _, mid) = admin_setup(&url).await?;
+        let content = "\u{1f}hopon-poll:{\"question\":\"Which game?\",\"options\":[\"Chess\",\"Wordle\"]}";
+        let t = now_us();
+        let S2C::Ack { id, .. } = o.call(C2S::Send { channel_id: text, content: content.into(), nonce: 81, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await? else { bail!("poll ack") };
+        m.call(C2S::React { channel_id: text, message_id: id, emoji: "1️⃣".into(), add: true }).await?;
+        wait_for(&mut o, |event| match event {
+            S2C::Reaction { message_id, emoji, user_id, add: true, .. } if *message_id == id && emoji == "1️⃣" && *user_id == mid => Some(()),
+            _ => None,
+        }).await?;
+        let S2C::History { messages, .. } = m.call(C2S::History { channel_id: text, before: None, limit: 10 }).await? else { bail!("history") };
+        let poll = messages.iter().find(|message| message.id == id).unwrap();
+        ensure!(poll.content == content && poll.reactions[0].users == [mid]);
+        m.call(C2S::React { channel_id: text, message_id: id, emoji: "1️⃣".into(), add: false }).await?;
+        let S2C::History { messages, .. } = m.call(C2S::History { channel_id: text, before: None, limit: 10 }).await? else { bail!("history") };
+        ensure!(messages.iter().find(|message| message.id == id).unwrap().reactions.is_empty());
+        Ok(())
+    });
+    pass &= check!("durable replay: paginated send/edit/reaction/delete and future-cursor fallback", {
+        let (mut o, mut m, _, text, _, _) = admin_setup(&url).await?;
+        let S2C::History { latest_cursor: baseline, .. } = o.call(C2S::History { channel_id: text, before: None, limit: 1 }).await? else { bail!("history") };
+        let t = now_us();
+        let S2C::Ack { id, .. } = o.call(C2S::Send { channel_id: text, content: "replay me".into(), nonce: 82, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await? else { bail!("ack") };
+        o.call(C2S::Edit { channel_id: text, message_id: id, content: "edited offline".into() }).await?;
+        o.call(C2S::React { channel_id: text, message_id: id, emoji: "👍".into(), add: true }).await?;
+        o.call(C2S::Delete { channel_id: text, message_id: id }).await?;
+        let mut cursor = baseline;
+        let mut replayed = vec![];
+        loop {
+            let S2C::Replay { events, more, snapshot_required, .. } = m.call(C2S::Replay { channel_id: text, after_cursor: cursor, limit: 2 }).await? else { bail!("replay") };
+            ensure!(!snapshot_required && events.len() <= 2);
+            for event in &events { ensure!(event.cursor > cursor); cursor = event.cursor; }
+            replayed.extend(events);
+            if !more { break; }
+        }
+        ensure!(replayed.iter().any(|e| matches!(&e.payload, DurablePayload::Message(msg) if msg.id == id)));
+        ensure!(replayed.iter().any(|e| matches!(&e.payload, DurablePayload::Edited { id: edited, content, .. } if *edited == id && content == "edited offline")));
+        ensure!(replayed.iter().any(|e| matches!(&e.payload, DurablePayload::Reaction { message_id, .. } if *message_id == id)));
+        ensure!(replayed.iter().any(|e| matches!(&e.payload, DurablePayload::Deleted { id: deleted, .. } if *deleted == id)));
+        let S2C::Replay { events, more, snapshot_required, .. } = m.call(C2S::Replay { channel_id: text, after_cursor: cursor, limit: 10 }).await? else { bail!("tail") };
+        ensure!(events.is_empty() && !more && !snapshot_required);
+        ensure!(matches!(m.call(C2S::Replay { channel_id: text, after_cursor: i64::MAX, limit: 10 }).await?, S2C::Replay { snapshot_required: true, .. }));
+        let mut outsider = Client::connect(&url).await?;
+        outsider.signup("replay").await?;
+        ensure!(outsider.call(C2S::Replay { channel_id: text, after_cursor: 0, limit: 10 }).await.is_err());
         Ok(())
     });
     pass &= check!("typing: relayed to others, rate-limited", {
@@ -546,14 +637,14 @@ async fn main() -> Result<()> {
         b.signup("fil").await?;
         b.call(C2S::JoinInvite { code }).await?;
         // Someone else can't send my upload.
-        ensure!(b.call(C2S::Send { channel_id: text, content: String::new(), nonce: 1, t_input: 0, t_client_send: 0, reply_to: None, files: vec![att.id.clone()], gifs: vec![] }).await.is_err(), "foreign claim");
+        ensure!(b.call(C2S::Send { channel_id: text, content: String::new(), nonce: 1, retry: false, t_input: 0, t_client_send: 0, reply_to: None, files: vec![att.id.clone()], gifs: vec![] }).await.is_err(), "foreign claim");
         let t = now_us();
-        fa.send(C2S::Send { channel_id: text, content: String::new(), nonce: 5150, t_input: t, t_client_send: t, reply_to: None, files: vec![att.id.clone()], gifs: vec![] }).await?;
+        fa.send(C2S::Send { channel_id: text, content: String::new(), nonce: 5150, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![att.id.clone()], gifs: vec![] }).await?;
         let got = wait_for(&mut b, |e| if let S2C::Message(m) = e { (m.channel_id == text && m.author_id != SYSTEM_USER).then(|| m.clone()) } else { None }).await?;
         ensure!(got.content.is_empty() && got.attachments.len() == 1 && got.attachments[0].id == att.id, "{got:?}");
         // Already sent: can't attach it again.
-        ensure!(fa.call(C2S::Send { channel_id: text, content: "again".into(), nonce: 5151, t_input: t, t_client_send: t, reply_to: None, files: vec![att.id.clone()], gifs: vec![] }).await.is_err(), "double claim");
-        ensure!(fa.call(C2S::Send { channel_id: text, content: String::new(), nonce: 5152, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await.is_err(), "empty message");
+        ensure!(fa.call(C2S::Send { channel_id: text, content: "again".into(), nonce: 5151, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![att.id.clone()], gifs: vec![] }).await.is_err(), "double claim");
+        ensure!(fa.call(C2S::Send { channel_id: text, content: String::new(), nonce: 5152, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await.is_err(), "empty message");
         let (st, head, data) = http(&url, "GET", &format!("/files/{}", att.id), &[], &[]).await?;
         ensure!(st == 200 && data == png && head.to_ascii_lowercase().contains("content-type: image/png"), "download {st}");
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -585,10 +676,10 @@ async fn main() -> Result<()> {
         }
         let S2C::ServerJoined(sv) = fa.call(C2S::CreateServer { name: "Gifs".into() }).await? else { bail!("server") };
         let text = sv.channels.iter().find(|c| c.kind == ChannelKind::Text).unwrap().id;
-        ensure!(fa.call(C2S::Send { channel_id: text, content: String::new(), nonce: 77, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec!["klipy:nope".into()] }).await.is_err());
+        ensure!(fa.call(C2S::Send { channel_id: text, content: String::new(), nonce: 77, retry: false, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec!["klipy:nope".into()] }).await.is_err());
         Ok(())
     });
-    pass &= check!("activity: playing status relayed to co-members, in the snapshot, cleared", {
+    pass &= check!("activity: playing status relayed to co-members, in the member page, cleared", {
         let (mut o, mut m, sid, _text, _voice, mid) = admin_setup(&url).await?;
         let _ = wait_for(&mut o, |e| if let S2C::Message(x) = e { (x.author_id == SYSTEM_USER).then_some(()) } else { None }).await;
         m.call(C2S::SetActivity { game: "VALORANT".into() }).await?;
@@ -597,12 +688,13 @@ async fn main() -> Result<()> {
         // Same value again: no event.
         m.call(C2S::SetActivity { game: "VALORANT".into() }).await?;
         ensure!(quiet(&mut o, 300, |e| matches!(e, S2C::Activity { .. })).await, "duplicate activity re-sent");
-        // Someone joining later sees it in their server snapshot.
+        // Someone joining later sees it in the member page.
         let S2C::Invite { code, .. } = o.call(C2S::CreateInvite { server_id: sid }).await? else { bail!("invite") };
         let mut c = Client::connect(&url).await?;
         c.signup("act").await?;
-        let S2C::ServerJoined(sv) = c.call(C2S::JoinInvite { code }).await? else { bail!("join") };
-        ensure!(sv.activities.contains(&(mid, "VALORANT".to_string())), "snapshot {:?}", sv.activities);
+        c.call(C2S::JoinInvite { code }).await?;
+        let S2C::Members { activities, .. } = c.call(C2S::Members { server_id: sid, offset: 0, limit: 20 }).await? else { bail!("member page") };
+        ensure!(activities.contains(&(mid, "VALORANT".to_string())), "member activity {activities:?}");
         m.call(C2S::SetActivity { game: "x".repeat(200) }).await?;
         let g2 = wait_for(&mut o, |e| if let S2C::Activity { game, .. } = e { Some(game.clone()) } else { None }).await?;
         ensure!(g2.chars().count() == MAX_ACTIVITY_CHARS, "not capped: {}", g2.len());

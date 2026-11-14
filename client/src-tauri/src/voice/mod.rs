@@ -202,14 +202,16 @@ impl Voice {
         core.emit(UiEvent::Voice { channel_id: Some(sid(channel_id)), state: "connecting", muted: p.muted, deafened: p.deafened, detail: None });
 
         let cached = self.grants.lock().remove(&channel_id).filter(|g| now_us() / 1_000_000 - g.2 < 300);
-        let (url, token) = match cached {
-            Some((u, t, _)) => (u, t),
-            None => match core.request(C2S::VoiceGrant { channel_id }).await? {
-                S2C::VoiceGrant { url, token, .. } => (url, token),
-                _ => return Err("unexpected reply".into()),
-            },
-        };
-        let r = self.connect(core.clone(), channel_id, &url, &token, t_click, &p).await;
+        let r: Res<()> = async {
+            let (url, token) = match cached {
+                Some((u, t, _)) => (u, t),
+                None => match core.request(C2S::VoiceGrant { channel_id }).await? {
+                    S2C::VoiceGrant { url, token, .. } => (url, token),
+                    _ => return Err("unexpected reply".into()),
+                },
+            };
+            self.connect(core.clone(), channel_id, &url, &token, t_click, &p).await
+        }.await;
         if let Err(e) = &r {
             *self.audio.lock() = None;
             core.emit(UiEvent::Voice { channel_id: None, state: "idle", muted: p.muted, deafened: p.deafened, detail: Some(e.clone()) });
@@ -235,6 +237,9 @@ impl Voice {
         let audio = audio_task.await.map_err(|e| e.to_string())??;
 
         let track = LocalAudioTrack::create_audio_track("mic", audio.rtc_source());
+        if p.muted || p.deafened || p.ptt {
+            track.mute();
+        }
         let publish = TrackPublishOptions {
             source: TrackSource::Microphone,
             // No DTX: it can clip the first syllable after a pause, and a muted
@@ -249,9 +254,6 @@ impl Voice {
             .publish_track(LocalTrack::Audio(track.clone()), publish)
             .await
             .map_err(|e| format!("publish: {e}"))?;
-        if p.muted || p.deafened || p.ptt {
-            track.mute();
-        }
         for (_, part) in room.remote_participants() {
             for (_, publication) in part.track_publications() {
                 if publication.kind() == TrackKind::Audio && publication.source() == TrackSource::Microphone {
@@ -304,7 +306,10 @@ impl Voice {
         };
         *self.active.lock().await = Some(Active { room, channel_id, track, events });
         self.ptt.attach(core.clone());
-        let _ = core.request(C2S::VoiceState { channel_id: Some(channel_id), muted: p.muted || p.ptt, deafened: p.deafened }).await;
+        if let Err(error) = core.request(C2S::VoiceState { channel_id: Some(channel_id), muted: p.muted || p.ptt, deafened: p.deafened }).await {
+            self.leave(&core, false).await;
+            return Err(error);
+        }
         self.emit_state(&core, "connected");
         Ok(())
     }
@@ -373,6 +378,11 @@ impl Voice {
         self.apply_transmit(core, true).await;
     }
 
+    pub async fn toggle_muted(&self, core: &Arc<Core>) {
+        let muted = !self.prefs.lock().muted;
+        self.set_muted(core, muted).await;
+    }
+
     pub async fn set_deafened(&self, core: &Arc<Core>, deafened: bool) {
         self.prefs.lock().deafened = deafened;
         if let Some(a) = self.active.lock().await.as_ref() {
@@ -384,6 +394,11 @@ impl Voice {
             }
         }
         self.apply_transmit(core, true).await;
+    }
+
+    pub async fn toggle_deafened(&self, core: &Arc<Core>) {
+        let deafened = !self.prefs.lock().deafened;
+        self.set_deafened(core, deafened).await;
     }
 
     /// Volume for one person (0.0 – 2.0). Remembered for later joins and

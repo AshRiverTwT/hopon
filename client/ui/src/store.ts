@@ -19,8 +19,12 @@ export const [s, set] = createStore({
   ready: false,
   user: null as User | null,
   servers: [] as Server[],
+  users: {} as Record<string, User>,
+  mentionCandidates: {} as Record<string, User[]>,
+  memberLoaded: {} as Record<string, number>,
   presence: {} as Record<string, Presence & { serverId: string }>,
   speaking: [] as string[],
+  media: { screen: {} as Record<string, string>, camera: {} as Record<string, string> },
   voice: { channelId: null, state: "idle", muted: false, deafened: false, detail: null } as VoiceState,
   selServer: null as string | null,
   selChannel: null as string | null,
@@ -43,17 +47,45 @@ export const [s, set] = createStore({
   msgs: [] as Msg[],
   more: true,
   loadingOlder: false,
+  channelLoading: false,
+  channelError: null as string | null,
   toast: null as string | null,
   editing: null as string | null,
 });
 
 export const userName = (id: string) => {
   if (id === SYSTEM_USER) return "HopOn";
-  for (const sv of s.servers) for (const m of sv.members) if (m.id === id) return m.name;
-  return "unknown";
+  return s.users[id]?.name ?? "unknown";
 };
 export const currentServer = () => s.servers.find((x) => x.id === s.selServer) ?? null;
+export function serverUsers(server: Server | null | undefined, includeSearch = false): User[] {
+  if (!server) return [];
+  const users = new Map(server.memberIds.map((id) => s.users[id]).filter((u): u is User => !!u).map((u) => [u.id, u]));
+  if (includeSearch) for (const u of s.mentionCandidates[server.id] ?? []) users.set(u.id, u);
+  return [...users.values()];
+}
+export const currentServerUsers = (includeSearch = false) => serverUsers(currentServer(), includeSearch);
+const memberLoads = new Set<string>();
+export function loadMoreMembers(serverId: string) {
+  const server = s.servers.find((x) => x.id === serverId);
+  if (!server || memberLoads.has(serverId)) return;
+  const offset = s.memberLoaded[serverId] ?? 0;
+  if (offset >= server.memberCount) return;
+  memberLoads.add(serverId);
+  call("load_members", { serverId, offset }).catch((e) => toast(String(e))).finally(() => memberLoads.delete(serverId));
+}
+export function rememberMentionCandidates(serverId: string, users: User[]) {
+  set("mentionCandidates", serverId, users);
+}
 export const isOwner = () => !!s.user && currentServer()?.ownerId === s.user.id;
+
+function clearChannelMedia(channelId: string) {
+  for (const source of ["camera", "screen"] as const) {
+    for (const [userId, channel] of Object.entries(s.media[source])) {
+      if (channel === channelId) set("media", source, userId, undefined!);
+    }
+  }
+}
 
 // ---------- typing ----------
 // Separate signal (not the store) so typing churn never touches the list.
@@ -131,7 +163,7 @@ function bumpLastId(channelId: string, msgs: Msg[]) {
     const j = s.servers[i].channels.findIndex((c) => c.id === channelId);
     if (j < 0) continue;
     for (const m of msgs) {
-      if (m.id.startsWith("p")) continue;
+      if (m.id.startsWith("p") || m.state < 2) continue;
       if (cmpId(m.id, s.servers[i].channels[j].lastId) > 0) set("servers", i, "channels", j, "lastId", m.id);
       if (m.authorId === s.user?.id) setRead(channelId, m.id);
     }
@@ -149,7 +181,7 @@ export function maybeMarkRead() {
     const ch = s.selChannel;
     if (!ch || s.stage || !s.atBottom || !document.hasFocus() || document.hidden) return;
     let newest = "";
-    for (let i = s.msgs.length - 1; i >= 0; i--) if (!s.msgs[i].id.startsWith("p")) { newest = s.msgs[i].id; break; }
+    for (let i = s.msgs.length - 1; i >= 0; i--) if (!s.msgs[i].id.startsWith("p") && s.msgs[i].state === 2) { newest = s.msgs[i].id; break; }
     if (!newest || (s.reads[ch] && cmpId(newest, s.reads[ch]) <= 0)) return;
     setRead(ch, newest);
     call("mark_read", { channelId: ch, messageId: newest }).catch(() => {});
@@ -178,7 +210,10 @@ const notifyCtx = {
 export function onEvent(e: UiEvent) {
   // Notifications are decided on arrival: the frame queue below doesn't run
   // while the window is hidden (tray), and that's exactly when they matter.
-  if (e.t === "messages") onMessages(e.channelId, e.msgs, notifyCtx);
+  if (e.t === "incomingMessage") {
+    onMessages(e.channelId, [e.msg], notifyCtx);
+    return;
+  }
   queue.push(e);
   if (!scheduled) {
     scheduled = true;
@@ -208,7 +243,14 @@ function apply(e: UiEvent, painted: string[]) {
       const changedUser = s.user?.id !== e.user?.id;
       const loggingOut = !e.user && !!s.user;
       set("user", e.user);
+      for (const source of ["screen", "camera"] as const) {
+        set("media", source, reconcile(Object.fromEntries(e.media.filter((p) => p.active && p.source === source).map((p) => [p.userId, p.channelId]))));
+      }
       set("servers", reconcile(e.servers, { key: "id" }));
+      const users = Object.fromEntries(e.users.map((u) => [u.id, u]));
+      set("users", reconcile(users));
+      set("mentionCandidates", {});
+      set("memberLoaded", {});
       const pres: Record<string, Presence & { serverId: string }> = {};
       for (const p of e.voice) {
         const sv = e.servers.find((x) => x.channels.some((c) => c.id === p.channelId));
@@ -241,11 +283,29 @@ function apply(e: UiEvent, painted: string[]) {
     }
     case "memberJoined": {
       const i = s.servers.findIndex((x) => x.id === e.serverId);
-      if (i >= 0 && !s.servers[i].members.some((m) => m.id === e.user.id))
-        set("servers", i, "members", (m) => [...m, e.user]);
+      set("users", e.user.id, e.user);
+      if (i >= 0 && !s.servers[i].memberIds.includes(e.user.id)) {
+        set("servers", i, "memberIds", (ids) => [...ids, e.user.id]);
+        set("servers", i, "memberCount", (n) => n + 1);
+      }
       set("online", e.user.id, true);
       break;
     }
+    case "memberPage": {
+      const i = s.servers.findIndex((x) => x.id === e.serverId);
+      for (const u of e.users) set("users", u.id, u);
+      if (i >= 0) {
+        set("servers", i, "memberIds", (ids) => [...new Set([...ids, ...e.users.map((u) => u.id)])]);
+        set("memberLoaded", e.serverId, Math.max(s.memberLoaded[e.serverId] ?? 0, e.offset + e.users.length));
+        for (const u of e.users) set("online", u.id, e.online.includes(u.id));
+        set("servers", i, "activities", (a) => ({ ...a, ...e.activities }));
+      }
+      break;
+    }
+    case "memberSearch":
+      for (const u of e.users) set("users", u.id, u);
+      set("mentionCandidates", e.serverId, e.users);
+      break;
     case "reaction": {
       if (e.channelId !== s.selChannel) break;
       const i = findId(s.msgs, e.messageId);
@@ -275,17 +335,29 @@ function apply(e: UiEvent, painted: string[]) {
     case "readUpdated":
       setRead(e.channelId, e.lastRead);
       break;
+    case "channelActivity": {
+      for (let i = 0; i < s.servers.length; i++) {
+        const j = s.servers[i].channels.findIndex((c) => c.id === e.channelId);
+        if (j >= 0 && cmpId(e.lastId, s.servers[i].channels[j].lastId) > 0)
+          set("servers", i, "channels", j, "lastId", e.lastId);
+      }
+      break;
+    }
     case "userPresence":
       set("online", e.userId, e.online);
       break;
     case "activity":
       s.servers.forEach((sv, i) => {
-        if (!sv.members.some((m) => m.id === e.userId)) return;
+        if (!sv.memberIds.includes(e.userId)) return;
         set("servers", i, "activities", produce((a: Record<string, string>) => { if (e.game) a[e.userId] = e.game; else delete a[e.userId]; }));
       });
       break;
     case "serverRemoved": {
-      const name = s.servers.find((x) => x.id === e.serverId)?.name ?? "the server";
+      const server = s.servers.find((x) => x.id === e.serverId);
+      const name = server?.name ?? "the server";
+      for (const channel of server?.channels ?? []) {
+        if (channel.voice) clearChannelMedia(channel.id);
+      }
       set("servers", (l) => l.filter((x) => x.id !== e.serverId));
       if (s.selServer === e.serverId) {
         set({ selServer: null, selChannel: null, stage: null, msgs: [] });
@@ -296,6 +368,7 @@ function apply(e: UiEvent, painted: string[]) {
       break;
     }
     case "channelDeleted": {
+      clearChannelMedia(e.channelId);
       if (s.stage === e.channelId) set("stage", null);
       if (s.selChannel === e.channelId) {
         set({ selChannel: null, msgs: [] });
@@ -306,11 +379,13 @@ function apply(e: UiEvent, painted: string[]) {
     }
     case "userUpdated": {
       const u = e.user;
-      if (s.user?.id === u.id) set("user", "avatarV", u.avatarV);
-      s.servers.forEach((sv, i) => {
-        const j = sv.members.findIndex((m) => m.id === u.id);
-        if (j >= 0) set("servers", i, "members", j, { name: u.name, avatarV: u.avatarV });
-      });
+      if (s.user?.id === u.id) set("user", u);
+      set("users", u.id, u);
+      for (const [server, candidates] of Object.entries(s.mentionCandidates)) {
+        if (candidates.some((candidate) => candidate.id === u.id)) {
+          set("mentionCandidates", server, candidates.map((candidate) => candidate.id === u.id ? u : candidate));
+        }
+      }
       break;
     }
     case "messages":
@@ -326,7 +401,13 @@ function apply(e: UiEvent, painted: string[]) {
     case "msgState":
       if (e.channelId === s.selChannel) {
         const i = findId(s.msgs, e.id);
-        if (i >= 0) set("msgs", i, "state", (st) => Math.max(st, e.state));
+        if (i >= 0) {
+          set("msgs", i, "state", (st) => Math.max(st, e.state));
+          if (e.state === 2) {
+            if (s.msgs[i].authorId === s.user?.id) setRead(e.channelId, e.id);
+            else maybeMarkRead();
+          }
+        }
       }
       break;
     case "edited":
@@ -376,6 +457,12 @@ function apply(e: UiEvent, painted: string[]) {
       if (sv) queueMicrotask(() => { if (s.selServer !== sv.id) selectServer(sv.id); if (s.selChannel !== id || s.stage) void selectChannel(id); });
       break;
     }
+    case "mediaPresence": {
+      const { source, userId, channelId, active } = e.media;
+      if (active) set("media", source, userId, channelId);
+      else if (s.media[source][userId] === channelId) set("media", source, userId, undefined!);
+      break;
+    }
     case "error":
       toast(e.message);
       break;
@@ -385,29 +472,39 @@ function apply(e: UiEvent, painted: string[]) {
 // ---------- actions ----------
 
 export function selectServer(id: string) {
-  set({ selServer: id, stage: null });
+  set({ selServer: id, stage: null, selChannel: null, msgs: [], channelError: null, channelLoading: false });
   if (prefs.lastServer !== id) setPrefs({ lastServer: id });
   const sv = s.servers.find((x) => x.id === id);
   const last = prefs.lastChannel[id];
   const ch = sv?.channels.find((c) => c.id === last && !c.voice) ?? sv?.channels.find((c) => !c.voice);
   if (ch) selectChannel(ch.id);
+  else set({ stage: null, selChannel: null, msgs: [], more: false, channelLoading: false });
 }
 
 let openSeq = 0;
 export async function selectChannel(id: string) {
   const seq = ++openSeq;
   batch(() => {
-    set({ selChannel: id, stage: null, msgs: [], more: true, loadingOlder: false, editing: null, replyTo: null, jump: null, dividerAfter: s.reads[id] ?? null });
+    set({ selChannel: id, stage: null, msgs: [], more: true, loadingOlder: false, channelLoading: true, channelError: null, editing: null, replyTo: null, jump: null, dividerAfter: s.reads[id] ?? null });
     set("mentions", id, 0);
     clearBanners(id);
     const sv = s.servers.find((x) => x.channels.some((c) => c.id === id));
     if (sv && prefs.lastChannel[sv.id] !== id) setPrefs({ lastChannel: { ...prefs.lastChannel, [sv.id]: id } });
   });
-  const msgs = await call<Msg[]>("open_channel", { channelId: id });
-  if (seq !== openSeq) return;
-  const r = mergeMsgs([...s.msgs], msgs);
-  set("msgs", reconcile(r.list, { key: "id", merge: false }));
-  maybeMarkRead();
+  try {
+    const msgs = await call<Msg[]>("open_channel", { channelId: id });
+    if (seq !== openSeq || s.selChannel !== id) return;
+    const r = mergeMsgs([...s.msgs], msgs);
+    set("msgs", reconcile(r.list, { key: "id", merge: false }));
+    set("channelLoading", false);
+    maybeMarkRead();
+  } catch (error) {
+    if (seq === openSeq && s.selChannel === id) set({ channelError: String(error), channelLoading: false });
+  }
+}
+
+export function retryOpenChannel() {
+  if (s.selChannel) void selectChannel(s.selChannel);
 }
 
 export function showStage(id: string) {
@@ -437,7 +534,7 @@ export async function loadOlder() {
 export function sendMessage(content: string, files: Attachment[] = [], gifs: Gif[] = []) {
   const ch = s.selChannel;
   const me = s.user;
-  const members = currentServer()?.members ?? [];
+  const members = currentServerUsers(true);
   const text = encodeMentions(content.trim(), members);
   if (!ch || !me || (!text && !files.length && !gifs.length)) return;
   // Optimistic attachments: GIFs show their preview until the server copy lands.
@@ -488,7 +585,7 @@ export function cycleServer(dir: 1 | -1) {
 export async function editMessage(id: string, content: string) {
   set("editing", null);
   if (!s.selChannel) return;
-  const text = encodeMentions(content, currentServer()?.members ?? []);
+  const text = encodeMentions(content, currentServerUsers(true));
   await call("edit_message", { channelId: s.selChannel, id, content: text }).catch((e) => toast(String(e)));
 }
 

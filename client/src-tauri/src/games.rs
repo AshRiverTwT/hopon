@@ -166,7 +166,7 @@ async fn post_result(core: Arc<Core>, game: &'static str, raw: String) {
         return;
     };
     let nonce = (now_us() as u64) | 1;
-    match core.send_message(ch, text, nonce, now_us(), None, vec![], vec![]) {
+    match core.send_message(ch, text, nonce, now_us(), None, vec![], vec![]).await {
         Ok(()) => {
             let name = GAMES.iter().find(|g| g.id == game).map(|g| g.name).unwrap_or(game);
             core.emit(UiEvent::Error { message: format!("{name} result posted to general") });

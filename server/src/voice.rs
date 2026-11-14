@@ -12,8 +12,7 @@ struct VideoGrant {
     can_publish: bool,
     can_subscribe: bool,
     can_publish_data: bool,
-    /// What this participant may publish (microphone for voice, screen for
-    /// screen share), so a voice token can't stream video and vice versa.
+    /// Microphone for native voice, video and screen audio for the webview.
     can_publish_sources: Vec<&'static str>,
     /// Screen connections set an attribute naming the streams they watch
     /// (viewer counts); voice connections can't change their own metadata.
@@ -43,9 +42,9 @@ pub fn grant(key: &str, secret: &str, user_id: i64, name: &str, channel_id: i64)
     mint(key, secret, user_id.to_string(), name, channel_id, vec!["microphone"], false)
 }
 
-/// Screen share: publish screen video (+ its audio) and watch others'.
+/// Publish camera and screen tracks without requesting a second microphone.
 pub fn screen_grant(key: &str, secret: &str, user_id: i64, name: &str, channel_id: i64) -> String {
-    mint(key, secret, screen_identity(user_id), name, channel_id, vec!["screen_share", "screen_share_audio"], true)
+    mint(key, secret, screen_identity(user_id), name, channel_id, vec!["screen_share", "screen_share_audio", "camera"], true)
 }
 
 fn mint(key: &str, secret: &str, identity: String, name: &str, channel_id: i64, sources: Vec<&'static str>, metadata: bool) -> String {

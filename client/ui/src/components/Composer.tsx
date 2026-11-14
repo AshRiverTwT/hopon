@@ -1,16 +1,20 @@
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { currentServer, iAmTyping, s, sendMessage, set, toast, typingIn, userName } from "../store";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { currentServer, iAmTyping, rememberMentionCandidates, s, sendMessage, serverUsers, set, toast, typingIn, userName } from "../store";
 import { call } from "../ipc";
 import { fmtSize } from "../media";
-import type { Attachment } from "../types";
+import type { Attachment, User } from "../types";
 import { GifPicker } from "./GifPicker";
 import { preview } from "../rich";
 import { Avatar } from "./Avatar";
 import { EmojiPicker } from "./EmojiPicker";
+import { encodePoll } from "../polls";
 
 const MAX_FILES = 10;
-
 interface Pending { key: number; name: string; size: number; thumb: string | null; att: Attachment | null; error: string | null }
+interface Draft { text: string; files: Pending[] }
+const drafts = new Map<string, Draft>();
+let fileSeq = 0;
+let refreshDraftHook: ((channelId: string) => void) | null = null;
 
 /** Drop/paste targets elsewhere in the window hand files to the composer. */
 let addFilesHook: ((files: File[]) => void) | null = null;
@@ -29,55 +33,105 @@ function typingLine(names: string[]): string {
 }
 
 export default function Composer() {
-  const [text, setText] = createSignal("");
+  const initialDraft = s.selChannel ? drafts.get(s.selChannel) : undefined;
+  const [text, setText] = createSignal(initialDraft?.text ?? "");
   const [caret, setCaret] = createSignal(0);
   const [pick, setPick] = createSignal(0);
   const [emoji, setEmoji] = createSignal(false);
   const [gif, setGif] = createSignal(false);
-  const [files, setFiles] = createSignal<Pending[]>([]);
+  const [files, setFiles] = createSignal<Pending[]>(initialDraft?.files ?? []);
+  const [searchResults, setSearchResults] = createSignal<User[]>([]);
   let ta!: HTMLTextAreaElement;
   let fileInput!: HTMLInputElement;
-  let seq = 0;
 
-  const patch = (key: number, p: Partial<Pending>) => setFiles((l) => l.map((x) => (x.key === key ? { ...x, ...p } : x)));
-  const drop = (key: number) => setFiles((l) => { const x = l.find((y) => y.key === key); if (x?.thumb) URL.revokeObjectURL(x.thumb); return l.filter((y) => y.key !== key); });
+  createEffect(() => {
+    const channelId = s.selChannel;
+    if (!channelId) return;
+    const saved = drafts.get(channelId) ?? { text: "", files: [] };
+    setFiles(saved.files);
+    setText(saved.text);
+    queueMicrotask(() => { if (ta) { ta.value = saved.text; resize(); } });
+  });
+
+  const patch = (key: number, p: Partial<Pending>, channelId: string) => {
+    const current = drafts.get(channelId) ?? { text: "", files: [] };
+    const nextDraftFiles = current.files.map((file) => file.key === key ? { ...file, ...p } : file);
+    drafts.set(channelId, { ...current, files: nextDraftFiles });
+    refreshDraftHook?.(channelId);
+  };
+  const drop = (key: number) => setFiles((l) => {
+    const x = l.find((y) => y.key === key);
+    if (x?.thumb) URL.revokeObjectURL(x.thumb);
+    const next = l.filter((y) => y.key !== key);
+    if (s.selChannel) drafts.set(s.selChannel, { text: text(), files: next });
+    return next;
+  });
   const addFiles = (list: File[]) => {
     if (!s.selChannel) return;
+    const channelId = s.selChannel;
     const room = MAX_FILES - files().length;
     if (list.length > room) toast(`Up to ${MAX_FILES} files per message`);
     for (const f of list.slice(0, Math.max(0, room))) {
-      const key = ++seq;
+      const key = ++fileSeq;
       const thumb = f.type.startsWith("image/") ? URL.createObjectURL(f) : null;
       setFiles((l) => [...l, { key, name: f.name || "file", size: f.size, thumb, att: null, error: null }]);
+      if (s.selChannel) drafts.set(s.selChannel, { text: text(), files: files() });
       (async () => {
         try {
           const [w, h] = await pixelSize(f);
           const bytes = new Uint8Array(await f.arrayBuffer());
           const att = await call<Attachment>("upload_file", bytes, { headers: { "x-name": encodeURIComponent(f.name || "file"), "x-w": String(w), "x-h": String(h) } });
-          patch(key, { att });
+          patch(key, { att }, channelId);
         } catch (e) {
-          patch(key, { error: String(e) });
+          patch(key, { error: String(e) }, channelId);
         }
       })();
     }
     ta.focus();
   };
-  onMount(() => { addFilesHook = addFiles; onCleanup(() => { if (addFilesHook === addFiles) addFilesHook = null; }); });
-  onCleanup(() => files().forEach((f) => f.thumb && URL.revokeObjectURL(f.thumb)));
+  onMount(() => {
+    const refresh = (channelId: string) => {
+      if (s.selChannel === channelId) setFiles(drafts.get(channelId)?.files ?? []);
+    };
+    addFilesHook = addFiles;
+    refreshDraftHook = refresh;
+    onCleanup(() => {
+      if (addFilesHook === addFiles) addFilesHook = null;
+      if (refreshDraftHook === refresh) refreshDraftHook = null;
+    });
+  });
   const uploading = () => files().some((f) => !f.att && !f.error);
   const name = () => currentServer()?.channels.find((c) => c.id === s.selChannel)?.name ?? "";
 
   // "@que" right before the caret → member suggestions.
   const query = createMemo(() => {
     const before = text().slice(0, caret());
-    const m = before.match(/(^|[\s(])@([^\s@<>]{0,32})$/);
+    const m = before.match(/(^|[\s(])@([^\n@<>]{0,32})$/);
     return m ? m[2] : null;
+  });
+  let searchSeq = 0;
+  createEffect(() => {
+    const q = query();
+    const serverId = currentServer()?.id;
+    if (!q || !serverId) { searchSeq++; setSearchResults([]); return; }
+    const seq = ++searchSeq;
+    const timer = window.setTimeout(() => {
+      call<User[]>("member_search", { serverId, query: q })
+        .then((users) => {
+          if (seq !== searchSeq) return;
+          setSearchResults(users);
+          rememberMentionCandidates(serverId, users);
+        }).catch(() => {});
+    }, 130);
+    onCleanup(() => clearTimeout(timer));
   });
   const matches = createMemo(() => {
     const q = query();
     if (q === null) return [];
     const ql = q.toLowerCase();
-    return (currentServer()?.members ?? []).filter((m) => m.name.toLowerCase().startsWith(ql)).slice(0, 6);
+    const merged = new Map(serverUsers(currentServer()).map((m) => [m.id, m]));
+    for (const m of searchResults()) merged.set(m.id, m);
+    return [...merged.values()].filter((m) => m.name.toLowerCase().startsWith(ql)).slice(0, 6);
   });
 
   const resize = () => { ta.style.height = "auto"; ta.style.height = Math.min(200, ta.scrollHeight) + "px"; };
@@ -87,6 +141,7 @@ export default function Composer() {
     const start = pos - q.length;
     const next = text().slice(0, start) + memberName + " " + text().slice(pos);
     setText(next);
+    if (s.selChannel) drafts.set(s.selChannel, { text: next, files: files() });
     ta.value = next;
     const c = start + memberName.length + 1;
     ta.setSelectionRange(c, c);
@@ -101,6 +156,7 @@ export default function Composer() {
     const end = ta.selectionEnd ?? start;
     const next = text().slice(0, start) + t + text().slice(end);
     setText(next);
+    if (s.selChannel) drafts.set(s.selChannel, { text: next, files: files() });
     ta.value = next;
     const c = start + t.length;
     ta.focus();
@@ -121,8 +177,10 @@ export default function Composer() {
       const v = text();
       const ready = files().filter((f) => f.att).map((f) => f.att!);
       if (uploading()) { toast("Still uploading…"); return; }
+      if (files().some((f) => f.error)) { toast("Remove failed uploads before sending"); return; }
       if (v.trim() || ready.length) {
         sendMessage(v, ready);
+        if (s.selChannel) drafts.delete(s.selChannel);
         setText("");
         ta.value = "";
         files().forEach((f) => f.thumb && URL.revokeObjectURL(f.thumb));
@@ -178,13 +236,21 @@ export default function Composer() {
       <button class="attach-btn" title="Attach files" aria-label="Attach files" onClick={() => fileInput.click()}>
         <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
       </button>
+      <button class="gif-btn poll-btn" title="Create a poll" aria-label="Create a poll" onClick={() => {
+        const question = window.prompt("What should people vote on?")?.trim();
+        if (!question) return;
+        const raw = window.prompt("Enter 2–5 choices separated by commas") ?? "";
+        const options = raw.split(",").map((option) => option.trim()).filter(Boolean).slice(0, 5);
+        if (options.length < 2) { toast("A poll needs at least two choices"); return; }
+        sendMessage(encodePoll({ question, options }));
+      }}>Poll</button>
       <input ref={fileInput} type="file" multiple hidden onChange={(e) => { addFiles([...(e.currentTarget.files ?? [])]); e.currentTarget.value = ""; }} />
       <textarea
         ref={ta}
         rows={1}
         maxLength={4000}
         placeholder={s.replyTo ? `Reply in ${name()}` : `Write in ${name()}`}
-        onInput={(e) => { setText(e.currentTarget.value); setCaret(e.currentTarget.selectionStart); setPick(0); resize(); if (e.currentTarget.value.trim()) iAmTyping(); }}
+        onInput={(e) => { setText(e.currentTarget.value); if (s.selChannel) drafts.set(s.selChannel, { text: e.currentTarget.value, files: files() }); setCaret(e.currentTarget.selectionStart); setPick(0); resize(); if (e.currentTarget.value.trim()) iAmTyping(); }}
         onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
         onClick={(e) => setCaret(e.currentTarget.selectionStart)}
         onKeyDown={onKey}

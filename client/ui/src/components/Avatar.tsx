@@ -9,14 +9,12 @@ const [loaded, setLoaded] = createSignal(0);
 
 export function avatarV(id: string): number {
   if (s.user?.id === id) return s.user.avatarV;
-  for (const sv of s.servers) for (const m of sv.members) if (m.id === id) return m.avatarV;
-  return 0;
+  return s.users[id]?.avatarV ?? 0;
 }
 
 function nameOf(id: string): string {
   if (s.user?.id === id) return s.user.name;
-  for (const sv of s.servers) for (const m of sv.members) if (m.id === id) return m.name;
-  return "?";
+  return s.users[id]?.name ?? "?";
 }
 
 export function Avatar(p: { id: string; size: number; class?: string }) {

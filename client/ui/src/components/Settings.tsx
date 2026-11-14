@@ -25,7 +25,7 @@ interface Opt {
 
 const vkName = (vk: number) => {
   if (vk >= 0x70 && vk <= 0x87) return `F${vk - 0x6f}`;
-  const named: Record<number, string> = { 0x14: "Caps Lock", 0x20: "Space", 0xc0: "`", 0x12: "Alt", 0x11: "Ctrl", 0x10: "Shift", 0x05: "Mouse 4", 0x06: "Mouse 5" };
+  const named: Record<number, string> = { 0x14: "Caps Lock", 0x20: "Space", 0xc0: "`", 0x12: "Alt", 0x11: "Ctrl", 0x10: "Shift", 0x1004: "Mouse 4", 0x1005: "Mouse 5" };
   return named[vk] ?? (vk >= 0x30 && vk <= 0x5a ? String.fromCharCode(vk) : `Key ${vk}`);
 };
 
@@ -37,7 +37,32 @@ export default function Settings(p: { close: () => void }) {
   const pttKey = () => prefs.pttKey;
   /** Waiting for a key: "ptt" or a hotkey action. */
   const [capturing, setCapturing] = createSignal<null | "ptt" | Action>(null);
+  const [nameDraft, setNameDraft] = createSignal<string | null>(null);
+  const [nameError, setNameError] = createSignal("");
+  const [savingName, setSavingName] = createSignal(false);
   let fileInput!: HTMLInputElement;
+  let nameButton: HTMLButtonElement | undefined;
+
+  const closeNameEditor = () => {
+    setNameDraft(null);
+    queueMicrotask(() => nameButton?.focus());
+  };
+  const saveName = async (e: SubmitEvent) => {
+    e.preventDefault();
+    const name = nameDraft()?.trim();
+    if (name === undefined || savingName()) return;
+    if ([...name].length > 32) return void setNameError("Use 32 characters or fewer.");
+    setSavingName(true);
+    setNameError("");
+    try {
+      await call("set_display_name", { name });
+      closeNameEditor();
+    } catch (error) {
+      setNameError(String(error));
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   const savePtt = (en: boolean, k: number) => {
     setPrefs({ ptt: en, pttKey: k });
@@ -82,7 +107,11 @@ export default function Settings(p: { close: () => void }) {
     { name: "Profile", opts: [
       { label: "Picture", value: () => (s.user?.avatarV ? "Change" : "Upload"), step: () => fileInput.click() },
       { label: "Remove picture", value: () => (s.user?.avatarV ? "Remove" : "—"), step: (d) => { if (d === 0 && s.user?.avatarV) call("set_avatar", { data: [] }).catch(err); } },
-      { label: "Name", value: () => s.user?.name ?? "", step: () => {} },
+      { label: "Display name", value: () => s.user?.name ?? "", step: (dir) => {
+        if (dir !== 0 || !s.user) return;
+        setNameError("");
+        setNameDraft(s.user.name);
+      } },
       { label: "Show what I'm playing", value: () => onOff(prefs.showActivity), step: () => { setPrefs({ showActivity: !prefs.showActivity }); call("activity_sharing", { enabled: prefs.showActivity }).catch(err); } },
     ] },
     { name: "Audio", opts: [
@@ -131,6 +160,14 @@ export default function Settings(p: { close: () => void }) {
   const current = () => cats()[cat()];
 
   const onKey = (e: KeyboardEvent) => {
+    if (nameDraft() !== null) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!savingName()) closeNameEditor();
+      }
+      return;
+    }
     const cap = capturing();
     if (cap === "ptt") {
       e.preventDefault(); e.stopPropagation();
@@ -158,9 +195,20 @@ export default function Settings(p: { close: () => void }) {
     else if (e.key === "ArrowLeft") { e.preventDefault(); opt() < 0 ? undefined : (opt() === 0 ? setOpt(-1) : current().opts[opt()].step(-1)); }
     else if (e.key === "Enter") { e.preventDefault(); opt() < 0 ? setOpt(0) : current().opts[opt()].step(0); }
   };
+  const onMouse = (e: MouseEvent) => {
+    if (capturing() !== "ptt" || (e.button !== 3 && e.button !== 4)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setCapturing(null);
+    savePtt(true, e.button === 3 ? 0x1004 : 0x1005);
+  };
   onMount(() => {
     window.addEventListener("keydown", onKey, true);
-    onCleanup(() => window.removeEventListener("keydown", onKey, true));
+    window.addEventListener("mousedown", onMouse, true);
+    onCleanup(() => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("mousedown", onMouse, true);
+    });
   });
 
   const pickFile = async () => {
@@ -176,6 +224,7 @@ export default function Settings(p: { close: () => void }) {
         <span class="wordmark"><span class="mark" aria-hidden="true">H</span>HopOn</span>
         <button class="pill" onClick={p.close}>Close</button>
       </div>
+      <Show when={nameDraft() === null}>
       <div class="cascade">
         <ol class="cascade-cats">
           <For each={cats()}>
@@ -196,7 +245,7 @@ export default function Settings(p: { close: () => void }) {
                 <div class="cap">{o.label}</div>
                 <div class="val">
                   <button class="chev" aria-label="Previous" onClick={() => o.step(-1)}>‹</button>
-                  <button class="v" onClick={() => o.step(0)}>{o.value()}</button>
+                  <button class="v" ref={(el) => { if (o.label === "Display name") nameButton = el; }} onClick={() => o.step(0)}>{o.value()}</button>
                   <button class="chev" aria-label="Next" onClick={() => o.step(1)}>›</button>
                 </div>
               </li>
@@ -204,7 +253,22 @@ export default function Settings(p: { close: () => void }) {
           </For>
         </ol>
       </div>
-      <Show when={!devs() && !devs.loading}>
+      </Show>
+      <Show when={nameDraft() !== null}>
+        <form class="profile-name-editor" onSubmit={saveName}>
+          <label for="display-name">Display name</label>
+          <input id="display-name" class="line" ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
+            value={nameDraft() ?? ""} onInput={(e) => setNameDraft(e.currentTarget.value)} disabled={savingName()}
+            aria-describedby="display-name-help" />
+          <p id="display-name-help" class="muted small">Leave blank to show your sign-in username. Up to 32 characters.</p>
+          <Show when={nameError()}><p role="alert">{nameError()}</p></Show>
+          <div class="field-row">
+            <button class="pill solid" type="submit" disabled={savingName()}>{savingName() ? "Saving…" : "Save name"}</button>
+            <button class="pill" type="button" onClick={closeNameEditor} disabled={savingName()}>Cancel</button>
+          </div>
+        </form>
+      </Show>
+      <Show when={nameDraft() === null && !devs() && !devs.loading}>
         <p class="cascade-note muted">Audio devices are unavailable in this build.</p>
       </Show>
       <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={pickFile} />

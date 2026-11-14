@@ -22,5 +22,8 @@ export const PipIcon = () => <I d="M1.5 3h13v10h-13zM8.5 8h4.5v3.5H8.5z" />;
 export const DockIcon = () => <I d="M1.5 3h13v10h-13zM4.5 6l3 3M4.5 9h3V6" />;
 export const CloseIcon = () => <I d="M3.5 3.5l9 9M12.5 3.5l-9 9" />;
 export const SpeakerIcon = () => <I d="M2 6h2.5L8 3v10L4.5 10H2zM11 5.5a3.5 3.5 0 010 5M12.8 3.5a6.3 6.3 0 010 9" />;
+export const CameraIcon = () => <I d="M2 4.5h8v7H2zM10 7l4-2v6l-4-2" />;
+export const MicIcon = () => <I d="M6 4a2 2 0 014 0v4a2 2 0 01-4 0zM3.5 7.5a4.5 4.5 0 009 0M8 12v2m-2 0h4" />;
+export const ScreenIcon = () => <I d="M2 3h12v8H2zM8 11v2m-3 0h6" />;
 export const BellIcon = () => <I d="M4 11V7a4 4 0 018 0v4l1.2 1.5H2.8zM6.5 14h3" />;
 export const BellOffIcon = () => <I d="M4 11V7a4 4 0 016.7-3M12 7v4l1.2 1.5H5M6.5 14h3M2 2l12 12" />;

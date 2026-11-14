@@ -56,6 +56,8 @@ impl Voice {
     pub fn leave_if_in(&self, _core: Arc<Core>, _channels: &[Id]) {}
     pub async fn set_muted(&self, _core: &Arc<Core>, _muted: bool) {}
     pub async fn set_deafened(&self, _core: &Arc<Core>, _deafened: bool) {}
+    pub async fn toggle_muted(&self, _core: &Arc<Core>) {}
+    pub async fn toggle_deafened(&self, _core: &Arc<Core>) {}
     pub async fn set_ptt(&self, _core: &Arc<Core>, _enabled: bool, _vk: u32) {}
     pub async fn set_volume(&self, _user: String, _v: f64) {}
     pub fn on_reconnect(&self, _core: Arc<Core>) {}

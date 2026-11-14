@@ -3,7 +3,7 @@
 // ResizeObserver on every mounted row (fonts, media, edits, reactions), so a
 // 5000-message channel renders ~30 rows and scrolls at full frame rate.
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { deleteMessage, editMessage, isOwner, jumpTo, loadOlder, maybeMarkRead, s, set, toggleReaction, userName } from "../store";
+import { deleteMessage, editMessage, isOwner, jumpTo, loadOlder, maybeMarkRead, retryOpenChannel, s, set, toggleReaction, userName } from "../store";
 import { findId } from "../merge";
 import { decodeMentions, jumboEmoji, mentionsUser, preview } from "../rich";
 import Rich from "./Rich";
@@ -15,6 +15,8 @@ import { cellClass, GAMES, parseGameResult } from "../games";
 import Attachments from "./Attachments";
 import { fitBox } from "../media";
 import { SYSTEM_USER } from "../types";
+import { isBookmarked, toggleBookmark } from "../localFeatures";
+import { decodePoll, POLL_EMOJI } from "../polls";
 
 const OVERSCAN = 800; // px above and below the viewport
 const EST_HEADER = 70;
@@ -167,6 +169,12 @@ export default function MessageList() {
       <button class="to-latest pill" onClick={() => { atBottom = true; set("atBottom", true); pin(); maybeMarkRead(); }}>Jump to latest ↓</button>
     </Show>
     <div class="messages" ref={el} onScroll={onScroll}>
+      <Show when={s.channelError}>
+        <div class="channel-error" role="alert">Couldn’t load this channel. <button class="link" onClick={retryOpenChannel}>Retry</button></div>
+      </Show>
+      <Show when={!s.channelError && s.channelLoading && !s.msgs.length}>
+        <div class="channel-error" role="status">Loading messages…</div>
+      </Show>
       <div style={{ height: `${layout()[layout().length - 1]}px`, position: "relative" }}>
         <Show when={!s.more && s.msgs.length > 0}>
           <div class="channel-start eyebrow">Beginning of the channel</div>
@@ -242,7 +250,7 @@ function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean;
     );
   }
   return (
-    <div ref={node} class="msg" onMouseEnter={() => setHover(true)} onMouseLeave={() => !picker() && setHover(false)}
+    <div ref={node} class="msg" tabIndex={0} onFocusIn={() => setHover(true)} onFocusOut={(e) => { if (!node.contains(e.relatedTarget as Node | null) && !picker()) setHover(false); }} onMouseEnter={() => setHover(true)} onMouseLeave={() => !picker() && !node.contains(document.activeElement) && setHover(false)}
       classList={{ first: p.header, pending: p.m.state === 0, failed: p.m.state === 3, "mention-me": !!s.user && mentionsUser(p.m.content, s.user.id), flash: flash() }}>
       <Show when={p.day}><div class="day-sep"><span>{p.day}</span></div></Show>
       <Show when={p.newHere}><div class="new-sep"><span>New</span></div></Show>
@@ -262,6 +270,7 @@ function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean;
         </div>
       </Show>
       <Show when={s.editing === p.m.id} fallback={
+        <Show when={decodePoll(p.m.content)} fallback={
         <Show when={parseGameResult(p.m.content)} fallback={
         <div class="body" classList={{ jumbo: !p.m.attachments.length && jumboEmoji(p.m.content) }}>
           <Show when={p.m.content}><Rich text={p.m.content} /></Show>
@@ -283,6 +292,15 @@ function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean;
             </div>
           )}
         </Show>
+        }>
+          {(poll) => <div class="poll-card"><strong>{poll().question}</strong><For each={poll().options}>{(option, index) => {
+            const emoji = POLL_EMOJI[index()];
+            const votes = () => p.m.reactions.find((reaction) => reaction.emoji === emoji)?.users ?? [];
+            return <button class="poll-option" classList={{ mine: !!s.user && votes().includes(s.user.id) }} onClick={() => toggleReaction(p.m, emoji)}>
+              <span>{emoji} {option}</span><span>{votes().length}</span>
+            </button>;
+          }}</For><span class="muted small">{p.m.reactions.filter((reaction) => POLL_EMOJI.slice(0, poll().options.length).includes(reaction.emoji)).reduce((total, reaction) => total + reaction.users.length, 0)} votes</span></div>}
+        </Show>
       }>
         <Editor m={p.m} />
       </Show>
@@ -302,6 +320,7 @@ function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean;
         <div class="actions" classList={{ open: picker() }}>
           <button class="link" onClick={() => set("replyTo", { ...p.m })}>Reply</button>
           <button class="link" onClick={() => setPicker((v) => !v)}>React</button>
+          <button class="link" aria-pressed={isBookmarked(p.m.channelId, p.m.id)} onClick={() => toggleBookmark(p.m.channelId, p.m.id)}>{isBookmarked(p.m.channelId, p.m.id) ? "Saved" : "Save"}</button>
           <Show when={mine()}><button class="link" onClick={() => set("editing", p.m.id)}>Edit</button></Show>
           <Show when={mine() || isOwner()}><button class="link" onClick={() => deleteMessage(p.m.id)}>Delete</button></Show>
           <Show when={picker()}>

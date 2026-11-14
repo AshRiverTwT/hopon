@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
     for i in 0..n {
         tick.tick().await;
         let t = now_us();
-        author.send(C2S::Send { channel_id, content: format!("e2e message {i} — the quick brown fox jumps over the lazy dog"), nonce: i as u64 + 1, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
+        author.send(C2S::Send { channel_id, content: format!("e2e message {i} — the quick brown fox jumps over the lazy dog"), nonce: i as u64 + 1, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await?;
     }
     tokio::time::sleep(Duration::from_secs(3)).await;
     println!("sent {n}");

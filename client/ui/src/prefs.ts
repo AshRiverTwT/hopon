@@ -102,7 +102,12 @@ function applyToCore(p: Prefs) {
 }
 
 export function applyOverlayKeys(p: Prefs) {
-  call("overlay_hotkey", { combo: p.hotkeys.overlay ?? "", typeCombo: p.hotkeys.overlayType ?? "" }).catch(() => {});
+  call("overlay_hotkey", {
+    combo: p.hotkeys.overlay ?? "",
+    typeCombo: p.hotkeys.overlayType ?? "",
+    muteCombo: p.hotkeys.toggleMute ?? "",
+    deafenCombo: p.hotkeys.toggleDeafen ?? "",
+  }).catch(() => {});
 }
 
 /** Zoom the whole window (games view follows via its bounds). */

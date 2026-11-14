@@ -229,15 +229,19 @@ The exact commands are in [Measuring on Windows](#measuring-on-windows).
   step before it.
 
 **Server**
-- Messages are fanned out from memory before the database write. A
-  per-channel lock covers ID assignment and broadcast, so fan-out order equals
-  ID order.
+- User messages are delivered from memory before the database write. A
+  per-channel lock keeps message IDs, broadcasts, and the write queue in order.
+  A message received this way is provisional until the server confirms the
+  write. The sender's outbox can retry a message that never committed.
 - A single persister batches inserts (one `UNNEST` insert per transaction) and
   acks the author after commit.
 - Edits and deletes go through the same ordered queue, so they can never
   overtake the insert they refer to.
-- Resends are idempotent: `(author, nonce)` is remembered for 5 minutes, so a
-  message resent after a reconnect keeps its ID and is never duplicated.
+- Resends reuse the original ID. The server keeps a short in-memory cache and
+  stores the unique `(author, nonce)` key in PostgreSQL for retries after a restart.
+- The replay log and message rows commit together. The replay schema is additive
+  and leaves the SQLx migration ledger at version 7, so the previous server can
+  start on the same database. A rollback requires a matching client protocol.
 - One `broadcast` per server (guild), not per channel. A user in 10 servers
   costs 10 receivers, and each event is encoded once and shared as `Bytes`.
 - A receiver that lags behind is disconnected; the client reconnects and

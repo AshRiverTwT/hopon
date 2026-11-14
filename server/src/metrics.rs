@@ -15,6 +15,10 @@ pub struct Metrics {
     pub messages: AtomicU64,
     pub lagged_disconnects: AtomicU64,
     pub persist_failures: AtomicU64,
+    pub history_rejected: AtomicU64,
+    pub upload_rejected: AtomicU64,
+    pub replay_snapshot_fallbacks: AtomicU64,
+    pub auth_rejected: AtomicU64,
 }
 
 impl Metrics {
@@ -27,13 +31,17 @@ impl Metrics {
             messages: AtomicU64::new(0),
             lagged_disconnects: AtomicU64::new(0),
             persist_failures: AtomicU64::new(0),
+            history_rejected: AtomicU64::new(0),
+            upload_rejected: AtomicU64::new(0),
+            replay_snapshot_fallbacks: AtomicU64::new(0),
+            auth_rejected: AtomicU64::new(0),
         }
     }
 
     pub fn render(&self) -> String {
         let g = |a: &AtomicU64| a.load(Ordering::Relaxed);
         format!(
-            "{}\n{}\n{}\nconnections {}\nmessages_total {}\nlagged_disconnects {}\npersist_failures {}\n",
+            "{}\n{}\n{}\nconnections {}\nmessages_total {}\nlagged_disconnects {}\npersist_failures {}\nhistory_rejected {}\nupload_rejected {}\nauth_rejected {}\nreplay_snapshot_fallbacks {}\n",
             self.fanout.lock().line(),
             self.persist.lock().line(),
             self.batch_rows.lock().line(),
@@ -41,6 +49,10 @@ impl Metrics {
             g(&self.messages),
             g(&self.lagged_disconnects),
             g(&self.persist_failures),
+            g(&self.history_rejected),
+            g(&self.upload_rejected),
+            g(&self.auth_rejected),
+            g(&self.replay_snapshot_fallbacks),
         )
     }
 

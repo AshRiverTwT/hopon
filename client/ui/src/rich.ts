@@ -121,7 +121,7 @@ export const mentionsUser = (src: string, userId: string) => src.includes(`<@${u
 /** Composer text → wire text: "@name" for known members becomes "<@id>". */
 export function encodeMentions(text: string, members: { id: string; name: string }[]): string {
   const sorted = [...members].sort((a, b) => b.name.length - a.name.length);
-  return text.replace(/(^|[\s(])@([^\s@<>]{1,32})/g, (all, pre: string, word: string) => {
+  return text.replace(/(^|[\s(])@([^\n@<>]{1,32}?)(?=\s@|[.,!?]|$)/g, (all, pre: string, word: string) => {
     for (const m of sorted) {
       if (word.toLowerCase().startsWith(m.name.toLowerCase())) {
         const tail = word.slice(m.name.length);
