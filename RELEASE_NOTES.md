@@ -2,6 +2,51 @@
 
 **Download the latest:** [HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe)
 
+## HopOn 0.5.2
+
+**Update the app and the server together** (new protocol: a 0.5.1 app shows
+*Update needed* on a 0.5.2 server and offers the one-click update).
+
+### New
+
+- **Webcam video in voice rooms.** Turn your camera on in the room, or press
+  **Join with camera**. Your own preview is mirrored.
+- **Polls.** The poll button in the message bar asks a question with 2 to 5
+  options; people vote with 1️⃣–5️⃣ and the counts update live.
+- **Display names.** Set one in Settings → Profile; it shows instead of your
+  username.
+- **Saved messages.** **Save** on any message; **Saved** in the channel header
+  lists them and jumps back to each one.
+- **Favorite channels.** The ☆ in the channel header.
+- **Search this channel.** **Search** in the channel header finds text in the
+  messages loaded so far.
+- **Push-to-talk on mouse buttons** (Mouse 4 / Mouse 5).
+- **Low resource screen sharing:** 720p at 30 fps, and you watch one stream
+  at a time.
+
+### Better
+
+- **Catch-up after reconnecting.** After a dropped connection or a server
+  restart, HopOn fetches exactly what you missed (messages, edits, deletions,
+  reactions) instead of reloading the channel.
+- **No duplicate messages** when a send is retried after a reconnect.
+- **Big servers load faster.** Members load in pages as you scroll the people
+  list, and @mention suggestions search the whole server.
+- **Lighter in the background.** While HopOn is minimized or in the tray it
+  skips screen updates it doesn't need; notifications and the in-game overlay
+  keep working.
+- Screen share connects only when someone shares or watches.
+- Drafts and unfinished uploads stay put when you switch channels; a channel
+  that fails to load offers **Retry**.
+
+### Known issues
+
+- Saved messages and favorite channels are kept on this PC only (they don't
+  follow your account to another computer yet).
+- While HopOn is open but not the window you're using, it stops updating the
+  chat on screen and catches up when you click back in. Notifications still
+  arrive.
+
 ## HopOn 0.5.1
 
 App only: no server update needed.
