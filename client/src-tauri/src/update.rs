@@ -23,6 +23,22 @@ struct Manifest {
     sha256: String,
     #[serde(default)]
     notes: String,
+    /// The Linux AppImage (optional: older manifests have none).
+    #[serde(default)]
+    linux_url: String,
+    #[serde(default)]
+    linux_sha256: String,
+}
+
+impl Manifest {
+    /// This platform's download: (url, sha256).
+    fn download(&self) -> Option<(&str, &str)> {
+        if cfg!(target_os = "linux") {
+            (!self.linux_url.is_empty() && self.linux_sha256.len() == 64).then_some((self.linux_url.as_str(), self.linux_sha256.as_str()))
+        } else {
+            Some((self.url.as_str(), self.sha256.as_str()))
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -61,7 +77,8 @@ async fn fetch(core: &Core) -> Res<Manifest> {
 #[tauri::command]
 pub async fn update_check(core: tauri::State<'_, Arc<Core>>) -> Res<UpdateInfo> {
     let m = fetch(&core).await?;
-    Ok(UpdateInfo { current: CURRENT.into(), available: newer(&m.version, CURRENT), latest: m.version, notes: m.notes })
+    let available = newer(&m.version, CURRENT) && m.download().is_some() && platform::can_update();
+    Ok(UpdateInfo { current: CURRENT.into(), available, latest: m.version, notes: m.notes })
 }
 
 /// Download, verify, then hand over to the installer and quit.
@@ -71,9 +88,10 @@ pub async fn update_install(app: tauri::AppHandle, core: tauri::State<'_, Arc<Co
     if !newer(&m.version, CURRENT) {
         return Err("you're already on the latest version".into());
     }
+    let (url, sha256) = m.download().ok_or("no download for this platform yet")?;
     let bytes = core
         .http()
-        .get(&m.url)
+        .get(url)
         .timeout(Duration::from_secs(600))
         .send()
         .await
@@ -84,12 +102,10 @@ pub async fn update_install(app: tauri::AppHandle, core: tauri::State<'_, Arc<Co
         .map_err(|_| "download failed".to_string())?;
     use sha2::{Digest, Sha256};
     let got: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
-    if !got.eq_ignore_ascii_case(&m.sha256) {
+    if !got.eq_ignore_ascii_case(sha256) {
         return Err("the download was corrupted (checksum mismatch); try again".into());
     }
-    let path = std::env::temp_dir().join(format!("HopOn-{}-setup.exe", m.version));
-    std::fs::write(&path, &bytes).map_err(|e| format!("couldn't save the installer: {e}"))?;
-    platform::run_installer(&path)?;
+    platform::install(&m.version, &bytes)?;
     // Leave voice cleanly, then exit so the installer can replace the files.
     let c = core.inner().clone();
     c.voice.leave(&c, true).await;
@@ -102,12 +118,18 @@ mod platform {
     use crate::core::Res;
     use std::os::windows::process::CommandExt;
 
-    pub fn run_installer(installer: &std::path::Path) -> Res<()> {
+    pub fn can_update() -> bool {
+        true
+    }
+
+    pub fn install(version: &str, bytes: &[u8]) -> Res<()> {
+        let installer = std::env::temp_dir().join(format!("HopOn-{version}-setup.exe"));
+        std::fs::write(&installer, bytes).map_err(|e| format!("couldn't save the installer: {e}"))?;
         const DETACHED_PROCESS: u32 = 0x0000_0008;
         // Tauri's NSIS installer: /P passive (progress bar only), /UPDATE keeps
         // shortcuts and settings, /R reopens HopOn when done. It closes this
         // process itself if it's still running.
-        std::process::Command::new(installer)
+        std::process::Command::new(&installer)
             .args(["/P", "/UPDATE", "/R"])
             .creation_flags(DETACHED_PROCESS)
             .spawn()
@@ -116,11 +138,44 @@ mod platform {
     }
 }
 
-#[cfg(not(windows))]
+/// Linux AppImage: replace the AppImage file in place, then start the new one.
+#[cfg(target_os = "linux")]
 mod platform {
     use crate::core::Res;
-    pub fn run_installer(_installer: &std::path::Path) -> Res<()> {
-        Err("in-app updates are only available on Windows".into())
+    use std::os::unix::fs::PermissionsExt;
+
+    /// Only the AppImage updates itself (a distro package updates through its package manager).
+    fn appimage() -> Option<std::path::PathBuf> {
+        std::env::var_os("APPIMAGE").map(std::path::PathBuf::from).filter(|p| p.is_file())
+    }
+
+    pub fn can_update() -> bool {
+        appimage().is_some()
+    }
+
+    pub fn install(_version: &str, bytes: &[u8]) -> Res<()> {
+        let target = appimage().ok_or("updates here come from your package manager")?;
+        let tmp = target.with_extension("new");
+        std::fs::write(&tmp, bytes).map_err(|e| format!("couldn't save the update: {e}"))?;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &target).map_err(|e| format!("couldn't replace the AppImage: {e}"))?;
+        // Started a moment later, once this copy has closed (one HopOn runs at a time).
+        std::process::Command::new("sh")
+            .args(["-c", "sleep 1.5; exec \"$0\"", &target.to_string_lossy()])
+            .spawn()
+            .map_err(|e| format!("couldn't start the new version: {e}"))?;
+        Ok(())
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+mod platform {
+    use crate::core::Res;
+    pub fn can_update() -> bool {
+        false
+    }
+    pub fn install(_version: &str, _bytes: &[u8]) -> Res<()> {
+        Err("in-app updates aren't available on this system".into())
     }
 }
 

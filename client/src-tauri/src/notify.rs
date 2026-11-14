@@ -39,7 +39,31 @@ fn show(app: &tauri::AppHandle, core: Arc<Core>, title: &str, body: &str, sound:
     }
 }
 
-#[cfg(not(windows))]
+/// Linux: a desktop notification (D-Bus); clicking it opens the channel.
+#[cfg(target_os = "linux")]
+fn show(app: &tauri::AppHandle, core: Arc<Core>, title: &str, body: &str, sound: bool, channel_id: Option<String>) {
+    let (app, title, body) = (app.clone(), title.to_owned(), body.to_owned());
+    std::thread::spawn(move || {
+        let mut n = notify_rust::Notification::new();
+        n.summary(&title).body(&body).appname("HopOn").icon("hopon").action("default", "Open");
+        if sound {
+            n.sound_name("message-new-instant");
+        }
+        match n.show() {
+            Ok(handle) => handle.wait_for_action(|action| {
+                if action == "default" {
+                    crate::tray::show_main(&app);
+                    if let Some(c) = channel_id.clone() {
+                        core.emit(crate::ui::UiEvent::OpenChannel { channel_id: c });
+                    }
+                }
+            }),
+            Err(e) => tracing::debug!("notification failed: {e}"),
+        }
+    });
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn show(_app: &tauri::AppHandle, _core: Arc<Core>, title: &str, body: &str, _sound: bool, _channel_id: Option<String>) {
     tracing::info!("notification: {title}: {body}");
 }

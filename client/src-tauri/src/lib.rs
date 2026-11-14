@@ -30,6 +30,7 @@ pub fn run() {
     if !std::env::args().any(|a| a == "--perf-exit") && !guard::single_instance() {
         return;
     }
+    linux::before_start();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -43,6 +44,8 @@ pub fn run() {
             tray::install(app)?;
             let dir = app.path().app_local_data_dir()?;
             std::fs::create_dir_all(&dir)?;
+            linux::private_dir(&dir);
+            linux::webview_media(app);
             // The cache is disposable: never let it stop the app from starting.
             let cache = match cache::Cache::open(&dir.join("cache.db")) {
                 Ok(c) => c,
@@ -181,6 +184,53 @@ async fn load_voice_prefs(core: &Arc<core::Core>) {
             core.voice
                 .set_ptt(core, en == "1", vk.parse().unwrap_or(0))
                 .await;
+        }
+    }
+}
+
+/// Linux specifics (AppImage on Arch and friends); nothing on other systems.
+mod linux {
+    /// Before the webview starts: WebKitGTK's DMA-BUF renderer shows a blank
+    /// window on some GPU drivers (common on Arch with NVIDIA); turn it off
+    /// unless the user chose otherwise.
+    pub fn before_start() {
+        #[cfg(target_os = "linux")]
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+
+    /// The data folder holds your sign-in: only you can read it.
+    pub fn private_dir(_dir: &std::path::Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(_dir, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+
+    /// Camera, screen share and stream playback need WebRTC and media capture,
+    /// which WebKitGTK leaves off by default; also answer its permission prompts.
+    pub fn webview_media(_app: &tauri::App) {
+        #[cfg(target_os = "linux")]
+        {
+            use tauri::Manager;
+            use webkit2gtk::{PermissionRequestExt, SettingsExt, WebViewExt};
+            if let Some(w) = _app.get_webview_window("main") {
+                let _ = w.with_webview(|wv| {
+                    let view = wv.inner();
+                    if let Some(settings) = view.settings() {
+                        settings.set_enable_webrtc(true);
+                        settings.set_enable_media_stream(true);
+                        settings.set_enable_mediasource(true);
+                        settings.set_media_playback_requires_user_gesture(false);
+                    }
+                    view.connect_permission_request(|_, req| {
+                        req.allow();
+                        true
+                    });
+                });
+            }
         }
     }
 }

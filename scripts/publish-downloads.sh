@@ -8,6 +8,9 @@ R=target/x86_64-pc-windows-msvc/release
 K=dist/hopon-windows-kit
 VER=$(python3 -c 'import json; print(json.load(open("client/src-tauri/tauri.conf.json"))["version"])')
 SETUP="$R/bundle/nsis/HopOn_${VER}_x64-setup.exe"
+# Linux AppImage (scripts/build-linux.sh): every release ships one.
+APPIMAGE="target/release/bundle/appimage/HopOn_${VER}_amd64.AppImage"
+[ -f "$APPIMAGE" ] || { echo "no Linux AppImage for $VER (run scripts/build-linux.sh)"; exit 1; }
 rm -rf "$K" && mkdir -p "$K"
 # Stable name, so download links never go stale.
 cp "$SETUP" "$K/HopOn-setup.exe"
@@ -28,11 +31,13 @@ git worktree add -q --detach "$wt" origin/downloads
 rm -f "$wt"/HopOn_*_x64-setup.exe
 cp dist/hopon-windows-kit.zip "$wt/"
 cp "$SETUP" "$wt/HopOn-setup.exe"
+cp "$APPIMAGE" "$wt/HopOn-x86_64.AppImage"
 # What in-app updates read: version, installer URL, SHA-256, release notes.
-python3 - "$VER" "$SETUP" "$wt/latest.json" <<'PY'
+python3 - "$VER" "$SETUP" "$wt/latest.json" "$APPIMAGE" <<'PY'
 import hashlib, json, re, sys
-ver, setup, out = sys.argv[1:4]
+ver, setup, out, appimage = sys.argv[1:5]
 sha = hashlib.sha256(open(setup, "rb").read()).hexdigest()
+linux_sha = hashlib.sha256(open(appimage, "rb").read()).hexdigest()
 notes = ""
 try:
     text = open("RELEASE_NOTES.md", encoding="utf-8").read()
@@ -40,7 +45,9 @@ try:
     notes = (m.group(1).strip() if m else "")[:2000]
 except OSError:
     pass
-json.dump({"version": ver, "url": "https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe", "sha256": sha, "notes": notes}, open(out, "w"), indent=2)
+json.dump({"version": ver, "url": "https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe", "sha256": sha,
+           "linux_url": "https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-x86_64.AppImage", "linux_sha256": linux_sha,
+           "notes": notes}, open(out, "w"), indent=2)
 PY
 mkdir -p "$wt/screens"
 shots=""
@@ -49,6 +56,7 @@ cat > "$wt/README.md" <<EOF
 # HopOn downloads
 
 - [HopOn-setup.exe](HopOn-setup.exe): Windows installer, version $VER (latest)
+- [HopOn-x86_64.AppImage](HopOn-x86_64.AppImage): Linux (Arch, Fedora, Ubuntu, …), version $VER. \`chmod +x\` it and run.
 - [hopon-windows-kit.zip](hopon-windows-kit.zip): local test kit (installer, server, benchmarks, scripts)
 
 Built from branch \`$branch\` at $rev.

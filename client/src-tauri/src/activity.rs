@@ -152,7 +152,31 @@ fn detect() -> Option<String> {
     }
 }
 
-#[cfg(not(windows))]
+/// Linux: read each process's command line from /proc (names only, never
+/// anything else). Proton / Wine games keep their Windows .exe names there;
+/// native builds (cs2, dota2, …) are matched as "<name>.exe" too.
+#[cfg(target_os = "linux")]
+fn detect() -> Option<String> {
+    for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+        let name = entry.file_name();
+        if !name.to_string_lossy().bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(cmd) = std::fs::read(entry.path().join("cmdline")) else { continue };
+        let arg0 = cmd.split(|b| *b == 0).next().unwrap_or_default();
+        let arg0 = String::from_utf8_lossy(arg0);
+        let base = arg0.rsplit(['/', '\\']).next().unwrap_or_default().to_owned();
+        if base.is_empty() {
+            continue;
+        }
+        if let Some(g) = game_for(&base).or_else(|| game_for(&format!("{base}.exe"))) {
+            return Some(g.to_owned());
+        }
+    }
+    None
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn detect() -> Option<String> {
     None
 }

@@ -39,6 +39,12 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # TLS for wss:// SFU signaling (off by default in the SDK).
 livekit = { version = "0.10", optional = true, features = ["rustls-tls-native-roots"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Desktop notifications over D-Bus (pure Rust).
+notify-rust = { version = "4", default-features = false, features = ["z"] }
+# Switch on WebRTC / camera / screen capture in the Linux webview (same version Tauri uses).
+webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }
+
 [target.'cfg(windows)'.dependencies]
 # Message notifications (Windows toasts); the same crate Tauri's notification plugin uses.
 tauri-winrt-notification = "0.7"

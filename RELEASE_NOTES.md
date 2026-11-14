@@ -1,6 +1,22 @@
 # HopOn release notes
 
-**Download the latest:** [HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe)
+**Download the latest:** [Windows: HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe) · [Linux: HopOn-x86_64.AppImage](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-x86_64.AppImage)
+
+## HopOn 0.6.4
+
+App only: no server update needed.
+
+### New
+
+- **Linux.** HopOn now comes as an AppImage too (x86_64; Arch, Fedora,
+  Ubuntu and others). Download it, `chmod +x HopOn-x86_64.AppImage` and run it.
+  Chat, voice, streams, cameras, notifications, "Playing…" and in-app updates
+  all work. Global push-to-talk and the in-game overlay are Windows only for now.
+
+### Fixed
+
+- **Quit from the tray** closes HopOn again (it used to stay running when
+  "close to tray" was on).
 
 ## HopOn 0.6.3
 

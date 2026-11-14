@@ -9,6 +9,29 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{Manager, WindowEvent};
 
 pub static CLOSE_TO_TRAY: AtomicBool = AtomicBool::new(true);
+/// Set by Quit: the close-to-tray handler must let windows close, or the
+/// exit request (which closes every window first) is swallowed.
+static QUITTING: AtomicBool = AtomicBool::new(false);
+
+/// Quit for real: leave voice cleanly, then exit. If anything still holds the
+/// process (a hook thread, a stuck connection), it ends after 3 s anyway.
+pub fn quit(app: &tauri::AppHandle) {
+    if QUITTING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(core) = app.try_state::<std::sync::Arc<Core>>() {
+            let c = core.inner().clone();
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(800), c.voice.leave(&c, true)).await;
+        }
+        app.exit(0);
+    });
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        std::process::exit(0);
+    });
+}
 
 pub fn show_main(app: &tauri::AppHandle) {
     if let Some(core) = app.try_state::<std::sync::Arc<Core>>() {
@@ -31,7 +54,7 @@ pub fn install(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, e| match e.id.as_ref() {
             "open" => show_main(app),
-            "quit" => app.exit(0),
+            "quit" => self::quit(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, e| {
@@ -63,7 +86,7 @@ pub fn on_window_event(w: &tauri::Window, e: &WindowEvent) {
         }
     }
     if let WindowEvent::CloseRequested { api, .. } = e {
-        if w.label() == "main" && CLOSE_TO_TRAY.load(Ordering::Relaxed) {
+        if w.label() == "main" && CLOSE_TO_TRAY.load(Ordering::Relaxed) && !QUITTING.load(Ordering::SeqCst) {
             api.prevent_close();
             if let Some(core) = w.app_handle().try_state::<std::sync::Arc<Core>>() {
                 core.set_ui_visible(false);
