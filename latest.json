@@ -1,6 +1,8 @@
 {
-  "version": "0.6.3",
+  "version": "0.6.4",
   "url": "https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe",
-  "sha256": "8bad8aa410f470f9c483aa58e5a8b31ddc0333cc96c686462d94b72761046f05",
-  "notes": "Update the server too, for the 10-minute edit limit (the app works on a\n0.6.1 server; edits just aren't limited there).\n\n### Changed\n\n- **Right column, top to bottom:** People, **Games**, Server and Settings\n  sit above the people list (or the games panel), which starts at the top\n  again.\n- **Invite** moved into **Server** (everyone can make an invite link there).\n- Settings has a gear; Update sits under Friends / Servers.\n- Titles size themselves to fit, so they don't get cut off when Games is open.\n- **Messages can be edited for 10 minutes** after sending.\n- Fewer explanations: a cleaner Friends page (your @username sits by the\n  title), stream quality and polls.\n- The selected channel on the wheel is back to its old size."
+  "sha256": "b7f2c725655d8b234e1c63e9937cbe6fbe2370c18655a4360eb5337999fb2ed0",
+  "linux_url": "https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-x86_64.AppImage",
+  "linux_sha256": "42a49fdff2bff957b2575b15795d842b3ebd00d9c1a3128e09c9e33580f76676",
+  "notes": "App only: no server update needed.\n\n### New\n\n- **Linux.** HopOn now comes as an AppImage too (x86_64; Arch, Fedora,\n  Ubuntu and others). Download it, `chmod +x HopOn-x86_64.AppImage` and run it.\n  Chat, voice, streams, cameras, notifications, \"Playing\u2026\" and in-app updates\n  all work. Global push-to-talk and the in-game overlay are Windows only for now.\n\n### Fixed\n\n- **Quit from the tray** closes HopOn again (it used to stay running when\n  \"close to tray\" was on)."
 }
