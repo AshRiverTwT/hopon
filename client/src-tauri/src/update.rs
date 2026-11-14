@@ -11,7 +11,8 @@ use std::time::Duration;
 /// Override at build time with HOPON_UPDATE_URL.
 const MANIFEST: &str = match option_env!("HOPON_UPDATE_URL") {
     Some(u) => u,
-    None => "https://raw.githubusercontent.com/AshRiverTwT/hopon/downloads/latest.json",
+    // Moon (experimental) builds update from the moon branch only, never from stable.
+    None => "https://raw.githubusercontent.com/AshRiverTwT/hopon/moon/builds/latest.json",
 };
 
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");

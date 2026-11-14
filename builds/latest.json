@@ -1,0 +1,6 @@
+{
+  "version": "0.7.1",
+  "url": "https://github.com/AshRiverTwT/hopon/raw/moon/builds/HopOn-Moon-setup.exe",
+  "sha256": "9441255df2981b137fa132989946e7dfe52406c6dfdd989e120a3742afc6d861",
+  "notes": "Moon (0.7b, experimental): sharp corners everywhere, a cool black-and-white palette, shadows for depth, monochrome presence and profile tones, square monochrome icon. Installs beside HopOn as \"HopOn Moon\" with its own settings, sign-in and updates."
+}

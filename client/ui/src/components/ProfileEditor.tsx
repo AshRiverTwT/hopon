@@ -64,9 +64,9 @@ export function ProfileEditor(p: { close: () => void }) {
           </div>
         </div>
         <div class="row">
-          <span class="eyebrow">Colour</span>
+          <span class="eyebrow">Tone</span>
           <div class="row-body">
-            <div class="swatches" role="radiogroup" aria-label="Profile colour">
+            <div class="swatches" role="radiogroup" aria-label="Profile tone">
               <For each={ACCENTS}>
                 {(c, i) => (
                   <button role="radio" aria-checked={accent() === i()} aria-label={ACCENT_NAMES[i()]} title={ACCENT_NAMES[i()]}

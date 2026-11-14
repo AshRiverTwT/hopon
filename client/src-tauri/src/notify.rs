@@ -45,7 +45,7 @@ fn show(app: &tauri::AppHandle, core: Arc<Core>, title: &str, body: &str, sound:
     let (app, title, body) = (app.clone(), title.to_owned(), body.to_owned());
     std::thread::spawn(move || {
         let mut n = notify_rust::Notification::new();
-        n.summary(&title).body(&body).appname("HopOn").icon("hopon").action("default", "Open");
+        n.summary(&title).body(&body).appname("HopOn Moon").icon("hopon").action("default", "Open");
         if sound {
             n.sound_name("message-new-instant");
         }

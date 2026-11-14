@@ -124,7 +124,7 @@ export default function Settings(p: { close: () => void }) {
       step: (d: -1 | 0 | 1) => { if (d === 0) setCapturing(a.id); },
     })) },
     { name: "Account", opts: [
-      { label: "Version", value: () => `HopOn ${__APP_VERSION__}`, step: () => {} },
+      { label: "Version · experimental moon build", value: () => `Moon ${__APP_VERSION__}`, step: () => {} },
       { label: "Updates", value: () => (upd.installing ? "Updating…" : upd.available ? `Install ${upd.latest}` : upd.checked ? (upd.error ? "Check again" : "Up to date") : "Check now"),
         step: (d) => { if (d !== 0) return; if (upd.available) void installUpdate(); else void checkUpdate().then((a) => !a && !upd.error && toast("You're on the latest version")); } },
       { label: "Server", value: () => cfg()?.url ?? "", step: () => {} },

@@ -54,11 +54,11 @@ pub fn single_instance() -> bool {
         use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
         use windows_sys::Win32::System::Threading::CreateMutexW;
         use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE};
-        let name: Vec<u16> = "Local\\HopOnSingleInstance".encode_utf16().chain(std::iter::once(0)).collect();
+        let name: Vec<u16> = "Local\\HopOnMoonSingleInstance".encode_utf16().chain(std::iter::once(0)).collect();
         // Leaked on purpose: held for the life of the process.
         let h = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
         if !h.is_null() && GetLastError() == ERROR_ALREADY_EXISTS {
-            let title: Vec<u16> = "HopOn".encode_utf16().chain(std::iter::once(0)).collect();
+            let title: Vec<u16> = "HopOn Moon".encode_utf16().chain(std::iter::once(0)).collect();
             let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
             if !hwnd.is_null() {
                 ShowWindow(hwnd, SW_RESTORE);

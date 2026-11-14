@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "HopOn",
-  "version": "0.7.0",
-  "identifier": "app.hopon.desktop",
+  "productName": "HopOn Moon",
+  "version": "0.7.1",
+  "identifier": "app.hopon.moon",
   "build": {
     "frontendDist": "../ui/dist",
     "devUrl": "http://localhost:5173",
@@ -20,7 +20,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "HopOn",
+        "title": "HopOn Moon",
         "width": 1280,
         "height": 800,
         "minWidth": 720,
