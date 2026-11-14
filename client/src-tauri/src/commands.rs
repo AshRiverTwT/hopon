@@ -542,6 +542,23 @@ pub async fn set_display_name(core: C<'_>, name: String) -> Res<()> {
     core.request(C2S::SetDisplayName { name }).await.map(|_| ())
 }
 
+/// Add a friend by their unique username.
+#[tauri::command]
+pub async fn friend_request(core: C<'_>, username: String) -> Res<()> {
+    core.request(C2S::FriendRequest { username }).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn friend_respond(core: C<'_>, user_id: String, accept: bool) -> Res<()> {
+    core.request(C2S::FriendRespond { user_id: pid(&user_id)?, accept }).await.map(|_| ())
+}
+
+/// Unfriend, cancel your request or decline theirs.
+#[tauri::command]
+pub async fn friend_remove(core: C<'_>, user_id: String) -> Res<()> {
+    core.request(C2S::FriendRemove { user_id: pid(&user_id)? }).await.map(|_| ())
+}
+
 /// Settings → "Show what I'm playing".
 #[tauri::command]
 pub fn activity_sharing(core: C<'_>, enabled: bool) {

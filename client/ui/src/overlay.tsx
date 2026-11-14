@@ -145,8 +145,8 @@ function Overlay() {
       <section class="ov-chat">
         <header class="ov-head">
           <span class="mark" aria-hidden="true">H</span>
-          <span class="ov-title">{channel() ? channel()!.c.name : "No channel open"}</span>
-          <span class="ov-sub">{channel()?.sv.name}</span>
+          <span class="ov-title">{channel() ? (channel()!.sv.dmWith ? userName(channel()!.sv.dmWith!) : channel()!.c.name) : "No channel open"}</span>
+          <span class="ov-sub">{channel()?.sv.dmWith ? "Direct message" : channel()?.sv.name}</span>
           <span class="ov-hint">{typing() ? "Enter to send · Esc to cancel" : `${comboLabel(prefs.hotkeys.overlayType)} to type · ${comboLabel(prefs.hotkeys.overlay)} to hide`}</span>
         </header>
         <div class="ov-msgs" ref={list}>
@@ -168,7 +168,7 @@ function Overlay() {
           </For>
         </div>
         <textarea ref={ta} class="ov-input" classList={{ typing: typing() }} rows={1} maxLength={4000}
-          placeholder={channel() ? (typing() ? `Message #${channel()!.c.name}` : `Press ${comboLabel(prefs.hotkeys.overlayType)} or click to type`) : ""}
+          placeholder={channel() ? (typing() ? (channel()!.sv.dmWith ? `Message ${userName(channel()!.sv.dmWith!)}` : `Message #${channel()!.c.name}`) : `Press ${comboLabel(prefs.hotkeys.overlayType)} or click to type`) : ""}
           disabled={!channel()} onMouseDown={startTyping} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } }} />
       </section>
       <Show when={o.voiceCh}>

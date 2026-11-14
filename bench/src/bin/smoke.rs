@@ -606,6 +606,55 @@ async fn main() -> Result<()> {
         ensure!(a1.call(C2S::SavePrefs { json: format!("{{\"x\":\"{}\"}}", "a".repeat(MAX_PREFS_BYTES)) }).await.is_err(), "oversized accepted");
         Ok(())
     });
+    pass &= check!("friends + DMs: request by username, accept opens one DM for both, guards, unfriend closes it", {
+        let mut a = Client::connect(&url).await?;
+        let ua = a.signup("fra").await?;
+        let mut b = Client::connect(&url).await?;
+        let ub = b.signup("frb").await?;
+        ensure!(a.call(C2S::FriendRequest { username: "no-such-person-x9".into() }).await.is_err(), "unknown name accepted");
+        ensure!(a.call(C2S::FriendRequest { username: ua.name.clone() }).await.is_err(), "befriended yourself");
+        // Usernames match case-insensitively, with or without "@".
+        ensure!(matches!(a.call(C2S::FriendRequest { username: format!("@{}", ub.name.to_uppercase()) }).await?, S2C::Ok));
+        let inc = wait_for(&mut b, |e| if let S2C::FriendUpdate(f) = e { Some(f.clone()) } else { None }).await?;
+        ensure!(inc.state == FriendState::Incoming && inc.user.id == ua.id && inc.username == ua.name, "incoming {inc:?}");
+        ensure!(b.call(C2S::FriendRespond { user_id: ua.id, accept: true }).await.is_ok());
+        let dm = wait_for(&mut a, |e| if let S2C::ServerJoined(s) = e { Some(s.clone()) } else { None }).await?;
+        ensure!(dm.dm_with == Some(ub.id) && dm.channels.len() == 1 && dm.members.len() == 2, "dm {dm:?}");
+        let fr = wait_for(&mut a, |e| if let S2C::FriendUpdate(f) = e { (f.state == FriendState::Friends).then(|| f.clone()) } else { None }).await?;
+        ensure!(fr.dm_server == Some(dm.id), "friend points at the DM");
+        let dm_b = wait_for(&mut b, |e| if let S2C::ServerJoined(s) = e { Some(s.clone()) } else { None }).await?;
+        ensure!(dm_b.id == dm.id && dm_b.dm_with == Some(ua.id), "B sees the same DM from its side");
+        let ch = dm.channels[0].id;
+        let send = |c: &str, n: u64| C2S::Send { channel_id: ch, content: c.into(), nonce: n, retry: false, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] };
+        a.send(send("hey friend", 7001)).await?;
+        let got = wait_for(&mut b, |e| if let S2C::Message(m) = e { (m.channel_id == ch).then(|| m.content.clone()) } else { None }).await?;
+        ensure!(got == "hey friend", "DM delivered");
+        // Not a server: no invites, admin actions or new channels.
+        ensure!(a.call(C2S::CreateInvite { server_id: dm.id }).await.is_err(), "invite to a DM");
+        ensure!(a.call(C2S::RenameServer { server_id: dm.id, name: "x".into() }).await.is_err(), "renamed a DM");
+        ensure!(a.call(C2S::CreateChannel { server_id: dm.id, name: "x".into(), kind: ChannelKind::Text }).await.is_err(), "channel in a DM");
+        // A second request after accepting is refused; the DM is reused, never duplicated.
+        ensure!(b.call(C2S::FriendRequest { username: ua.name.clone() }).await.is_err(), "already friends");
+        // Unfriend: both are told, the DM stays (history) but closes to new messages.
+        ensure!(a.call(C2S::FriendRemove { user_id: ub.id }).await.is_ok());
+        let gone = wait_for(&mut b, |e| if let S2C::FriendRemoved { user_id } = e { Some(*user_id) } else { None }).await?;
+        ensure!(gone == ua.id);
+        ensure!(b.call(send("still there?", 7002)).await.is_err(), "messaged after unfriending");
+        let S2C::History { messages, .. } = b.call(C2S::History { channel_id: ch, before: None, limit: 10 }).await? else { bail!("history") };
+        ensure!(messages.iter().any(|m| m.content == "hey friend"), "history kept");
+        // Friends again: same DM, open again.
+        ensure!(b.call(C2S::FriendRequest { username: ua.name.clone() }).await.is_ok());
+        ensure!(a.call(C2S::FriendRespond { user_id: ub.id, accept: true }).await.is_ok());
+        let again = wait_for(&mut a, |e| if let S2C::FriendUpdate(f) = e { (f.state == FriendState::Friends).then(|| f.dm_server) } else { None }).await?;
+        ensure!(again == Some(dm.id), "re-friending reuses the DM");
+        ensure!(b.call(send("back again", 7003)).await.is_ok(), "DM reopened");
+        // In the login snapshot: username and friends.
+        let mut a2 = Client::connect(&url).await?;
+        let S2C::Authed { username, friends, servers, .. } = a2.call(C2S::Login { username: ua.name.clone(), password: "benchmark-pass".into() }).await? else { bail!("login") };
+        ensure!(username == ua.name && friends.iter().any(|f| f.user.id == ub.id && f.state == FriendState::Friends), "snapshot friends");
+        ensure!(servers.iter().any(|s| s.id == dm.id && s.dm_with == Some(ub.id)), "snapshot DM");
+        Ok(())
+    });
     let mut fa = Client::connect(&url).await?;
     let S2C::Authed { .. } = fa.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("login") };
     pass &= check!("attachments: upload, send without text, deliver, history, download, claim rules, delete removes file", {

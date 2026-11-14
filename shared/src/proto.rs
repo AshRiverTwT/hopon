@@ -11,7 +11,7 @@ pub type Id = i64;
 /// Bumped on every wire-incompatible change. Sent as `?v=` on the WebSocket
 /// URL; the server answers HTTP 426 to any other version before any
 /// MessagePack is exchanged, so old and new builds fail loudly, not silently.
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 
 /// Append the protocol version to a chat URL (`ws://host:port/ws`).
 pub fn versioned_url(url: &str) -> String {
@@ -99,7 +99,33 @@ pub struct ServerInfo {
     pub online: Vec<Id>,
     /// What members are playing right now (user, game name).
     pub activities: Vec<(Id, String)>,
+    /// A direct message: the other person (the server is hidden, has one text
+    /// channel, and `members` holds both people). None for normal servers.
+    pub dm_with: Option<Id>,
 }
+
+/// Where a friendship stands, seen from your side.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FriendState {
+    Friends,
+    /// They asked you.
+    Incoming,
+    /// You asked them.
+    Outgoing,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Friend {
+    pub user: UserInfo,
+    /// Their unique login name (what you add friends by); `user.name` may be a display name.
+    pub username: String,
+    pub state: FriendState,
+    /// Your DM with them, once you're friends (it stays after unfriending, read-only).
+    pub dm_server: Option<Id>,
+}
+
+/// Most friends (and pending requests) one account can have.
+pub const MAX_FRIENDS: usize = 500;
 
 /// Longest game name accepted for an activity.
 pub const MAX_ACTIVITY_CHARS: usize = 48;
@@ -367,6 +393,12 @@ pub enum C2S {
     /// Advertise an active video source for the current voice participant.
     MediaState { channel_id: Id, source: MediaSource, active: bool },
     SetDisplayName { name: String },
+    /// Send a friend request by unique username (accepts theirs if they already asked you).
+    FriendRequest { username: String },
+    /// Accept or decline someone's request.
+    FriendRespond { user_id: Id, accept: bool },
+    /// Unfriend, cancel your request, or decline theirs. Your DM stays, read-only.
+    FriendRemove { user_id: Id },
     /// PNG, JPEG or WebP, at most `MAX_AVATAR_BYTES`. Empty removes it.
     SetAvatar {
         #[serde(with = "serde_bytes")]
@@ -448,6 +480,9 @@ pub enum S2C {
         media: Vec<MediaPresence>,
         /// Your saved preferences (JSON object; opaque to the server).
         prefs: String,
+        /// Your unique login name (friends add you by it).
+        username: String,
+        friends: Vec<Friend>,
     },
     Error {
         code: ErrorCode,
@@ -528,6 +563,10 @@ pub enum S2C {
         deafened: bool,
     },
     MediaPresence(MediaPresence),
+    /// A friendship was added or changed (sent to both people).
+    FriendUpdate(Friend),
+    /// A friendship or request is gone.
+    FriendRemoved { user_id: Id },
     LoggedOut,
     Ok,
     /// A user's profile changed (e.g. new avatar); sent to all their servers.

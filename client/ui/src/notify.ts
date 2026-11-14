@@ -52,13 +52,13 @@ export function onMessages(channelId: string, msgs: Msg[], ctx: NotifyCtx) {
     if (watching) continue;
     const author = ctx.userName(m.authorId);
     const text = preview(m.content, ctx.userName) || (m.attachments.length ? `sent ${m.attachments.length === 1 ? "a file" : `${m.attachments.length} files`}` : "");
-    const where = `#${ctx.channelName(channelId)}`;
+    const where = ctx.channelName(channelId); // "#general", or "Direct message"
     if (looking()) {
       if (!prefs.appNotify) continue;
       pushBanner({ channelId, messageId: m.id, title: `${author} · ${where}`, body: text, mention });
       if (prefs.notifySound) ping(mention);
     } else if (prefs.systemNotify) {
-      call("notify", { title: `${author} · ${where} · ${ctx.serverName(channelId)}`, body: text, sound: prefs.notifySound, channelId }).catch(() => {});
+      call("notify", { title: [author, where, ctx.serverName(channelId)].filter(Boolean).join(" · "), body: text, sound: prefs.notifySound, channelId }).catch(() => {});
     }
   }
 }

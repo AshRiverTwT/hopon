@@ -326,6 +326,7 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 /* ---------- narrow windows ---------- */
 @media (max-width: 1100px) {
   :root { --dial: 230px; --rail: 150px; }
+  .topbar .long { display: none; }
   .monogram { font-size: 36px; }
 }
 @media (max-width: 900px) {
@@ -776,3 +777,45 @@ video.media { background: #000; }
 .poll-n { flex: none; font-size: 13px; font-weight: 600; color: var(--cream); font-variant-numeric: tabular-nums; }
 .poll-count { font-weight: 400; color: var(--cream-55); }
 .poll-foot { margin-top: 10px; font-size: 12px; color: var(--cream-35); }
+
+/* ---------- friends & direct messages ---------- */
+.friends-pill { position: relative; }
+.pill-dot { position: absolute; top: 6px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--hot); }
+/* left column in friends mode (where the channel dial sits) */
+.dm-nav { grid-area: dial; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 18px 20px 12px var(--gutter); overflow-y: auto; scrollbar-width: none; }
+.dm-home { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 12px; border-radius: 6px; font-family: "Archivo", sans-serif; font-stretch: 125%;
+  font-weight: 900; font-size: 15px; text-transform: uppercase; letter-spacing: 0.01em; color: var(--cream-55); text-align: left; }
+.dm-home:hover { color: var(--cream); background: var(--cream-05); }
+.dm-home.on { color: var(--cream); background: var(--cream-10); }
+.count-badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--hot); color: #fff; font-family: "Inter Tight", sans-serif; font-stretch: 100%;
+  font-size: 12px; font-weight: 700; line-height: 20px; text-align: center; }
+.dm-nav-head { margin: 18px 12px 4px; }
+.dm-nav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.dm-row { width: 100%; display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 10px; border-radius: 6px; text-align: left; color: var(--cream-80); }
+.dm-row:hover { background: var(--cream-05); color: var(--cream); }
+.dm-row.on { background: var(--cream-10); color: var(--cream); }
+.dm-row.unread .dm-name { color: var(--cream); font-weight: 600; }
+.dm-name { flex: 1; min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dm-unread { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--hot); }
+.dm-empty { padding: 4px 12px; }
+.dm-back { margin: auto 12px 0; padding-top: 18px; }
+/* friends home */
+.friends { display: flex; flex-direction: column; gap: 30px; min-height: 0; overflow-y: auto; padding-bottom: 40px; }
+.friend-add { max-width: 720px; display: grid; gap: 8px; }
+.friend-add .field-row { margin-top: 0; }
+.friends-head { margin: 0 4px 2px; }
+.friends .index-name { font-size: 24px; }
+.friends .index-row.off .index-name { color: var(--cream-35); }
+.handle { font-size: 13px; letter-spacing: 0; color: var(--cream-55); }
+.handle .game, .rail-sub.game { color: var(--hot); }
+.friends-empty { padding: 18px 4px; }
+.index-meta .pill { height: 32px; line-height: 32px; }
+/* open DM */
+.head-row .avatar { flex: none; align-self: center; }
+.dm-online { flex: none; align-self: center; font-size: 13px; color: var(--cream-55); }
+.dm-online::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: #3fbf6f; }
+.dm-closed { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 18px; padding: 16px 12px 6px; border-top: 1px solid var(--cream-20); color: var(--cream-55); font-size: 15px; }
+/* online friends (right column) */
+.rail li.rail-click { cursor: pointer; }
+.rail-none { padding: 6px; height: auto !important; }
+.topbar > .friends-pill { flex: none; max-width: none; overflow: visible; }

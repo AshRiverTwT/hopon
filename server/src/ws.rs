@@ -465,6 +465,7 @@ impl Session {
             .filter(|entry| self.guilds.contains(&entry.server_id))
             .map(|entry| *entry.value())
             .collect();
+        let friends = self.st.load_friends(uid).await.map_err(internal)?;
         self.send(
             req,
             S2C::Authed {
@@ -479,6 +480,8 @@ impl Session {
                 voice,
                 media,
                 prefs,
+                username: name.to_owned(),
+                friends,
             },
         )
         .await;
@@ -532,6 +535,9 @@ impl Session {
                 let (chan, guild) = self.member_chan(channel_id, uid).await?;
                 if chan.kind != ChannelKind::Text {
                     return Err((ErrorCode::BadRequest, "not a text channel".into()));
+                }
+                if guild.is_dm() && !guild.dm_open.load(Ordering::Relaxed) {
+                    return Err((ErrorCode::Forbidden, "You can only message friends".into()));
                 }
                 if nonce > i64::MAX as u64 {
                     return Err((ErrorCode::BadRequest, "message nonce is out of range".into()));
@@ -888,6 +894,62 @@ impl Session {
                 self.send(req, S2C::UserLookup(user)).await;
                 Ok(())
             }
+            C2S::FriendRequest { username } => {
+                let wanted = username.trim().trim_start_matches('@').to_lowercase();
+                let target: Option<(Id,)> = sqlx::query_as("SELECT id FROM users WHERE name_lower = $1")
+                    .bind(&wanted)
+                    .fetch_optional(&self.st.db)
+                    .await
+                    .map_err(internal)?;
+                let (other,) = target.ok_or((ErrorCode::NotFound, format!("No one is called {}", username.trim())))?;
+                if other == uid {
+                    return Err((ErrorCode::BadRequest, "That's your own username".into()));
+                }
+                let (a, b) = crate::state::pair(uid, other);
+                let row: Option<(Id, bool)> = sqlx::query_as("SELECT requested_by, accepted FROM friendships WHERE user_a = $1 AND user_b = $2")
+                    .bind(a).bind(b).fetch_optional(&self.st.db).await.map_err(internal)?;
+                match row {
+                    Some((_, true)) => return Err((ErrorCode::BadRequest, "You're already friends".into())),
+                    Some((by, false)) if by == uid => {} // already asked: nothing new
+                    Some(_) => self.accept_friend(uid, other).await?, // they asked you first
+                    None => {
+                        let n: i64 = sqlx::query_scalar("SELECT count(*) FROM friendships WHERE user_a = $1 OR user_b = $1")
+                            .bind(uid).fetch_one(&self.st.db).await.map_err(internal)?;
+                        if n as usize >= hopon_shared::MAX_FRIENDS {
+                            return Err((ErrorCode::BadRequest, "Friends list is full".into()));
+                        }
+                        sqlx::query("INSERT INTO friendships (user_a, user_b, requested_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
+                            .bind(a).bind(b).bind(uid).execute(&self.st.db).await.map_err(internal)?;
+                        self.push_friend(uid, other).await;
+                        self.push_friend(other, uid).await;
+                    }
+                }
+                self.send(req, S2C::Ok).await;
+                Ok(())
+            }
+            C2S::FriendRespond { user_id, accept } => {
+                let (a, b) = crate::state::pair(uid, user_id);
+                let row: Option<(Id, bool)> = sqlx::query_as("SELECT requested_by, accepted FROM friendships WHERE user_a = $1 AND user_b = $2")
+                    .bind(a).bind(b).fetch_optional(&self.st.db).await.map_err(internal)?;
+                match row {
+                    Some((by, false)) if by == user_id => {
+                        if accept {
+                            self.accept_friend(uid, user_id).await?;
+                        } else {
+                            self.drop_friend(uid, user_id).await?;
+                        }
+                    }
+                    Some((_, true)) => {}
+                    _ => return Err((ErrorCode::NotFound, "That request is gone".into())),
+                }
+                self.send(req, S2C::Ok).await;
+                Ok(())
+            }
+            C2S::FriendRemove { user_id } => {
+                self.drop_friend(uid, user_id).await?;
+                self.send(req, S2C::Ok).await;
+                Ok(())
+            }
             C2S::CreateServer { name: sname } => {
                 let sname = sname.trim().to_owned();
                 if sname.is_empty() || sname.chars().count() > 64 {
@@ -941,6 +1003,9 @@ impl Session {
                         "only the owner can create channels".into(),
                     ));
                 }
+                if self.st.guild(server_id).await.map_err(internal)?.is_dm() {
+                    return Err((ErrorCode::BadRequest, "direct messages have one channel".into()));
+                }
                 let id = self.st.ids.next();
                 sqlx::query(
                     "INSERT INTO channels (id, server_id, name, kind) VALUES ($1, $2, $3, $4)",
@@ -971,6 +1036,9 @@ impl Session {
                 if !g.is_member(uid) {
                     return Err((ErrorCode::Forbidden, "not a member".into()));
                 }
+                if g.is_dm() {
+                    return Err((ErrorCode::BadRequest, "direct messages can't have invites".into()));
+                }
                 let code = auth::invite_code();
                 sqlx::query("INSERT INTO invites (code, server_id, created_by, expires_at) VALUES ($1, $2, $3, now() + interval '7 days')")
                     .bind(&code).bind(server_id).bind(uid).execute(&self.st.db).await.map_err(internal)?;
@@ -988,6 +1056,9 @@ impl Session {
                 .map_err(internal)?;
                 let (sid,) =
                     row.ok_or((ErrorCode::NotFound, "invite is invalid or expired".into()))?;
+                if self.st.guild(sid).await.map_err(internal)?.is_dm() {
+                    return Err((ErrorCode::NotFound, "invite is invalid or expired".into()));
+                }
                 let inserted = sqlx::query("INSERT INTO members (server_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
                     .bind(sid).bind(uid).execute(&self.st.db).await.map_err(internal)?.rows_affected() == 1;
                 let g = self.st.guild(sid).await.map_err(internal)?;
@@ -1313,6 +1384,19 @@ impl Session {
             | C2S::Kick { .. }
             | C2S::RevokeInvites { .. }
             | C2S::LeaveServer { .. }) => {
+                let target = match &m {
+                    C2S::RenameServer { server_id, .. } | C2S::DeleteServer { server_id } | C2S::Kick { server_id, .. }
+                    | C2S::RevokeInvites { server_id } | C2S::LeaveServer { server_id } => Some(*server_id),
+                    C2S::UpdateChannel { channel_id, .. } | C2S::DeleteChannel { channel_id } => {
+                        self.st.chans.get(channel_id).map(|c| c.server_id)
+                    }
+                    _ => None,
+                };
+                if let Some(sid) = target {
+                    if self.st.guild(sid).await.map_err(internal)?.is_dm() {
+                        return Err((ErrorCode::BadRequest, "not available in direct messages".into()));
+                    }
+                }
                 if let C2S::LeaveServer { server_id } = &m {
                     self.guilds.remove(server_id);
                 }
@@ -1351,6 +1435,78 @@ impl Session {
             .chan_for(channel_id, uid)
             .await
             .ok_or((ErrorCode::NotFound, "no such channel".into()))
+    }
+
+    /// Tell `user` (all their connections) where they stand with `other`.
+    async fn push_friend(&self, user: Id, other: Id) {
+        let msg = match self.st.friend_of(user, other).await {
+            Ok(Some(f)) => S2C::FriendUpdate(f),
+            Ok(None) => S2C::FriendRemoved { user_id: other },
+            Err(_) => return,
+        };
+        let f = frame(0, msg);
+        self.st.to_user(user, || Out::Frame(f.clone()));
+    }
+
+    /// Become friends and make sure their DM exists, with both people subscribed.
+    async fn accept_friend(&mut self, uid: Id, other: Id) -> Result<(), (ErrorCode, String)> {
+        let (a, b) = crate::state::pair(uid, other);
+        sqlx::query("UPDATE friendships SET accepted = true WHERE user_a = $1 AND user_b = $2")
+            .bind(a).bind(b).execute(&self.st.db).await.map_err(internal)?;
+        let sid = match self.st.dm_between(uid, other).await.map_err(internal)? {
+            Some(sid) => sid,
+            None => {
+                let (sid, text_id) = (self.st.ids.next(), self.st.ids.next());
+                let mut tx = self.st.db.begin().await.map_err(internal)?;
+                let made = sqlx::query("INSERT INTO servers (id, name, owner_id, dm_pair) VALUES ($1, '', $2, $3) ON CONFLICT (dm_pair) WHERE dm_pair IS NOT NULL DO NOTHING")
+                    .bind(sid).bind(uid).bind(crate::state::dm_key(uid, other))
+                    .execute(&mut *tx).await.map_err(internal)?.rows_affected() == 1;
+                if made {
+                    sqlx::query("INSERT INTO members (server_id, user_id) VALUES ($1, $2), ($1, $3)")
+                        .bind(sid).bind(uid).bind(other).execute(&mut *tx).await.map_err(internal)?;
+                    sqlx::query("INSERT INTO channels (id, server_id, name, kind) VALUES ($1, $2, 'dm', 0)")
+                        .bind(text_id).bind(sid).execute(&mut *tx).await.map_err(internal)?;
+                }
+                tx.commit().await.map_err(internal)?;
+                if made { sid } else { self.st.dm_between(uid, other).await.map_err(internal)?.ok_or((ErrorCode::Internal, "DM vanished".into()))? }
+            }
+        };
+        let g = self.st.guild(sid).await.map_err(internal)?;
+        g.dm_open.store(true, Ordering::Relaxed);
+        {
+            let mut m = g.members.write();
+            m.insert(uid);
+            m.insert(other);
+        }
+        // Both people's connections join the DM and learn about it.
+        self.guilds.insert(sid);
+        for user in [uid, other] {
+            let info = self.st.load_servers(user, Some(sid)).await.map_err(internal)?.pop();
+            if let (Some(info), Some(conns)) = (info, self.st.conns.get(&user)) {
+                for (_, tx) in conns.iter() {
+                    let _ = tx.try_send(Out::Subscribe(sid, g.tx.subscribe()));
+                    let _ = tx.try_send(Out::Frame(frame(0, S2C::ServerJoined(info.clone()))));
+                }
+            }
+        }
+        self.push_friend(uid, other).await;
+        self.push_friend(other, uid).await;
+        Ok(())
+    }
+
+    /// Unfriend / cancel / decline. The DM stays (history), but closes to new messages.
+    async fn drop_friend(&mut self, uid: Id, other: Id) -> Result<(), (ErrorCode, String)> {
+        let (a, b) = crate::state::pair(uid, other);
+        sqlx::query("DELETE FROM friendships WHERE user_a = $1 AND user_b = $2")
+            .bind(a).bind(b).execute(&self.st.db).await.map_err(internal)?;
+        if let Some(sid) = self.st.dm_between(uid, other).await.map_err(internal)? {
+            if let Some(g) = self.st.guilds.get(&sid) {
+                g.dm_open.store(false, Ordering::Relaxed);
+            }
+        }
+        self.push_friend(uid, other).await;
+        self.push_friend(other, uid).await;
+        Ok(())
     }
 
     async fn joined_server(&mut self, req: u32, uid: Id, sid: Id) -> R {

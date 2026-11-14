@@ -3,7 +3,11 @@ export interface User { id: string; name: string; avatarV: number }
 export interface Channel { id: string; serverId: string; name: string; voice: boolean; topic: string; lastId: string }
 export interface Server { id: string; name: string; ownerId: string; channels: Channel[]; memberIds: string[]; memberCount: number; reads: Record<string, string>; online: string[];
   /** user → game they're playing right now */
-  activities: Record<string, string> }
+  activities: Record<string, string>;
+  /** A direct message with this person (a hidden two-person server). */
+  dmWith?: string | null }
+export type FriendState = "friends" | "incoming" | "outgoing";
+export interface Friend { user: User; username: string; state: FriendState; dmServer: string | null }
 export interface Msg {
   id: string; channelId: string; authorId: string; content: string;
   editedAt: number | null; ts: number; nonce: string;
@@ -24,7 +28,9 @@ export interface MediaPresence { userId: string; channelId: string; source: Medi
 
 export type UiEvent =
   | { t: "conn"; state: "connecting" | "online" | "offline"; rttMs: number | null }
-  | { t: "session"; user: User | null; servers: Server[]; users: User[]; voice: Presence[]; media: MediaPresence[] }
+  | { t: "session"; user: User | null; servers: Server[]; users: User[]; voice: Presence[]; media: MediaPresence[]; username: string; friends: Friend[] }
+  | { t: "friend"; friend: Friend }
+  | { t: "friendRemoved"; userId: string }
   | { t: "server"; server: Server }
   | { t: "channelCreated"; channel: Channel }
   | { t: "memberJoined"; serverId: string; user: User }

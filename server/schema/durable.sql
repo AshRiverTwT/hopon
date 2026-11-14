@@ -21,3 +21,21 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_status TEXT NOT NULL DEFAULT '
 CREATE UNIQUE INDEX IF NOT EXISTS messages_author_nonce
     ON messages (author_id, client_nonce)
     WHERE client_nonce IS NOT NULL AND client_nonce <> 0;
+
+-- 0.6: friends and direct messages. A DM is a hidden two-member server with
+-- one text channel; dm_pair ("<smaller id>:<larger id>") marks it and keeps
+-- one DM per pair. Additive like the rest of this file, so an older server
+-- can still start on this database.
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS dm_pair TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS servers_dm_pair ON servers (dm_pair) WHERE dm_pair IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS friendships (
+    user_a        BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_b        BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    requested_by  BIGINT NOT NULL,
+    accepted      BOOLEAN NOT NULL DEFAULT false,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_a, user_b),
+    CHECK (user_a < user_b)
+);
+CREATE INDEX IF NOT EXISTS friendships_b ON friendships (user_b);

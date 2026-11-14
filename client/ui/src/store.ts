@@ -2,7 +2,7 @@ import { batch, createSignal } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import { call, markPainted, now, randomNonce } from "./ipc";
 import { findId, mergeMsgs, trimTop } from "./merge";
-import { cmpId, SYSTEM_USER, type Attachment, type Channel, type Gif, type Msg, type Presence, type Server, type UiEvent, type User } from "./types";
+import { cmpId, SYSTEM_USER, type Attachment, type Channel, type Friend, type Gif, type Msg, type Presence, type Server, type UiEvent, type User } from "./types";
 import { chime, closeAudio } from "./sounds";
 import { encodeMentions } from "./rich";
 import { applyPrefs, prefs, resetPrefs, setPrefs } from "./prefs";
@@ -28,6 +28,11 @@ export const [s, set] = createStore({
   voice: { channelId: null, state: "idle", muted: false, deafened: false, detail: null } as VoiceState,
   selServer: null as string | null,
   selChannel: null as string | null,
+  /** Friends mode: the friends home, or a DM when the selected server is one. */
+  friendsOpen: false,
+  /** Your unique login name (friends add you by it). */
+  username: "",
+  friends: [] as Friend[],
   /** Voice channel shown on the stage (null = show the text channel). */
   stage: null as string | null,
   /** channel → last read message id (yours, from the server + live). */
@@ -58,6 +63,14 @@ export const userName = (id: string) => {
   return s.users[id]?.name ?? "unknown";
 };
 export const currentServer = () => s.servers.find((x) => x.id === s.selServer) ?? null;
+/** Servers you see in the server list (DMs live under Friends). */
+export const realServers = () => s.servers.filter((x) => !x.dmWith);
+export const isDmServer = (id: string | null) => !!id && !!s.servers.find((x) => x.id === id)?.dmWith;
+export const currentDm = () => { const sv = currentServer(); return sv?.dmWith ? sv : null; };
+export const dmWith = (userId: string) => s.servers.find((x) => x.dmWith === userId) ?? null;
+export const friendOf = (userId: string) => s.friends.find((f) => f.user.id === userId) ?? null;
+/** The DM a channel belongs to, if it is one. */
+export const dmOfChannel = (channelId: string) => s.servers.find((x) => x.dmWith && x.channels.some((c) => c.id === channelId)) ?? null;
 export function serverUsers(server: Server | null | undefined, includeSearch = false): User[] {
   if (!server) return [];
   const users = new Map(server.memberIds.map((id) => s.users[id]).filter((u): u is User => !!u).map((u) => [u.id, u]));
@@ -202,8 +215,8 @@ let scheduled = false;
 const notifyCtx = {
   get me() { return s.user?.id ?? null; },
   get openChannel() { return s.stage ? null : s.selChannel; },
-  channelName: (id: string) => s.servers.flatMap((x) => x.channels).find((c) => c.id === id)?.name ?? "channel",
-  serverName: (id: string) => s.servers.find((x) => x.channels.some((c) => c.id === id))?.name ?? "",
+  channelName: (id: string) => { const dm = dmOfChannel(id); return dm ? "Direct message" : `#${s.servers.flatMap((x) => x.channels).find((c) => c.id === id)?.name ?? "channel"}`; },
+  serverName: (id: string) => (dmOfChannel(id) ? "" : s.servers.find((x) => x.channels.some((c) => c.id === id))?.name ?? ""),
   userName: (id: string) => userName(id),
 };
 
@@ -257,17 +270,31 @@ function apply(e: UiEvent, painted: string[]) {
         if (sv) pres[p.userId] = { ...p, serverId: sv.id };
       }
       set("presence", reconcile(pres));
+      set("username", e.username ?? "");
+      set("friends", reconcile(e.friends ?? []));
+      for (const f of e.friends ?? []) set("users", f.user.id, f.user);
       absorbServers(e.servers, true);
       if (loggingOut) resetPrefs();
       if (changedUser) {
         set({ selServer: null, selChannel: null, stage: null, msgs: [] });
       }
-      if (e.user && !s.selServer && e.servers.length) {
+      const real = e.servers.filter((x) => !x.dmWith);
+      if (e.user && !s.selServer && real.length) {
         const last = prefs.lastServer;
-        selectServer(last && e.servers.some((x) => x.id === last) ? last : e.servers[0].id);
+        selectServer(last && real.some((x) => x.id === last) ? last : real[0].id);
       }
       break;
     }
+    case "friend": {
+      set("users", e.friend.user.id, e.friend.user);
+      const i = s.friends.findIndex((f) => f.user.id === e.friend.user.id);
+      if (i >= 0) set("friends", i, reconcile(e.friend));
+      else set("friends", s.friends.length, e.friend);
+      break;
+    }
+    case "friendRemoved":
+      set("friends", (l) => l.filter((f) => f.user.id !== e.userId));
+      break;
     case "server": {
       absorbServers([e.server], false);
       const i = s.servers.findIndex((x) => x.id === e.server.id);
@@ -472,8 +499,9 @@ function apply(e: UiEvent, painted: string[]) {
 // ---------- actions ----------
 
 export function selectServer(id: string) {
-  set({ selServer: id, stage: null, selChannel: null, msgs: [], channelError: null, channelLoading: false });
-  if (prefs.lastServer !== id) setPrefs({ lastServer: id });
+  const dm = isDmServer(id);
+  set({ selServer: id, stage: null, selChannel: null, msgs: [], channelError: null, channelLoading: false, friendsOpen: dm });
+  if (!dm && prefs.lastServer !== id) setPrefs({ lastServer: id });
   const sv = s.servers.find((x) => x.id === id);
   const last = prefs.lastChannel[id];
   const ch = sv?.channels.find((c) => c.id === last && !c.voice) ?? sv?.channels.find((c) => !c.voice);
@@ -577,10 +605,42 @@ export function cycleChannel(dir: 1 | -1, unreadOnly = false) {
 }
 
 export function cycleServer(dir: 1 | -1) {
-  if (s.servers.length < 2) return;
-  const at = Math.max(0, s.servers.findIndex((x) => x.id === s.selServer));
-  selectServer(s.servers[(at + dir + s.servers.length) % s.servers.length].id);
+  const list = realServers();
+  if (!list.length) return;
+  const at = list.findIndex((x) => x.id === s.selServer);
+  if (at < 0) { selectServer(list[0].id); return; }
+  if (list.length < 2) return;
+  selectServer(list[(at + dir + list.length) % list.length].id);
 }
+
+// ---------- friends ----------
+
+/** Friends home (keeps your server selection to come back to). */
+export function openFriends() {
+  set("friendsOpen", true);
+  if (isDmServer(s.selServer)) { set({ selServer: null, selChannel: null, stage: null, msgs: [] }); }
+}
+
+/** Back to your servers. */
+export function closeFriends() {
+  set("friendsOpen", false);
+  if (!s.selServer || isDmServer(s.selServer)) {
+    const real = realServers();
+    const last = prefs.lastServer;
+    const to = (last && real.some((x) => x.id === last) ? last : real[0]?.id) ?? null;
+    if (to) selectServer(to); else set({ selServer: null, selChannel: null, stage: null, msgs: [] });
+  }
+}
+
+export function openDm(userId: string) {
+  const dm = dmWith(userId);
+  if (dm) selectServer(dm.id);
+}
+
+/** Incoming requests + unread DMs: what the Friends button points at. */
+export const friendsAttention = () =>
+  s.friends.some((f) => f.state === "incoming") ||
+  s.servers.some((x) => x.dmWith && x.channels.some((c) => isUnread(c) && x.id !== s.selServer));
 
 export async function editMessage(id: string, content: string) {
   set("editing", null);

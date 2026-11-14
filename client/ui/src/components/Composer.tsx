@@ -244,7 +244,7 @@ export default function Composer() {
         ref={ta}
         rows={1}
         maxLength={4000}
-        placeholder={s.replyTo ? `Reply in ${name()}` : `Write in ${name()}`}
+        placeholder={currentServer()?.dmWith ? (s.replyTo ? `Reply to ${userName(currentServer()!.dmWith!)}` : `Write to ${userName(currentServer()!.dmWith!)}`) : s.replyTo ? `Reply in ${name()}` : `Write in ${name()}`}
         onInput={(e) => { setText(e.currentTarget.value); if (s.selChannel) drafts.set(s.selChannel, { text: e.currentTarget.value, files: files() }); setCaret(e.currentTarget.selectionStart); setPick(0); resize(); if (e.currentTarget.value.trim()) iAmTyping(); }}
         onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
         onClick={(e) => setCaret(e.currentTarget.selectionStart)}

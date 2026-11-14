@@ -1,6 +1,6 @@
 import { createSignal, For, Show } from "solid-js";
 import { call } from "../ipc";
-import { currentServer, isOwner, jumpTo, loadMoreMembers, loadOlder, s, selectChannel, selectServer, serverUsers, toast, userName } from "../store";
+import { currentServer, isOwner, jumpTo, loadMoreMembers, loadOlder, realServers, s, selectChannel, selectServer, serverUsers, toast, userName } from "../store";
 import { Confirm } from "./ServerSettings";
 import { Overlay } from "./Overlay";
 import { Avatar } from "./Avatar";
@@ -73,7 +73,7 @@ export function ServersSheet(p: { close: () => void }) {
   return (
     <Overlay title="Servers" close={p.close}>
       <ol class="index">
-        <For each={s.servers} fallback={<li class="muted">You are not in any server yet.</li>}>
+        <For each={realServers()} fallback={<li class="muted">You are not in any server yet.</li>}>
           {(sv, i) => (
             <li>
               <button class="index-row" classList={{ current: s.selServer === sv.id }} onClick={() => { selectServer(sv.id); p.close(); }}>

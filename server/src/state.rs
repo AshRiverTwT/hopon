@@ -7,11 +7,11 @@ use crate::{auth::Keys, config::Config, metrics::Metrics, persist::PersistOp};
 use anyhow::Result;
 use bytes::Bytes;
 use dashmap::DashMap;
-use hopon_shared::{encode, ids::IdGen, ChannelInfo, ChannelKind, Id, MediaPresence, MediaSource, ServerFrame, ServerInfo, UserInfo, S2C};
+use hopon_shared::{encode, ids::IdGen, ChannelInfo, ChannelKind, Friend, FriendState, Id, MediaPresence, MediaSource, ServerFrame, ServerInfo, UserInfo, S2C};
 use parking_lot::{Mutex, RwLock};
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tokio::sync::Semaphore;
@@ -31,9 +31,30 @@ pub type ConnTx = mpsc::Sender<Out>;
 pub struct Guild {
     pub tx: broadcast::Sender<Bytes>,
     pub members: RwLock<HashSet<Id>>,
+    /// A direct message between these two people (a hidden server).
+    pub dm: Option<(Id, Id)>,
+    /// DM only: the two are still friends, so new messages are allowed.
+    pub dm_open: AtomicBool,
+}
+
+/// The two ids of a pair, smaller first (friendships and DMs are stored that way).
+pub fn pair(a: Id, b: Id) -> (Id, Id) {
+    (a.min(b), a.max(b))
+}
+pub fn dm_key(a: Id, b: Id) -> String {
+    let (x, y) = pair(a, b);
+    format!("{x}:{y}")
+}
+fn parse_dm(k: &str) -> Option<(Id, Id)> {
+    let (a, b) = k.split_once(':')?;
+    Some((a.parse().ok()?, b.parse().ok()?))
 }
 
 impl Guild {
+    /// Admin actions, invites and new channels don't apply to DMs.
+    pub fn is_dm(&self) -> bool {
+        self.dm.is_some()
+    }
     pub fn is_member(&self, u: Id) -> bool {
         self.members.read().contains(&u)
     }
@@ -285,13 +306,15 @@ impl State {
         }
     }
 
-    pub fn guild_or_insert(&self, id: Id, members: impl IntoIterator<Item = Id>) -> Arc<Guild> {
+    pub fn guild_or_insert(&self, id: Id, members: impl IntoIterator<Item = Id>, dm: Option<(Id, Id)>, dm_open: bool) -> Arc<Guild> {
         self.guilds
             .entry(id)
             .or_insert_with(|| {
                 Arc::new(Guild {
                     tx: broadcast::channel(GUILD_BACKLOG).0,
                     members: RwLock::new(members.into_iter().collect()),
+                    dm,
+                    dm_open: AtomicBool::new(dm_open),
                 })
             })
             .clone()
@@ -351,19 +374,74 @@ impl State {
                 .bind(id)
                 .fetch_all(&self.db)
                 .await?;
-        Ok(self.guild_or_insert(id, members.into_iter().map(|m| m.0)))
+        let dm: Option<(Id, Id)> = sqlx::query_scalar::<_, Option<String>>("SELECT dm_pair FROM servers WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.db)
+            .await?
+            .flatten()
+            .and_then(|k| parse_dm(&k));
+        let open = match dm {
+            Some((a, b)) => self.are_friends(a, b).await?,
+            None => false,
+        };
+        Ok(self.guild_or_insert(id, members.into_iter().map(|m| m.0), dm, open))
+    }
+
+    pub async fn are_friends(&self, a: Id, b: Id) -> Result<bool> {
+        let (x, y) = pair(a, b);
+        Ok(sqlx::query_scalar::<_, bool>("SELECT accepted FROM friendships WHERE user_a = $1 AND user_b = $2")
+            .bind(x)
+            .bind(y)
+            .fetch_optional(&self.db)
+            .await?
+            .unwrap_or(false))
+    }
+
+    /// The DM server between two people, if it exists.
+    pub async fn dm_between(&self, a: Id, b: Id) -> Result<Option<Id>> {
+        Ok(sqlx::query_scalar("SELECT id FROM servers WHERE dm_pair = $1")
+            .bind(dm_key(a, b))
+            .fetch_optional(&self.db)
+            .await?)
+    }
+
+    /// Everyone `user` is friends with or has a request with, seen from `user`'s side.
+    pub async fn load_friends(&self, user: Id) -> Result<Vec<Friend>> {
+        let rows: Vec<(i64, String, String, i32, i64, bool, Option<i64>)> = sqlx::query_as(
+            "SELECT u.id, u.name, COALESCE(u.display_name, u.name), u.avatar_v, f.requested_by, f.accepted, \
+                    (SELECT s.id FROM servers s WHERE s.dm_pair = f.user_a::text || ':' || f.user_b::text) \
+             FROM friendships f JOIN users u ON u.id = CASE WHEN f.user_a = $1 THEN f.user_b ELSE f.user_a END \
+             WHERE f.user_a = $1 OR f.user_b = $1 ORDER BY u.name_lower",
+        )
+        .bind(user)
+        .fetch_all(&self.db)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, username, name, avatar_v, by, accepted, dm)| Friend {
+                user: UserInfo { id, name, avatar_v: avatar_v as u32 },
+                username,
+                state: if accepted { FriendState::Friends } else if by == user { FriendState::Outgoing } else { FriendState::Incoming },
+                dm_server: dm,
+            })
+            .collect())
+    }
+
+    /// One friendship as `user` sees it (None: no friendship or request).
+    pub async fn friend_of(&self, user: Id, other: Id) -> Result<Option<Friend>> {
+        Ok(self.load_friends(user).await?.into_iter().find(|f| f.user.id == other))
     }
 
     /// Full snapshots of the given servers (or every server of `user` when
     /// `only` is None). Three queries regardless of server count.
     pub async fn load_servers(&self, user: Id, only: Option<Id>) -> Result<Vec<ServerInfo>> {
-        let rows: Vec<(i64, String, i64)> = match only {
-            Some(sid) => sqlx::query_as("SELECT id, name, owner_id FROM servers WHERE id = $1")
+        let rows: Vec<(i64, String, i64, Option<String>)> = match only {
+            Some(sid) => sqlx::query_as("SELECT id, name, owner_id, dm_pair FROM servers WHERE id = $1")
                 .bind(sid)
                 .fetch_all(&self.db)
                 .await?,
             None => sqlx::query_as(
-                "SELECT s.id, s.name, s.owner_id FROM servers s JOIN members m ON m.server_id = s.id \
+                "SELECT s.id, s.name, s.owner_id, s.dm_pair FROM servers s JOIN members m ON m.server_id = s.id \
                  WHERE m.user_id = $1 ORDER BY s.id",
             )
             .bind(user)
@@ -408,7 +486,7 @@ impl State {
 
         let mut out: Vec<ServerInfo> = rows
             .into_iter()
-            .map(|(id, name, owner_id)| ServerInfo {
+            .map(|(id, name, owner_id, dm)| ServerInfo {
                 id,
                 name,
                 owner_id,
@@ -419,8 +497,31 @@ impl State {
                 reads: vec![],
                 online: vec![],
                 activities: vec![],
+                dm_with: dm.as_deref().and_then(parse_dm).map(|(a, b)| if a == user { b } else { a }),
             })
             .collect();
+        // A DM's two people travel with it (the other person may not be a friend any more).
+        let dm_ids: Vec<i64> = out.iter().filter(|s| s.dm_with.is_some()).map(|s| s.id).collect();
+        if !dm_ids.is_empty() {
+            let people: Vec<(i64, i64, String, i32)> = sqlx::query_as(
+                "SELECT m.server_id, u.id, COALESCE(u.display_name, u.name), u.avatar_v FROM members m JOIN users u ON u.id = m.user_id WHERE m.server_id = ANY($1)",
+            )
+            .bind(&dm_ids)
+            .fetch_all(&self.db)
+            .await?;
+            for (sid, uid, name, av) in people {
+                if let Some(s) = out.iter_mut().find(|s| s.id == sid) {
+                    s.members.push(UserInfo { id: uid, name, avatar_v: av as u32 });
+                    s.member_ids.push(uid);
+                    if self.is_online(uid) {
+                        s.online.push(uid);
+                    }
+                    if let Some(g) = self.activities.get(&uid) {
+                        s.activities.push((uid, g.clone()));
+                    }
+                }
+            }
+        }
         let idx: HashMap<i64, usize> = out.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
         for (id, server_id, name, kind, topic) in chans {
             let mut c = ChannelInfo {

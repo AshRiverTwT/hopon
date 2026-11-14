@@ -110,6 +110,9 @@ pub struct Store {
     /// Member rows intersecting the visible people list.
     pub visible_members: HashSet<Id>,
     pub speaking: Vec<String>,
+    /// Your unique login name, and your friends and requests.
+    pub username: String,
+    pub friends: Vec<hopon_shared::Friend>,
 }
 
 impl Store {
@@ -162,7 +165,14 @@ impl Store {
             users: self.users_by_id.values().map(Into::into).collect(),
             voice: self.voice.values().map(|(_, p)| p.into()).collect(),
             media: self.media.values().map(Into::into).collect(),
+            username: self.username.clone(),
+            friends: self.friends.iter().map(Into::into).collect(),
         }
+    }
+
+    /// Friends' online state and games show in the friends list, wherever you are.
+    fn is_friend(&self, user: Id) -> bool {
+        self.friends.iter().any(|f| f.user.id == user)
     }
 
     fn edit_recent(&mut self, channel: Id, id: Id, content: &str, edited_at: i64) {
@@ -336,6 +346,8 @@ impl Core {
                     | UiEvent::MemberJoined { .. }
                     | UiEvent::UserUpdated { .. }
                     | UiEvent::MediaPresence { .. }
+                    | UiEvent::Friend { .. }
+                    | UiEvent::FriendRemoved { .. }
                     | UiEvent::OpenChannel { .. }
                     | UiEvent::Error { .. }
             );
@@ -986,6 +998,8 @@ impl Core {
                 voice,
                 media,
                 prefs,
+                username,
+                friends,
             } => {
                 // Before the session snapshot, so the UI can pick your last server.
                 self.store.lock().prefs = Some(prefs.clone());
@@ -1007,6 +1021,11 @@ impl Core {
                     }
                     s.me = Some(user.clone());
                     s.users_by_id.insert(user.id, user.clone());
+                    s.username = username.clone();
+                    s.friends = friends.clone();
+                    for f in friends.iter() {
+                        s.users_by_id.insert(f.user.id, f.user.clone());
+                    }
                     s.media = media.iter().filter(|p| p.active).map(|p| ((p.user_id, p.source), *p)).collect();
                     s.servers = servers.clone();
                     for server in servers.iter() {
@@ -1050,7 +1069,7 @@ impl Core {
                         }
                         visible |= is_member && visible_members.contains(user_id);
                     }
-                    visible
+                    visible || s.is_friend(*user_id)
                 };
                 if visible {
                     self.emit(UiEvent::Activity {
@@ -1060,6 +1079,21 @@ impl Core {
                 }
             }
             S2C::ChannelEvent(event) => self.apply_durable_event(event, t_recv),
+            S2C::FriendUpdate(friend) => {
+                {
+                    let mut s = self.store.lock();
+                    s.users_by_id.insert(friend.user.id, friend.user.clone());
+                    match s.friends.iter_mut().find(|f| f.user.id == friend.user.id) {
+                        Some(f) => *f = friend.clone(),
+                        None => s.friends.push(friend.clone()),
+                    }
+                }
+                self.emit(UiEvent::Friend { friend: friend.into() });
+            }
+            S2C::FriendRemoved { user_id } => {
+                self.store.lock().friends.retain(|f| f.user.id != *user_id);
+                self.emit(UiEvent::FriendRemoved { user_id: sid(*user_id) });
+            }
             S2C::Replay { events, .. } => {
                 for event in events { self.apply_durable_event(event, t_recv); }
             }
@@ -1479,7 +1513,7 @@ impl Core {
                         }
                         visible |= visible_members.contains(user_id);
                     }
-                    visible
+                    visible || s.is_friend(*user_id)
                 };
                 if visible {
                     self.emit(UiEvent::UserPresence {

@@ -1,6 +1,8 @@
 import { Match, Show, Switch, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { call } from "./ipc";
-import { currentServer, cycleChannel, cycleServer, isOwner, maybeMarkRead, s, toast } from "./store";
+import { closeFriends, currentDm, currentServer, cycleChannel, cycleServer, friendOf, friendsAttention, isOwner, maybeMarkRead, openFriends, s, toast } from "./store";
+import { DmClosed, DmHeader, FriendsHome, FriendsNav, FriendsRail } from "./components/Friends";
+import { BookmarkIcon, SearchIcon } from "./components/icons";
 import { comboOf, type Action } from "./hotkeys";
 import { applyScale, prefs, SCALES, setPrefs } from "./prefs";
 import { addFilesToComposer } from "./components/Composer";
@@ -151,14 +153,15 @@ export default function App() {
     <>
       <Show when={s.ready} fallback={<div class="splash" />}>
         <Show when={s.user} fallback={<Login />}>
-          <div class="frame" classList={{ "with-games": games() && !!currentServer() }}>
+          <div class="frame" classList={{ "with-games": games() && !!currentServer() && !s.friendsOpen }}>
             <header class="topbar">
               <span class="wordmark"><span class="mark" aria-hidden="true">H</span><span class="wordmark-text">HopOn</span></span>
-              <button class="pill ghost" title={currentServer()?.name} onClick={() => setSheet({ k: "servers" })}>{currentServer()?.name ?? "Servers"}</button>
+              <button class="pill ghost" title={s.friendsOpen ? "Your servers" : currentServer()?.name} onClick={() => setSheet({ k: "servers" })}>{(!s.friendsOpen && currentServer()?.name) || "Servers"}</button>
+              <button class="pill ghost friends-pill" classList={{ active: s.friendsOpen }} onClick={() => (s.friendsOpen ? closeFriends() : openFriends())}>
+                Friends<Show when={friendsAttention() && !s.friendsOpen}><i class="pill-dot" aria-label="Something new" /></Show>
+              </button>
               <div class="topbar-right">
-                <Show when={currentServer()}>
-                  <button class="pill ghost" onClick={() => setSheet({ k: "search" })}>Search</button>
-                  <button class="pill ghost" onClick={() => setSheet({ k: "bookmarks" })}>Saved</button>
+                <Show when={currentServer() && !s.friendsOpen}>
                   <button class="pill ghost" onClick={() => setSheet({ k: "members" })}>People {currentServer()!.memberIds.length}/{currentServer()!.memberCount}</button>
                   <Show when={isOwner()}><button class="pill ghost" onClick={() => setSheet({ k: "server" })}>Server<span class="long"> settings</span></button></Show>
                   <button class="pill ghost" onClick={invite}>Invite</button>
@@ -172,6 +175,17 @@ export default function App() {
                 <button class="pill" onClick={() => setSheet({ k: "settings" })}>Settings</button>
               </div>
             </header>
+            <Show when={!s.friendsOpen} fallback={<>
+              <FriendsNav />
+              <main class="main">
+                <Show when={currentDm()} fallback={<FriendsHome />}>
+                  <DmHeader search={() => setSheet({ k: "search" })} saved={() => setSheet({ k: "bookmarks" })} />
+                  <MessageList />
+                  <Show when={friendOf(currentDm()!.dmWith!)?.state === "friends"} fallback={<DmClosed />}><Composer /></Show>
+                </Show>
+              </main>
+              <FriendsRail />
+            </>}>
             <Show when={currentServer()} fallback={
               <main class="empty-state">
                 <h1 class="display title">No servers yet</h1>
@@ -189,6 +203,8 @@ export default function App() {
                         <h1 class="display title" title={channel()?.name}>{channel()?.name}</h1>
                         <button class="pill ghost" aria-pressed={isFavorite(s.selChannel!)} title="Favorite channel" onClick={() => toggleFavorite(s.selChannel!)}>{isFavorite(s.selChannel!) ? "★" : "☆"}</button>
                         <ChannelBell channelId={s.selChannel!} />
+                        <button class="icon-btn" title="Search this channel" aria-label="Search this channel" onClick={() => setSheet({ k: "search" })}><SearchIcon /></button>
+                        <button class="icon-btn" title="Saved messages" aria-label="Saved messages" onClick={() => setSheet({ k: "bookmarks" })}><BookmarkIcon /></button>
                       </div>
                       <Show when={channel()?.topic}><p class="topic">{channel()!.topic}</p></Show>
                     </header>
@@ -198,6 +214,7 @@ export default function App() {
                 </Match>
               </Switch>
               <Show when={games()} fallback={<PeopleRail />}><GamesPanel close={() => setGames(false)} /></Show>
+            </Show>
             </Show>
             <footer class="foot-l"><Status compact /><AudioToggles /></footer>
             <footer class="foot-r"><Status /></footer>

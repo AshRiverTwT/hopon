@@ -73,7 +73,7 @@ const calls: string[] = [];
 mockIPC((cmd, args) => {
   calls.push(cmd);
   switch (cmd) {
-    case "open_channel": return scene === "chat" || scene === "voice" ? hist : [];
+    case "open_channel": return (args as { channelId: string }).channelId === "7901" ? dmHist : scene === "chat" || scene === "voice" ? hist : [];
     case "load_older": return { msgs: [], more: false };
     case "get_config": return { url: "wss://hopon-chat.duckdns.org/ws" };
     case "audio_devices": return { processing: { aec: false, ns: true, agc: true }, inputs: [{ id: "a", name: "Headset Microphone (Arctis 7)" }], outputs: [{ id: "b", name: "Headset Earphone (Arctis 7)" }], input: "a", output: "b", aec: "Software", ns: "Software", agc: "Software" };
@@ -93,11 +93,25 @@ await import("./main");
 
 const user = scene === "login" ? null : me;
 const servers = scene === "empty" || scene === "login" ? [] : [server];
+// Friends: mira (a DM), nell (friend, no DM yet), jun asked you, you asked rosa.
+const dmServer: Server = { id: "9901", name: "", ownerId: "1001", members: [], channels: [{ id: "7901", serverId: "9901", name: "dm", voice: false, topic: "", lastId: "20000003" }],
+  reads: { "7901": "20000001" }, online: ["1002"], activities: { "1002": "VALORANT" }, dmWith: "1002", memberIds: ["1001", "1002"], memberCount: 2 } as unknown as Server;
+const dmHist: Msg[] = [
+  { id: "20000001", channelId: "7901", authorId: "1002", content: "you on tonight?", editedAt: null, ts: Date.now() - 600000, nonce: "", state: 2, replyTo: null, reactions: [], attachments: [] },
+  { id: "20000002", channelId: "7901", authorId: "1001", content: "after dinner, ~9", editedAt: null, ts: Date.now() - 540000, nonce: "", state: 2, replyTo: null, reactions: [], attachments: [] },
+  { id: "20000003", channelId: "7901", authorId: "1002", content: "bet. bring nell", editedAt: null, ts: Date.now() - 60000, nonce: "", state: 2, replyTo: null, reactions: [], attachments: [] },
+];
+const friends = scene === "login" ? [] : [
+  { user: members[1], username: "mira", state: "friends" as const, dmServer: "9901" },
+  { user: members[4], username: "nell", state: "friends" as const, dmServer: null },
+  { user: members[2], username: "jun", state: "incoming" as const, dmServer: null },
+  { user: members[6], username: "rosa", state: "outgoing" as const, dmServer: null },
+];
 const voice = scene === "voice" || scene === "chat"
   ? [{ userId: "1002", channelId: "7101", muted: false, deafened: false }, { userId: "1004", channelId: "7101", muted: true, deafened: false }, ...(scene === "voice" ? [{ userId: "1001", channelId: "7101", muted: false, deafened: false }] : [])]
   : [];
 onEvent({ t: "conn", state: "online", rttMs: 0.4 });
-onEvent({ t: "session", user, servers, users: members, voice, media: scene === "voice" && !lk
+onEvent({ t: "session", user, servers: scene === "login" ? servers : [...servers, dmServer], users: members, voice, username: "ash", friends, media: scene === "voice" && !lk
   ? [{ userId: "1002", channelId: "7101", source: "screen", active: true }]
   : [] });
 if (scene === "voice") {

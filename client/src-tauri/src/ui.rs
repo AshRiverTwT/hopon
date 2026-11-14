@@ -68,6 +68,8 @@ pub struct UiServer {
     pub online: Vec<String>,
     /// user → game they're playing.
     pub activities: std::collections::HashMap<String, String>,
+    /// A direct message with this person (hidden from the server list).
+    pub dm_with: Option<String>,
 }
 impl From<&ServerInfo> for UiServer {
     fn from(s: &ServerInfo) -> Self {
@@ -85,6 +87,32 @@ impl From<&ServerInfo> for UiServer {
                 .iter()
                 .map(|(u, g)| (sid(*u), g.clone()))
                 .collect(),
+            dm_with: s.dm_with.map(sid),
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct UiFriend {
+    pub user: UiUser,
+    /// Unique login name (what friends are added by).
+    pub username: String,
+    /// "friends" | "incoming" | "outgoing"
+    pub state: &'static str,
+    pub dm_server: Option<String>,
+}
+impl From<&hopon_shared::Friend> for UiFriend {
+    fn from(f: &hopon_shared::Friend) -> Self {
+        Self {
+            user: (&f.user).into(),
+            username: f.username.clone(),
+            state: match f.state {
+                hopon_shared::FriendState::Friends => "friends",
+                hopon_shared::FriendState::Incoming => "incoming",
+                hopon_shared::FriendState::Outgoing => "outgoing",
+            },
+            dm_server: f.dm_server.map(sid),
         }
     }
 }
@@ -200,7 +228,14 @@ pub enum UiEvent {
         users: Vec<UiUser>,
         voice: Vec<UiPresence>,
         media: Vec<UiMedia>,
+        /// Your unique login name.
+        username: String,
+        friends: Vec<UiFriend>,
     },
+    /// A friendship or request was added or changed.
+    Friend { friend: UiFriend },
+    /// A friendship or request is gone.
+    FriendRemoved { user_id: String },
     Server {
         server: UiServer,
     },
