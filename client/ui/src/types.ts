@@ -19,10 +19,12 @@ export interface Gif { id: string; title: string; preview: string; width: number
 /** Author id of server-written messages (welcomes). */
 export const SYSTEM_USER = "0";
 export interface Presence { userId: string; channelId: string | null; muted: boolean; deafened: boolean }
+export type MediaSource = "screen" | "camera";
+export interface MediaPresence { userId: string; channelId: string; source: MediaSource; active: boolean }
 
 export type UiEvent =
   | { t: "conn"; state: "connecting" | "online" | "offline"; rttMs: number | null }
-  | { t: "session"; user: User | null; servers: Server[]; users: User[]; voice: Presence[] }
+  | { t: "session"; user: User | null; servers: Server[]; users: User[]; voice: Presence[]; media: MediaPresence[] }
   | { t: "server"; server: Server }
   | { t: "channelCreated"; channel: Channel }
   | { t: "memberJoined"; serverId: string; user: User }
@@ -45,7 +47,7 @@ export type UiEvent =
   | { t: "edited"; channelId: string; id: string; content: string; editedAt: number }
   | { t: "deleted"; channelId: string; id: string }
   | { t: "presence"; serverId: string; presence: Presence }
-  | { t: "screenShare"; serverId: string; channelId: string; userId: string; active: boolean }
+  | { t: "mediaPresence"; media: MediaPresence }
   | { t: "voice"; channelId: string | null; state: string; muted: boolean; deafened: boolean; detail: string | null }
   | { t: "speaking"; userIds: string[] }
   | { t: "openChannel"; channelId: string }

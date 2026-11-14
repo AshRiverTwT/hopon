@@ -123,8 +123,8 @@ fn hide(app: &tauri::AppHandle, refocus: bool) {
 
 /// Combos changed in Settings ("" disables the overlay / typing key).
 #[tauri::command]
-pub fn overlay_hotkey(app: tauri::AppHandle, combo: String, type_combo: Option<String>) -> Res<()> {
-    platform::set_hotkey(app, &combo, type_combo.as_deref().unwrap_or(""))
+pub fn overlay_hotkey(app: tauri::AppHandle, combo: String, type_combo: Option<String>, mute_combo: Option<String>, deafen_combo: Option<String>) -> Res<()> {
+    platform::set_hotkey(app, &combo, type_combo.as_deref().unwrap_or(""), mute_combo.as_deref().unwrap_or(""), deafen_combo.as_deref().unwrap_or(""))
 }
 
 /// Close from inside the overlay: Esc (`refocus`: back to the game) or the
@@ -216,9 +216,10 @@ fn vk_of(code: &str) -> Option<u32> {
 #[cfg(windows)]
 mod platform {
     use super::parse_combo;
-    use crate::core::Res;
+    use crate::core::{Core, Res};
     use parking_lot::Mutex;
     use std::sync::OnceLock;
+    use tauri::Manager;
     use windows_sys::Win32::Foundation::{HWND, RECT};
     use windows_sys::Win32::System::Threading::GetCurrentThreadId;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey, MOD_NOREPEAT};
@@ -228,6 +229,8 @@ mod platform {
 
     const HOTKEY_ID: i32 = 0x484f; // "HO"
     const TYPE_ID: i32 = 0x4854; // "HT"
+    const MUTE_ID: i32 = 0x484d;
+    const DEAFEN_ID: i32 = 0x4844;
     const WM_REREGISTER: u32 = WM_APP + 7;
     const WM_TYPE_ON: u32 = WM_APP + 8;
     const WM_TYPE_OFF: u32 = WM_APP + 9;
@@ -236,6 +239,8 @@ mod platform {
         thread: u32,
         combo: Mutex<String>,
         type_combo: Mutex<String>,
+        mute_combo: Mutex<String>,
+        deafen_combo: Mutex<String>,
         app: Mutex<Option<tauri::AppHandle>>,
     }
     static HOT: OnceLock<Hot> = OnceLock::new();
@@ -248,7 +253,7 @@ mod platform {
         }
     }
 
-    pub fn set_hotkey(app: tauri::AppHandle, combo: &str, type_combo: &str) -> Res<()> {
+    pub fn set_hotkey(app: tauri::AppHandle, combo: &str, type_combo: &str, mute_combo: &str, deafen_combo: &str) -> Res<()> {
         if !combo.is_empty() && parse_combo(combo).is_none() {
             return Err("that key can't be used for the overlay".into());
         }
@@ -258,11 +263,13 @@ mod platform {
                 .name("hopon-hotkey".into())
                 .spawn(move || run(tx))
                 .expect("hotkey thread");
-            Hot { thread: rx.recv().unwrap_or(0), combo: Mutex::new(String::new()), type_combo: Mutex::new(String::new()), app: Mutex::new(None) }
+            Hot { thread: rx.recv().unwrap_or(0), combo: Mutex::new(String::new()), type_combo: Mutex::new(String::new()), mute_combo: Mutex::new(String::new()), deafen_combo: Mutex::new(String::new()), app: Mutex::new(None) }
         });
         *hot.app.lock() = Some(app);
         *hot.combo.lock() = combo.to_owned();
         *hot.type_combo.lock() = type_combo.to_owned();
+        *hot.mute_combo.lock() = mute_combo.to_owned();
+        *hot.deafen_combo.lock() = deafen_combo.to_owned();
         unsafe { PostThreadMessageW(hot.thread, WM_REREGISTER, 0, 0) };
         Ok(())
     }
@@ -275,6 +282,8 @@ mod platform {
             let _ = tx.send(GetCurrentThreadId());
             let mut registered = false;
             let mut type_registered = false;
+            let mut mute_registered = false;
+            let mut deafen_registered = false;
             while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
                 let Some(hot) = HOT.get() else { continue };
                 match msg.message {
@@ -283,12 +292,20 @@ mod platform {
                             UnregisterHotKey(std::ptr::null_mut(), HOTKEY_ID);
                             registered = false;
                         }
+                        if mute_registered { UnregisterHotKey(std::ptr::null_mut(), MUTE_ID); mute_registered = false; }
+                        if deafen_registered { UnregisterHotKey(std::ptr::null_mut(), DEAFEN_ID); deafen_registered = false; }
                         let combo = hot.combo.lock().clone();
                         if let Some((mods, vk)) = parse_combo(&combo) {
                             registered = RegisterHotKey(std::ptr::null_mut(), HOTKEY_ID, mods | MOD_NOREPEAT, vk) != 0;
                             if !registered {
                                 tracing::warn!("overlay hotkey {combo} is taken by another app");
                             }
+                        }
+                        if let Some((mods, vk)) = parse_combo(&hot.mute_combo.lock().clone()) {
+                            mute_registered = RegisterHotKey(std::ptr::null_mut(), MUTE_ID, mods | MOD_NOREPEAT, vk) != 0;
+                        }
+                        if let Some((mods, vk)) = parse_combo(&hot.deafen_combo.lock().clone()) {
+                            deafen_registered = RegisterHotKey(std::ptr::null_mut(), DEAFEN_ID, mods | MOD_NOREPEAT, vk) != 0;
                         }
                     }
                     WM_TYPE_ON => {
@@ -312,6 +329,18 @@ mod platform {
                     WM_HOTKEY if msg.wParam as i32 == TYPE_ID => {
                         if let Some(app) = hot.app.lock().clone() {
                             super::type_pressed(app);
+                        }
+                    }
+                    WM_HOTKEY if msg.wParam as i32 == MUTE_ID || msg.wParam as i32 == DEAFEN_ID => {
+                        if let Some(app) = hot.app.lock().clone() {
+                            if let Some(core) = app.try_state::<std::sync::Arc<Core>>() {
+                                let core = core.inner().clone();
+                                let mute = msg.wParam as i32 == MUTE_ID;
+                                tauri::async_runtime::spawn(async move {
+                                    if mute { core.voice.toggle_muted(&core).await; }
+                                    else { core.voice.toggle_deafened(&core).await; }
+                                });
+                            }
                         }
                     }
                     _ => {}
@@ -351,7 +380,7 @@ mod platform {
 #[cfg(not(windows))]
 mod platform {
     use crate::core::Res;
-    pub fn set_hotkey(_app: tauri::AppHandle, _combo: &str, _type_combo: &str) -> Res<()> {
+    pub fn set_hotkey(_app: tauri::AppHandle, _combo: &str, _type_combo: &str, _mute_combo: &str, _deafen_combo: &str) -> Res<()> {
         Ok(())
     }
     pub fn type_hotkey(_on: bool) {}

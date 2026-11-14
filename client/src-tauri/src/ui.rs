@@ -2,7 +2,7 @@
 //! so they cross the IPC boundary as decimal strings.
 
 use hopon_shared::{
-    Attachment, ChannelInfo, ChannelKind, Id, Message, ServerInfo, UserInfo, VoicePresence,
+    Attachment, ChannelInfo, ChannelKind, Id, MediaPresence, MediaSource, Message, ServerInfo, UserInfo, VoicePresence,
 };
 use serde::Serialize;
 
@@ -166,6 +166,26 @@ impl From<&VoicePresence> for UiPresence {
 }
 
 #[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct UiMedia {
+    pub channel_id: String,
+    pub user_id: String,
+    pub source: &'static str,
+    pub active: bool,
+}
+
+impl From<&MediaPresence> for UiMedia {
+    fn from(media: &MediaPresence) -> Self {
+        Self {
+            channel_id: sid(media.channel_id),
+            user_id: sid(media.user_id),
+            source: match media.source { MediaSource::Screen => "screen", MediaSource::Camera => "camera" },
+            active: media.active,
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Debug)]
 #[serde(tag = "t", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum UiEvent {
     /// `state`: "connecting" | "online" | "offline" | "incompatible".
@@ -179,6 +199,7 @@ pub enum UiEvent {
         servers: Vec<UiServer>,
         users: Vec<UiUser>,
         voice: Vec<UiPresence>,
+        media: Vec<UiMedia>,
     },
     Server {
         server: UiServer,
@@ -280,7 +301,7 @@ pub enum UiEvent {
         server_id: String,
         presence: UiPresence,
     },
-    ScreenShare { server_id: String, channel_id: String, user_id: String, active: bool },
+    MediaPresence { media: UiMedia },
     /// Voice connection status for the local user.
     Voice {
         channel_id: Option<String>,

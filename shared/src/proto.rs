@@ -11,7 +11,7 @@ pub type Id = i64;
 /// Bumped on every wire-incompatible change. Sent as `?v=` on the WebSocket
 /// URL; the server answers HTTP 426 to any other version before any
 /// MessagePack is exchanged, so old and new builds fail loudly, not silently.
-pub const PROTOCOL_VERSION: u32 = 10;
+pub const PROTOCOL_VERSION: u32 = 11;
 
 /// Append the protocol version to a chat URL (`ws://host:port/ws`).
 pub fn versioned_url(url: &str) -> String {
@@ -43,6 +43,21 @@ pub struct UserInfo {
     /// Avatar version; 0 = no avatar. Clients fetch with `GetAvatar` and
     /// cache by (id, version).
     pub avatar_v: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MediaSource {
+    Screen,
+    Camera,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MediaPresence {
+    pub server_id: Id,
+    pub channel_id: Id,
+    pub user_id: Id,
+    pub source: MediaSource,
+    pub active: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -180,12 +195,17 @@ pub const MAX_REACTIONS_PER_MESSAGE: usize = 20;
 pub const MAX_EMOJI_BYTES: usize = 32;
 
 /// A reaction must be a short symbol: no whitespace, no control characters,
-/// no ASCII letters or digits (so it can't be used as a text channel).
+/// no ASCII letters or bare digits (keycap emoji are allowed).
 pub fn valid_emoji(e: &str) -> bool {
     !e.is_empty()
         && e.len() <= MAX_EMOJI_BYTES
-        && e.chars()
-            .all(|c| !c.is_whitespace() && !c.is_control() && !c.is_ascii_alphanumeric())
+        && e.char_indices().all(|(i, c)| {
+            !c.is_whitespace() && !c.is_control()
+                && (!c.is_ascii_alphanumeric()
+                    || (c.is_ascii_digit()
+                        && (e[i + 1..].starts_with("\u{fe0f}\u{20e3}")
+                            || e[i + 1..].starts_with('\u{20e3}'))))
+        })
 }
 
 /// Mention token for a user inside message content.
@@ -344,8 +364,9 @@ pub enum C2S {
     ScreenGrant {
         channel_id: Id,
     },
-    /// Advertise whether the current voice participant is sharing a screen.
-    ScreenShare { active: bool },
+    /// Advertise an active video source for the current voice participant.
+    MediaState { channel_id: Id, source: MediaSource, active: bool },
+    SetDisplayName { name: String },
     /// PNG, JPEG or WebP, at most `MAX_AVATAR_BYTES`. Empty removes it.
     SetAvatar {
         #[serde(with = "serde_bytes")]
@@ -424,6 +445,7 @@ pub enum S2C {
         refresh_token: String,
         servers: Vec<ServerInfo>,
         voice: Vec<VoicePresence>,
+        media: Vec<MediaPresence>,
         /// Your saved preferences (JSON object; opaque to the server).
         prefs: String,
     },
@@ -505,7 +527,7 @@ pub enum S2C {
         muted: bool,
         deafened: bool,
     },
-    ScreenPresence { server_id: Id, channel_id: Id, user_id: Id, active: bool },
+    MediaPresence(MediaPresence),
     LoggedOut,
     Ok,
     /// A user's profile changed (e.g. new avatar); sent to all their servers.
@@ -647,6 +669,16 @@ mod tests {
             vec![12, 34]
         );
         assert_eq!(mention_token(7), "<@7>");
+    }
+
+    #[test]
+    fn poll_keycaps_are_valid_reactions() {
+        for emoji in ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "0\u{20e3}"] {
+            assert!(valid_emoji(emoji), "{emoji}");
+        }
+        for text in ["1", "12", "1\u{fe0f}", "a️⃣", "1️⃣2", "1️⃣ vote"] {
+            assert!(!valid_emoji(text), "{text}");
+        }
     }
 
     #[test]

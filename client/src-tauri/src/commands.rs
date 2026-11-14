@@ -4,7 +4,7 @@ use crate::core::{Core, Res};
 use crate::perf::Startup;
 use crate::ui::*;
 use hopon_shared::time::now_us;
-use hopon_shared::{ChannelKind, C2S, S2C};
+use hopon_shared::{ChannelKind, MediaSource, C2S, S2C};
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::ipc::Channel;
@@ -31,10 +31,12 @@ pub fn ui_set_context(
     core: C<'_>,
     server_id: Option<String>,
     joined_voice: Option<String>,
+    viewed_voice: Option<String>,
 ) -> Res<()> {
     core.inner().set_ui_context(
         server_id.as_deref().map(pid).transpose()?,
         joined_voice.as_deref().map(pid).transpose()?,
+        viewed_voice.as_deref().map(pid).transpose()?,
     );
     Ok(())
 }
@@ -523,11 +525,21 @@ pub async fn screen_grant(core: C<'_>, channel_id: String) -> Res<(String, Strin
 }
 
 #[tauri::command]
-pub async fn screen_presence(core: C<'_>, active: bool) -> Res<()> {
-    match core.request(C2S::ScreenShare { active }).await? {
+pub async fn media_presence(core: C<'_>, channel_id: String, source: String, active: bool) -> Res<()> {
+    let source = match source.as_str() {
+        "screen" => MediaSource::Screen,
+        "camera" => MediaSource::Camera,
+        _ => return Err("unknown video source".into()),
+    };
+    match core.request(C2S::MediaState { channel_id: pid(&channel_id)?, source, active }).await? {
         S2C::Ok => Ok(()),
         _ => Err("unexpected reply".into()),
     }
+}
+
+#[tauri::command]
+pub async fn set_display_name(core: C<'_>, name: String) -> Res<()> {
+    core.request(C2S::SetDisplayName { name }).await.map(|_| ())
 }
 
 /// Settings → "Show what I'm playing".

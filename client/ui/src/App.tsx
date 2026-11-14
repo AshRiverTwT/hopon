@@ -23,9 +23,10 @@ import { FullStream, MiniPlayer } from "./components/Streams";
 import { Banners, ChannelBell } from "./components/Banners";
 import { installUpdate, startUpdateChecks, upd } from "./update";
 import { ServerSettingsSheet } from "./components/ServerSettings";
-import { InviteSheet, MembersSheet, NewChannelSheet, ServersSheet } from "./components/Sheets";
+import { BookmarksSheet, InviteSheet, MembersSheet, NewChannelSheet, SearchSheet, ServersSheet } from "./components/Sheets";
+import { isFavorite, toggleFavorite } from "./localFeatures";
 
-type Sheet = null | { k: "servers" } | { k: "server" } | { k: "members" } | { k: "settings" } | { k: "invite"; link: string } | { k: "new"; voice: boolean };
+type Sheet = null | { k: "servers" } | { k: "server" } | { k: "members" } | { k: "settings" } | { k: "invite"; link: string } | { k: "new"; voice: boolean } | { k: "bookmarks" } | { k: "search" };
 
 export default function App() {
   const [perf, setPerf] = createSignal(false);
@@ -36,6 +37,7 @@ export default function App() {
     call("ui_set_context", {
       serverId: s.selServer,
       joinedVoice: s.voice.channelId,
+      viewedVoice: s.stage,
     }).catch(() => {});
   });
   onMount(() => {
@@ -83,11 +85,11 @@ export default function App() {
     if (!games()) return;
     call("games_visible", { visible: !sheet() && !perf() }).catch(() => {});
   });
-  // Screen media is joined only when someone watches or shares.
+  // Keep video capture scoped to the voice room and current account.
   createEffect(() => {
     const ch = s.voice.channelId;
-    if (ch && s.voice.state === "connected" && s.user) setScreenContext(ch, s.user.id);
-    else if (!ch) void disconnectScreens(true);
+    if (s.conn.state === "online" && ch && s.voice.state === "connected" && s.user) setScreenContext(ch, s.user.id);
+    else if (s.conn.state !== "online" || !ch || !s.user) void disconnectScreens(true);
   });
   onMount(() => {
     startUpdateChecks();
@@ -155,6 +157,8 @@ export default function App() {
               <button class="pill ghost" title={currentServer()?.name} onClick={() => setSheet({ k: "servers" })}>{currentServer()?.name ?? "Servers"}</button>
               <div class="topbar-right">
                 <Show when={currentServer()}>
+                  <button class="pill ghost" onClick={() => setSheet({ k: "search" })}>Search</button>
+                  <button class="pill ghost" onClick={() => setSheet({ k: "bookmarks" })}>Saved</button>
                   <button class="pill ghost" onClick={() => setSheet({ k: "members" })}>People {currentServer()!.memberIds.length}/{currentServer()!.memberCount}</button>
                   <Show when={isOwner()}><button class="pill ghost" onClick={() => setSheet({ k: "server" })}>Server<span class="long"> settings</span></button></Show>
                   <button class="pill ghost" onClick={invite}>Invite</button>
@@ -183,6 +187,7 @@ export default function App() {
                     <header class="head">
                       <div class="head-row">
                         <h1 class="display title" title={channel()?.name}>{channel()?.name}</h1>
+                        <button class="pill ghost" aria-pressed={isFavorite(s.selChannel!)} title="Favorite channel" onClick={() => toggleFavorite(s.selChannel!)}>{isFavorite(s.selChannel!) ? "★" : "☆"}</button>
                         <ChannelBell channelId={s.selChannel!} />
                       </div>
                       <Show when={channel()?.topic}><p class="topic">{channel()!.topic}</p></Show>
@@ -200,6 +205,8 @@ export default function App() {
           <Switch>
             <Match when={sheet()?.k === "servers"}><ServersSheet close={close} /></Match>
             <Match when={sheet()?.k === "members"}><MembersSheet close={close} /></Match>
+            <Match when={sheet()?.k === "bookmarks"}><BookmarksSheet close={close} /></Match>
+            <Match when={sheet()?.k === "search"}><SearchSheet close={close} /></Match>
             <Match when={sheet()?.k === "server"}><ServerSettingsSheet close={close} /></Match>
             <Match when={sheet()?.k === "settings"}><Settings close={close} /></Match>
             <Match when={sheet()?.k === "invite"}><InviteSheet link={(sheet() as { link: string }).link} close={close} /></Match>

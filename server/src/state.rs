@@ -7,7 +7,7 @@ use crate::{auth::Keys, config::Config, metrics::Metrics, persist::PersistOp};
 use anyhow::Result;
 use bytes::Bytes;
 use dashmap::DashMap;
-use hopon_shared::{ids::IdGen, ChannelInfo, ChannelKind, Id, ServerInfo, UserInfo};
+use hopon_shared::{encode, ids::IdGen, ChannelInfo, ChannelKind, Id, MediaPresence, MediaSource, ServerFrame, ServerInfo, UserInfo, S2C};
 use parking_lot::{Mutex, RwLock};
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
@@ -74,8 +74,8 @@ pub struct State {
     pub chans: DashMap<Id, Arc<Chan>>,
     pub conns: DashMap<Id, Vec<(u64, ConnTx)>>,
     pub voice: Mutex<HashMap<Id, VoiceEntry>>,
-    /// Active screen shares advertised over the main socket, keyed by user.
-    pub screen_shares: DashMap<Id, (Id, Id)>,
+    /// Active video sources advertised over the main socket.
+    pub media: DashMap<(Id, MediaSource), MediaPresence>,
     /// Caps expensive history/replay work across the process.
     pub history_slots: Arc<Semaphore>,
     /// Per-account concurrency cap for history and replay requests.
@@ -127,7 +127,7 @@ impl State {
             chans: DashMap::new(),
             conns: DashMap::new(),
             voice: Mutex::new(HashMap::new()),
-            screen_shares: DashMap::new(),
+            media: DashMap::new(),
             history_slots: Arc::new(Semaphore::new(128)),
             user_history_slots: DashMap::new(),
             upload_slots: Arc::new(Semaphore::new(8)),
@@ -238,26 +238,12 @@ impl State {
             let mut v = self.voice.lock();
             match v.get(&user) {
                 Some(e) if e.server_id == server && channel.map_or(true, |c| c == e.channel_id) => {
+                    self.clear_media(user, e.channel_id);
                     v.remove(&user)
                 }
                 _ => None,
             }
         }?;
-        let share = self.screen_shares.get(&user).map(|entry| *entry.value());
-        if share == Some((server, removed.channel_id)) {
-            self.screen_shares.remove(&user);
-            if let Some(g) = announce {
-                g.publish(Bytes::from(hopon_shared::encode(&hopon_shared::ServerFrame {
-                    req: 0,
-                    msg: hopon_shared::S2C::ScreenPresence {
-                        server_id: server,
-                        channel_id: removed.channel_id,
-                        user_id: user,
-                        active: false,
-                    },
-                })));
-            }
-        }
         if let Some(g) = announce {
             g.publish(Bytes::from(hopon_shared::encode(
                 &hopon_shared::ServerFrame {
@@ -273,6 +259,30 @@ impl State {
             )));
         }
         Some(removed.channel_id)
+    }
+
+    pub fn set_media(&self, presence: MediaPresence) {
+        let key = (presence.user_id, presence.source);
+        let changed = if presence.active {
+            self.media.insert(key, presence) != Some(presence)
+        } else {
+            self.media.remove_if(&key, |_, current| current.channel_id == presence.channel_id).is_some()
+        };
+        if changed {
+            if let Some(guild) = self.guilds.get(&presence.server_id) {
+                guild.publish(Bytes::from(encode(&ServerFrame { req: 0, msg: S2C::MediaPresence(presence) })));
+            }
+        }
+    }
+
+    pub fn clear_media(&self, user: Id, channel: Id) {
+        for source in [MediaSource::Screen, MediaSource::Camera] {
+            let presence = self.media.get(&(user, source)).map(|entry| *entry.value());
+            if let Some(mut presence) = presence.filter(|p| p.channel_id == channel) {
+                presence.active = false;
+                self.set_media(presence);
+            }
+        }
     }
 
     pub fn guild_or_insert(&self, id: Id, members: impl IntoIterator<Item = Id>) -> Arc<Guild> {
@@ -451,7 +461,7 @@ impl State {
         let guild = self.guild(server_id).await?;
         anyhow::ensure!(guild.is_member(user), "not a member");
         let rows: Vec<(i64, String, i32)> = sqlx::query_as(
-            "SELECT u.id, u.name, u.avatar_v FROM members m JOIN users u ON u.id = m.user_id \
+            "SELECT u.id, COALESCE(u.display_name, u.name), u.avatar_v FROM members m JOIN users u ON u.id = m.user_id \
              WHERE m.server_id = $1 ORDER BY u.name_lower, u.id LIMIT $2 OFFSET $3",
         )
         .bind(server_id)
@@ -490,8 +500,9 @@ impl State {
         anyhow::ensure!(guild.is_member(user), "not a member");
         let prefix = query.to_lowercase();
         let rows: Vec<(i64, String, i32)> = sqlx::query_as(
-            "SELECT u.id, u.name, u.avatar_v FROM members m JOIN users u ON u.id = m.user_id \
-             WHERE m.server_id = $1 AND left(u.name_lower, char_length($2)) = $2 ORDER BY u.name_lower, u.id LIMIT $3",
+            "SELECT u.id, COALESCE(u.display_name, u.name), u.avatar_v FROM members m JOIN users u ON u.id = m.user_id \
+             WHERE m.server_id = $1 AND (left(lower(COALESCE(u.display_name, u.name)), char_length($2)) = $2 \
+               OR left(u.name_lower, char_length($2)) = $2) ORDER BY u.name_lower, u.id LIMIT $3",
         )
         .bind(server_id).bind(prefix).bind(limit as i64).fetch_all(&self.db).await?;
         Ok(rows
@@ -513,7 +524,7 @@ impl State {
         let guild = self.guild(server_id).await?;
         anyhow::ensure!(guild.is_member(user), "not a member");
         let row: Option<(i64, String, i32)> = sqlx::query_as(
-            "SELECT u.id, u.name, u.avatar_v FROM members m JOIN users u ON u.id = m.user_id WHERE m.server_id = $1 AND u.id = $2",
+            "SELECT u.id, COALESCE(u.display_name, u.name), u.avatar_v FROM members m JOIN users u ON u.id = m.user_id WHERE m.server_id = $1 AND u.id = $2",
         )
         .bind(server_id).bind(user_id).fetch_optional(&self.db).await?;
         Ok(row.map(|(id, name, avatar_v)| UserInfo {

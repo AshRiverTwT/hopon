@@ -1,4 +1,4 @@
-//! Global push-to-talk. Windows: a low-level keyboard hook (WH_KEYBOARD_LL)
+//! Global push-to-talk. Windows: low-level keyboard and mouse hooks
 //! on its own thread with a message loop. The hook only flips an atomic and
 //! wakes a task; it never blocks, so key-to-transmit is one wake-up (<1 ms)
 //! plus the track unmute.
@@ -43,6 +43,7 @@ impl Ptt {
 
     pub fn configure(&self, enabled: bool, vk: u32) {
         let s = shared();
+        s.down.store(false, Ordering::Relaxed);
         s.vk.store(vk, Ordering::Relaxed);
         s.enabled.store(enabled && vk != 0, Ordering::Relaxed);
         if enabled && !self.hook_started.swap(true, Ordering::Relaxed) {
@@ -84,6 +85,9 @@ mod hook {
     use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+    const MOUSE4: u32 = 0x1004;
+    const MOUSE5: u32 = 0x1005;
+
     unsafe extern "system" fn proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
         if code == HC_ACTION as i32 {
             let s = shared();
@@ -101,18 +105,45 @@ mod hook {
         CallNextHookEx(std::ptr::null_mut(), code, w, l)
     }
 
+    unsafe extern "system" fn mouse_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+        if code == HC_ACTION as i32 {
+            let s = shared();
+            if s.enabled.load(Ordering::Relaxed) {
+                let event = w as u32;
+                if matches!(event, WM_XBUTTONDOWN | WM_XBUTTONUP) {
+                    let mouse = &*(l as *const MSLLHOOKSTRUCT);
+                    let button = (mouse.mouseData >> 16) as u16;
+                    let vk = match button {
+                        XBUTTON1 => MOUSE4,
+                        XBUTTON2 => MOUSE5,
+                        _ => 0,
+                    };
+                    if vk != 0 && vk == s.vk.load(Ordering::Relaxed) {
+                        let down = event == WM_XBUTTONDOWN;
+                        if s.down.swap(down, Ordering::Relaxed) != down {
+                            s.changed.notify_one();
+                        }
+                    }
+                }
+            }
+        }
+        CallNextHookEx(std::ptr::null_mut(), code, w, l)
+    }
+
     pub fn start() {
         std::thread::Builder::new()
             .name("hopon-ptt".into())
             .spawn(|| unsafe {
                 let h = SetWindowsHookExW(WH_KEYBOARD_LL, Some(proc), std::ptr::null_mut(), 0);
-                if h.is_null() {
+                let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), std::ptr::null_mut(), 0);
+                if h.is_null() && mouse.is_null() {
                     tracing::warn!("push-to-talk hook failed");
                     return;
                 }
                 let mut msg: MSG = std::mem::zeroed();
                 while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {}
-                UnhookWindowsHookEx(h);
+                if !h.is_null() { UnhookWindowsHookEx(h); }
+                if !mouse.is_null() { UnhookWindowsHookEx(mouse); }
             })
             .ok();
     }

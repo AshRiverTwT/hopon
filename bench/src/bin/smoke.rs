@@ -108,7 +108,8 @@ fn jwt_claims(t: &str) -> Result<serde_json::Value> {
 
 macro_rules! check {
     ($name:expr, $e:expr) => {{
-        let r: Result<()> = Box::pin(async { $e }).await;
+        let r: Result<()> = tokio::time::timeout(std::time::Duration::from_secs(30), Box::pin(async { $e }))
+            .await.unwrap_or_else(|_| Err(anyhow::anyhow!("check timed out after 30 seconds")));
         match &r {
             Ok(()) => println!("ok    {}", $name),
             Err(e) => println!("FAIL  {}: {e:#}", $name),
@@ -188,6 +189,25 @@ async fn main() -> Result<()> {
     });
     pass &= check!("bad invite rejected", {
         ensure!(b.call(C2S::JoinInvite { code: "notacode".into() }).await.is_err());
+        Ok(())
+    });
+    pass &= check!("display name: validates, broadcasts, persists, and resets", {
+        ensure!(a.call(C2S::SetDisplayName { name: "a".repeat(33) }).await.is_err());
+        let S2C::UserUpdated(updated) = a.call(C2S::SetDisplayName { name: "  HopOn Tester  ".into() }).await? else { bail!("name update") };
+        ensure!(updated.name == "HopOn Tester");
+        wait_for(&mut b, |event| match event {
+            S2C::UserUpdated(user) if user.id == updated.id && user.name == updated.name => Some(()),
+            _ => None,
+        }).await?;
+        let mut c = Client::connect(&url).await?;
+        let S2C::Authed { user, .. } = c.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("sign in with username") };
+        ensure!(user.name == updated.name);
+        let S2C::UserUpdated(reset) = a.call(C2S::SetDisplayName { name: String::new() }).await? else { bail!("name reset") };
+        ensure!(reset.name == name);
+        wait_for(&mut b, |event| match event {
+            S2C::UserUpdated(user) if user.id == reset.id && user.name == reset.name => Some(()),
+            _ => None,
+        }).await?;
         Ok(())
     });
 
@@ -295,17 +315,30 @@ async fn main() -> Result<()> {
         ensure!(a.call(C2S::VoiceGrant { channel_id: text }).await.is_err());
         ensure!(a.call(C2S::ScreenGrant { channel_id: voice }).await.is_err(), "screen grant before joining voice");
         a.call(C2S::VoiceState { channel_id: Some(voice), muted: true, deafened: false }).await?;
-        // In the room: screen token with its own identity, screen sources only.
+        // The webview has its own identity and can publish video and screen audio.
         let S2C::VoiceGrant { token, .. } = a.call(C2S::ScreenGrant { channel_id: voice }).await? else { bail!("screen grant") };
         let claims = jwt_claims(&token)?;
         ensure!(claims["sub"].as_str().unwrap_or("").ends_with(":screen"), "identity {}", claims["sub"]);
-        ensure!(claims["video"]["canPublishSources"] == serde_json::json!(["screen_share", "screen_share_audio"]), "{}", claims["video"]);
+        ensure!(claims["video"]["canPublishSources"] == serde_json::json!(["screen_share", "screen_share_audio", "camera"]), "{}", claims["video"]);
         let S2C::VoiceGrant { token, .. } = a.call(C2S::VoiceGrant { channel_id: voice }).await? else { bail!("voice grant") };
         ensure!(jwt_claims(&token)?["video"]["canPublishSources"] == serde_json::json!(["microphone"]), "voice token not mic-only");
         loop { if let S2C::VoicePresence { channel_id, muted, .. } = next_msg(&mut b).await? { ensure!(channel_id == Some(voice) && muted); break; } }
+        ensure!(b.call(C2S::MediaState { channel_id: voice, source: MediaSource::Camera, active: true }).await.is_err());
+        for (source, active) in [(MediaSource::Camera, true), (MediaSource::Screen, true), (MediaSource::Screen, false)] {
+            a.call(C2S::MediaState { channel_id: voice, source, active }).await?;
+            wait_for(&mut b, |event| match event {
+                S2C::MediaPresence(p) if p.channel_id == voice && p.source == source && p.active == active => Some(()),
+                _ => None,
+            }).await?;
+        }
         let mut c = Client::connect(&url).await?;
-        c.call(C2S::Refresh { refresh_token: refresh.clone() }).await.map(|_| ()).ok();
+        let S2C::Authed { media, .. } = c.call(C2S::Login { username: name.clone(), password: "smoke-password".into() }).await? else { bail!("media snapshot") };
+        ensure!(media.iter().filter(|p| p.channel_id == voice).map(|p| p.source).collect::<Vec<_>>() == [MediaSource::Camera]);
         drop(a);
+        wait_for(&mut b, |event| match event {
+            S2C::MediaPresence(p) if p.channel_id == voice && p.source == MediaSource::Camera && !p.active => Some(()),
+            _ => None,
+        }).await?;
         loop { if let S2C::VoicePresence { channel_id, .. } = next_msg(&mut b).await? { ensure!(channel_id.is_none()); break; } }
         Ok(())
     });
@@ -498,6 +531,53 @@ async fn main() -> Result<()> {
         o.call(C2S::Delete { channel_id: text, message_id: root }).await?;
         let n: Vec<_> = { let S2C::History { messages, .. } = o.call(C2S::History { channel_id: text, before: None, limit: 10 }).await? else { bail!("h") }; messages };
         ensure!(!n.iter().any(|x| x.id == root));
+        Ok(())
+    });
+    pass &= check!("poll votes: numbered emoji broadcast, persist, and can be removed", {
+        let (mut o, mut m, _, text, _, mid) = admin_setup(&url).await?;
+        let content = "\u{1f}hopon-poll:{\"question\":\"Which game?\",\"options\":[\"Chess\",\"Wordle\"]}";
+        let t = now_us();
+        let S2C::Ack { id, .. } = o.call(C2S::Send { channel_id: text, content: content.into(), nonce: 81, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await? else { bail!("poll ack") };
+        m.call(C2S::React { channel_id: text, message_id: id, emoji: "1️⃣".into(), add: true }).await?;
+        wait_for(&mut o, |event| match event {
+            S2C::Reaction { message_id, emoji, user_id, add: true, .. } if *message_id == id && emoji == "1️⃣" && *user_id == mid => Some(()),
+            _ => None,
+        }).await?;
+        let S2C::History { messages, .. } = m.call(C2S::History { channel_id: text, before: None, limit: 10 }).await? else { bail!("history") };
+        let poll = messages.iter().find(|message| message.id == id).unwrap();
+        ensure!(poll.content == content && poll.reactions[0].users == [mid]);
+        m.call(C2S::React { channel_id: text, message_id: id, emoji: "1️⃣".into(), add: false }).await?;
+        let S2C::History { messages, .. } = m.call(C2S::History { channel_id: text, before: None, limit: 10 }).await? else { bail!("history") };
+        ensure!(messages.iter().find(|message| message.id == id).unwrap().reactions.is_empty());
+        Ok(())
+    });
+    pass &= check!("durable replay: paginated send/edit/reaction/delete and future-cursor fallback", {
+        let (mut o, mut m, _, text, _, _) = admin_setup(&url).await?;
+        let S2C::History { latest_cursor: baseline, .. } = o.call(C2S::History { channel_id: text, before: None, limit: 1 }).await? else { bail!("history") };
+        let t = now_us();
+        let S2C::Ack { id, .. } = o.call(C2S::Send { channel_id: text, content: "replay me".into(), nonce: 82, retry: false, t_input: t, t_client_send: t, reply_to: None, files: vec![], gifs: vec![] }).await? else { bail!("ack") };
+        o.call(C2S::Edit { channel_id: text, message_id: id, content: "edited offline".into() }).await?;
+        o.call(C2S::React { channel_id: text, message_id: id, emoji: "👍".into(), add: true }).await?;
+        o.call(C2S::Delete { channel_id: text, message_id: id }).await?;
+        let mut cursor = baseline;
+        let mut replayed = vec![];
+        loop {
+            let S2C::Replay { events, more, snapshot_required, .. } = m.call(C2S::Replay { channel_id: text, after_cursor: cursor, limit: 2 }).await? else { bail!("replay") };
+            ensure!(!snapshot_required && events.len() <= 2);
+            for event in &events { ensure!(event.cursor > cursor); cursor = event.cursor; }
+            replayed.extend(events);
+            if !more { break; }
+        }
+        ensure!(replayed.iter().any(|e| matches!(&e.payload, DurablePayload::Message(msg) if msg.id == id)));
+        ensure!(replayed.iter().any(|e| matches!(&e.payload, DurablePayload::Edited { id: edited, content, .. } if *edited == id && content == "edited offline")));
+        ensure!(replayed.iter().any(|e| matches!(&e.payload, DurablePayload::Reaction { message_id, .. } if *message_id == id)));
+        ensure!(replayed.iter().any(|e| matches!(&e.payload, DurablePayload::Deleted { id: deleted, .. } if *deleted == id)));
+        let S2C::Replay { events, more, snapshot_required, .. } = m.call(C2S::Replay { channel_id: text, after_cursor: cursor, limit: 10 }).await? else { bail!("tail") };
+        ensure!(events.is_empty() && !more && !snapshot_required);
+        ensure!(matches!(m.call(C2S::Replay { channel_id: text, after_cursor: i64::MAX, limit: 10 }).await?, S2C::Replay { snapshot_required: true, .. }));
+        let mut outsider = Client::connect(&url).await?;
+        outsider.signup("replay").await?;
+        ensure!(outsider.call(C2S::Replay { channel_id: text, after_cursor: 0, limit: 10 }).await.is_err());
         Ok(())
     });
     pass &= check!("typing: relayed to others, rate-limited", {

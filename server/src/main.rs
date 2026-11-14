@@ -27,6 +27,18 @@ async fn main() -> Result<()> {
         .min_connections(cfg.db_pool.min(4))
         .connect(&cfg.database_url)
         .await?;
+    // 0.5.2 moved the status column into the additive schema so older servers
+    // can still start after a rollback. Remove the temporary migration record
+    // created by earlier 0.5.2 builds before SQLx validates the ledger.
+    sqlx::raw_sql(
+        "DO $$ BEGIN \
+           IF to_regclass('_sqlx_migrations') IS NOT NULL THEN \
+             DELETE FROM _sqlx_migrations WHERE version = 8 AND description = 'status'; \
+           END IF; \
+         END $$;",
+    )
+    .execute(&db)
+    .await?;
     sqlx::migrate!("./migrations").run(&db).await?;
     // The released server validates its SQLx ledger through migration 7.
     // Keep the additive schema for durable delivery outside that ledger so

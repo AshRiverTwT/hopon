@@ -95,6 +95,7 @@ pub struct Store {
     recent_bytes: usize,
     /// user → (server, presence)
     pub voice: HashMap<Id, (Id, VoicePresence)>,
+    media: HashMap<(Id, MediaSource), MediaPresence>,
     pub pending: HashMap<u64, PendingSend>,
     pub access_token: Option<(String, i64)>,
     /// Latest account preferences JSON (sent to the UI before any snapshot).
@@ -105,6 +106,7 @@ pub struct Store {
     pub visible_server: Option<Id>,
     /// Voice room the client is currently joined to.
     pub joined_voice: Option<Id>,
+    viewed_voice: Option<Id>,
     /// Member rows intersecting the visible people list.
     pub visible_members: HashSet<Id>,
     pub speaking: Vec<String>,
@@ -159,6 +161,7 @@ impl Store {
             servers: self.servers.iter().map(Into::into).collect(),
             users: self.users_by_id.values().map(Into::into).collect(),
             voice: self.voice.values().map(|(_, p)| p.into()).collect(),
+            media: self.media.values().map(Into::into).collect(),
         }
     }
 
@@ -332,6 +335,7 @@ impl Core {
                     | UiEvent::ChannelCreated { .. }
                     | UiEvent::MemberJoined { .. }
                     | UiEvent::UserUpdated { .. }
+                    | UiEvent::MediaPresence { .. }
                     | UiEvent::OpenChannel { .. }
                     | UiEvent::Error { .. }
             );
@@ -415,11 +419,12 @@ impl Core {
         }
     }
 
-    pub fn set_ui_context(self: &Arc<Self>, server_id: Option<Id>, joined_voice: Option<Id>) {
+    pub fn set_ui_context(self: &Arc<Self>, server_id: Option<Id>, joined_voice: Option<Id>, viewed_voice: Option<Id>) {
         let visible = {
             let mut store = self.store.lock();
             store.visible_server = server_id;
             store.joined_voice = joined_voice;
+            store.viewed_voice = viewed_voice;
             store.visible_members.clone()
         };
         self.set_visible_members(visible);
@@ -449,9 +454,9 @@ impl Core {
                 .voice
                 .iter()
                 .filter(|(id, (server, p))| {
-                    members.contains(id)
-                        && (Some(*server) == store.visible_server
-                            || Some(p.channel_id) == store.joined_voice)
+                    (members.contains(id) && Some(*server) == store.visible_server)
+                        || Some(p.channel_id) == store.joined_voice
+                        || Some(p.channel_id) == store.viewed_voice
                 })
                 .map(|(id, (server, p))| (*server, *id, p.channel_id, p.muted, p.deafened))
                 .collect::<Vec<_>>();
@@ -470,6 +475,7 @@ impl Core {
             });
         }
         for (server_id, user_id, channel_id, muted, deafened) in presences {
+            self.ensure_user_profile(server_id, user_id);
             self.emit(UiEvent::Presence {
                 server_id: sid(server_id),
                 presence: UiPresence {
@@ -478,6 +484,20 @@ impl Core {
                     muted,
                     deafened,
                 },
+            });
+        }
+    }
+
+    fn ensure_user_profile(self: &Arc<Self>, server_id: Id, user_id: Id) {
+        let should_lookup = {
+            let mut store = self.store.lock();
+            !store.users_by_id.contains_key(&user_id) && store.user_lookups.insert(user_id)
+        };
+        if should_lookup {
+            let core = self.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = core.request(C2S::UserLookup { server_id, user_id }).await;
+                core.store.lock().user_lookups.remove(&user_id);
             });
         }
     }
@@ -964,6 +984,7 @@ impl Core {
                 refresh_token,
                 servers,
                 voice,
+                media,
                 prefs,
             } => {
                 // Before the session snapshot, so the UI can pick your last server.
@@ -985,6 +1006,8 @@ impl Core {
                         s.users_by_id.clear();
                     }
                     s.me = Some(user.clone());
+                    s.users_by_id.insert(user.id, user.clone());
+                    s.media = media.iter().filter(|p| p.active).map(|p| ((p.user_id, p.source), *p)).collect();
                     s.servers = servers.clone();
                     for server in servers.iter() {
                         for member in &server.members {
@@ -1075,14 +1098,7 @@ impl Core {
                     (own, t_in, missing_profile)
                 };
                 if let Some((server_id, user_id)) = missing_profile {
-                    let should_lookup = self.store.lock().user_lookups.insert(user_id);
-                    if should_lookup {
-                        let core = self.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let _ = core.request(C2S::UserLookup { server_id, user_id }).await;
-                            core.store.lock().user_lookups.remove(&user_id);
-                        });
-                    }
+                    self.ensure_user_profile(server_id, user_id);
                 }
                 let clock = *self.clock.lock();
                 if let Some(t) = t_input_local {
@@ -1319,6 +1335,7 @@ impl Core {
                     }
                     s.remove_recent_channel(*channel_id);
                     s.pending.retain(|_, p| p.channel_id != *channel_id);
+                    s.media.retain(|_, p| p.channel_id != *channel_id);
                 }
                 self.cache.purge_channels(vec![*channel_id]);
                 self.voice.leave_if_in(self.clone(), &[*channel_id]);
@@ -1362,6 +1379,7 @@ impl Core {
                         s.remove_recent_channel(*c);
                     }
                     s.voice.retain(|_, (srv, _)| srv != server_id);
+                    s.media.retain(|_, p| p.server_id != *server_id);
                     chans
                 };
                 self.voice.leave_if_in(self.clone(), &channels);
@@ -1493,6 +1511,9 @@ impl Core {
                     let visible = s.visible_members.contains(user_id)
                         || s.joined_voice.map_or(false, |joined| {
                             *channel_id == Some(joined) || previous == Some(joined)
+                        })
+                        || s.viewed_voice.is_some_and(|viewed| {
+                            *channel_id == Some(viewed) || previous == Some(viewed)
                         });
                     match channel_id {
                         Some(c) => {
@@ -1516,6 +1537,9 @@ impl Core {
                     visible
                 };
                 if visible {
+                    if channel_id.is_some() {
+                        self.ensure_user_profile(*server_id, *user_id);
+                    }
                     self.emit(UiEvent::Presence {
                         server_id: sid(*server_id),
                         presence: UiPresence {
@@ -1527,10 +1551,16 @@ impl Core {
                     });
                 }
             }
-            S2C::ScreenPresence { server_id, channel_id, user_id, active } => {
-                self.emit(UiEvent::ScreenShare {
-                    server_id: sid(*server_id), channel_id: sid(*channel_id), user_id: sid(*user_id), active: *active,
-                });
+            S2C::MediaPresence(media) => {
+                let key = (media.user_id, media.source);
+                let mut store = self.store.lock();
+                if media.active {
+                    store.media.insert(key, *media);
+                } else if store.media.get(&key).is_some_and(|p| p.channel_id == media.channel_id) {
+                    store.media.remove(&key);
+                }
+                drop(store);
+                self.emit(UiEvent::MediaPresence { media: media.into() });
             }
             S2C::LoggedOut => {
                 *self.store.lock() = Store::default();

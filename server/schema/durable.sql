@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS durable_event_state (
 );
 
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS client_nonce BIGINT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_status TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS messages_author_nonce
     ON messages (author_id, client_nonce)
     WHERE client_nonce IS NOT NULL AND client_nonce <> 0;

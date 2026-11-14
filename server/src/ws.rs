@@ -266,16 +266,14 @@ impl Session {
         let prev = {
             let mut v = self.st.voice.lock();
             match v.get(&uid) {
-                Some(e) if e.conn_id == self.conn => v.remove(&uid),
+                Some(e) if e.conn_id == self.conn => {
+                    self.st.clear_media(uid, e.channel_id);
+                    v.remove(&uid)
+                }
                 _ => None,
             }
         };
         if let Some(e) = prev {
-            if self.st.screen_shares.remove(&uid).is_some() {
-                if let Some(g) = self.st.guilds.get(&e.server_id) {
-                    g.publish(frame(0, S2C::ScreenPresence { server_id: e.server_id, channel_id: e.channel_id, user_id: uid, active: false }));
-                }
-            }
             if let Some(g) = self.st.guilds.get(&e.server_id) {
                 g.publish(frame(
                     0,
@@ -457,35 +455,33 @@ impl Session {
             self.st.announce_presence(uid, true);
         }
         let access_token = self.st.keys.access_token(uid, &name);
-        let (avatar_v, prefs): (i32, String) =
-            sqlx::query_as("SELECT avatar_v, prefs FROM users WHERE id = $1")
+        let (avatar_v, prefs, display_name): (i32, String, String) =
+            sqlx::query_as("SELECT avatar_v, prefs, COALESCE(display_name, name) FROM users WHERE id = $1")
                 .bind(uid)
                 .fetch_one(&self.st.db)
                 .await
                 .map_err(internal)?;
+        let media = self.st.media.iter()
+            .filter(|entry| self.guilds.contains(&entry.server_id))
+            .map(|entry| *entry.value())
+            .collect();
         self.send(
             req,
             S2C::Authed {
                 user: UserInfo {
                     id: uid,
-                    name,
+                    name: display_name,
                     avatar_v: avatar_v as u32,
                 },
                 access_token,
                 refresh_token,
                 servers,
                 voice,
+                media,
                 prefs,
             },
         )
         .await;
-        let active_shares: Vec<_> = self.st.screen_shares.iter()
-            .filter(|entry| self.guilds.contains(&entry.value().0))
-            .map(|entry| (*entry.key(), *entry.value()))
-            .collect();
-        for (user_id, (server_id, channel_id)) in active_shares {
-            self.send(0, S2C::ScreenPresence { server_id, channel_id, user_id, active: true }).await;
-        }
         Ok(())
     }
 
@@ -997,7 +993,7 @@ impl Session {
                 let g = self.st.guild(sid).await.map_err(internal)?;
                 g.members.write().insert(uid);
                 if inserted {
-                    let (av,): (i32,) = sqlx::query_as("SELECT avatar_v FROM users WHERE id = $1")
+                    let (av, display_name): (i32, String) = sqlx::query_as("SELECT avatar_v, COALESCE(display_name, name) FROM users WHERE id = $1")
                         .bind(uid)
                         .fetch_one(&self.st.db)
                         .await
@@ -1008,7 +1004,7 @@ impl Session {
                             server_id: sid,
                             user: UserInfo {
                                 id: uid,
-                                name: name.to_owned(),
+                                name: display_name,
                                 avatar_v: av as u32,
                             },
                         },
@@ -1045,8 +1041,8 @@ impl Session {
             }
             C2S::ScreenGrant { channel_id } => {
                 // Only people already in that voice room can share or watch.
-                let in_room =
-                    self.st.voice.lock().get(&uid).map(|e| e.channel_id) == Some(channel_id);
+                let in_room = self.st.voice.lock().get(&uid)
+                    .is_some_and(|e| e.conn_id == self.conn && e.channel_id == channel_id);
                 if !in_room {
                     return Err((ErrorCode::Forbidden, "join the voice room first".into()));
                 }
@@ -1068,18 +1064,13 @@ impl Session {
                 .await;
                 Ok(())
             }
-            C2S::ScreenShare { active } => {
-                let voice = self.st.voice.lock().get(&uid).map(|e| (e.server_id, e.channel_id));
-                let Some((server_id, channel_id)) = voice else {
-                    return Err((ErrorCode::Forbidden, "join the voice room first".into()));
-                };
-                if active {
-                    self.st.screen_shares.insert(uid, (server_id, channel_id));
-                } else {
-                    self.st.screen_shares.remove(&uid);
-                }
-                if let Some(g) = self.st.guilds.get(&server_id) {
-                    g.publish(frame(0, S2C::ScreenPresence { server_id, channel_id, user_id: uid, active }));
+            C2S::MediaState { channel_id, source, active } => {
+                {
+                    let voice = self.st.voice.lock();
+                    let Some(entry) = voice.get(&uid).filter(|e| e.conn_id == self.conn && e.channel_id == channel_id) else {
+                        return Err((ErrorCode::Forbidden, "join the voice room first".into()));
+                    };
+                    self.st.set_media(MediaPresence { server_id: entry.server_id, channel_id, user_id: uid, source, active });
                 }
                 self.send(req, S2C::Ok).await;
                 Ok(())
@@ -1096,23 +1087,16 @@ impl Session {
                         if chan.kind != ChannelKind::Voice {
                             return Err((ErrorCode::BadRequest, "not a voice channel".into()));
                         }
-                        let prev = self.st.voice.lock().insert(
-                            uid,
-                            VoiceEntry {
-                                server_id: chan.server_id,
-                                channel_id: cid,
-                                muted,
-                                deafened,
-                                conn_id: self.conn,
-                            },
-                        );
-                        if let Some(p) = prev.filter(|p| p.channel_id != cid) {
-                            if self.st.screen_shares.remove(&uid).is_some() {
-                                if let Some(g) = self.st.guilds.get(&p.server_id) {
-                                    g.publish(frame(0, S2C::ScreenPresence { server_id: p.server_id, channel_id: p.channel_id, user_id: uid, active: false }));
-                                }
+                        let prev = {
+                            let mut voice = self.st.voice.lock();
+                            let previous = voice.insert(uid, VoiceEntry {
+                                server_id: chan.server_id, channel_id: cid, muted, deafened, conn_id: self.conn,
+                            });
+                            if let Some(p) = previous.filter(|p| p.channel_id != cid || p.conn_id != self.conn) {
+                                self.st.clear_media(uid, p.channel_id);
                             }
-                        }
+                            previous
+                        };
                         if let Some(p) = prev.filter(|p| p.server_id != chan.server_id) {
                             if let Some(g) = self.st.guilds.get(&p.server_id) {
                                 g.publish(frame(
@@ -1142,6 +1126,19 @@ impl Session {
                 self.send(req, S2C::Ok).await;
                 Ok(())
             }
+            C2S::SetDisplayName { name } => {
+                let name = name.trim();
+                if name.chars().count() > 32 || name.chars().any(char::is_control) {
+                    return Err((ErrorCode::BadRequest, "display name must be at most 32 characters with no control characters".into()));
+                }
+                let (name, avatar_v): (String, i32) = sqlx::query_as(
+                    "UPDATE users SET display_name = NULLIF($2, '') WHERE id = $1 \
+                     RETURNING COALESCE(display_name, name), avatar_v",
+                )
+                .bind(uid).bind(name).fetch_one(&self.st.db).await.map_err(internal)?;
+                self.send_profile(req, UserInfo { id: uid, name, avatar_v: avatar_v as u32 }).await;
+                Ok(())
+            }
             C2S::SetAvatar { data } => {
                 if data.len() > MAX_AVATAR_BYTES {
                     return Err((ErrorCode::BadRequest, "image too large (max 48 KB)".into()));
@@ -1153,20 +1150,14 @@ impl Session {
                     ));
                 }
                 let blob = (!data.is_empty()).then_some(data);
-                let (v,): (i32,) = sqlx::query_as("UPDATE users SET avatar = $2, avatar_v = avatar_v + 1 WHERE id = $1 RETURNING avatar_v")
+                let (v, display_name): (i32, String) = sqlx::query_as("UPDATE users SET avatar = $2, avatar_v = avatar_v + 1 WHERE id = $1 RETURNING avatar_v, COALESCE(display_name, name)")
                     .bind(uid).bind(blob).fetch_one(&self.st.db).await.map_err(internal)?;
                 let user = UserInfo {
                     id: uid,
-                    name: name.to_owned(),
+                    name: display_name,
                     avatar_v: v as u32,
                 };
-                // Only servers the user is still in (membership is authoritative
-                // on the guild; this session's set can be stale after a kick).
-                let frame_b = frame(0, S2C::UserUpdated(user.clone()));
-                for g in self.st.guilds.iter().filter(|g| g.is_member(uid)) {
-                    g.publish(frame_b.clone());
-                }
-                self.send(req, S2C::UserUpdated(user)).await;
+                self.send_profile(req, user).await;
                 Ok(())
             }
             C2S::GetAvatar { user_id } => {
@@ -1335,6 +1326,20 @@ impl Session {
             | C2S::Resume { .. }
             | C2S::Refresh { .. } => unreachable!(),
         }
+    }
+
+    async fn send_profile(&mut self, req: u32, user: UserInfo) {
+        let update = frame(0, S2C::UserUpdated(user.clone()));
+        for guild in self.st.guilds.iter().filter(|g| g.is_member(user.id)) {
+            guild.publish(update.clone());
+        }
+        // Other sessions of an account with no guilds have no subscription.
+        if let Some(conns) = self.st.conns.get(&user.id) {
+            for (_, tx) in conns.iter().filter(|(id, _)| *id != self.conn) {
+                let _ = tx.try_send(Out::Frame(update.clone()));
+            }
+        }
+        self.send(req, S2C::UserUpdated(user)).await;
     }
 
     async fn member_chan(

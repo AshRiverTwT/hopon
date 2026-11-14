@@ -35,5 +35,5 @@ mockIPC((cmd, args) => {
 });
 await import("./overlay");
 const push = (window as unknown as { __ovPush: (e: unknown) => void }).__ovPush;
-push({ t: "session", user: members[0], servers: [server], users: members, voice: ["1001", "1002", "1003", "1004"].map((u, i) => ({ userId: u, channelId: "7101", muted: i === 3, deafened: false })) });
+push({ t: "session", user: members[0], servers: [server], users: members, voice: ["1001", "1002", "1003", "1004"].map((u, i) => ({ userId: u, channelId: "7101", muted: i === 3, deafened: false })), media: [] });
 push({ t: "speaking", userIds: ["1002"] });

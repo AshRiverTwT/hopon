@@ -1,4 +1,4 @@
-// Screen share. Runs in the webview with LiveKit's JS SDK on its own
+// Camera and screen sharing run in the webview with LiveKit's JS SDK on their own
 // connection ("<user>:screen") to the voice room you're in, so capture,
 // hardware encode and decode use the browser engine (GPU H.264). The native
 // voice connection subscribes to microphones only, never to screens.
@@ -10,11 +10,13 @@
 // would stay black until the sharer's screen changes (a still desktop sends
 // no new frames); moving the same element keeps the picture it has.
 //
-// The SDK is loaded on first use, so it costs nothing until you're in voice.
+// The SDK is loaded on the first video action.
 import { createStore, produce } from "solid-js/store";
+import { createSignal } from "solid-js";
 import { call } from "./ipc";
 import { prefs, setPrefs } from "./prefs";
-import type { LocalTrack, RemoteAudioTrack, RemoteTrack, Room } from "livekit-client";
+import type { MediaSource } from "./types";
+import type { LocalTrack, LocalVideoTrack, RemoteAudioTrack, RemoteTrack, RemoteVideoTrack, Room } from "livekit-client";
 
 export type Quality = "720p30" | "720p60" | "1080p60";
 export const QUALITIES: Record<Quality, { label: string; width: number; height: number; fps: number; bitrate: number }> = {
@@ -36,6 +38,8 @@ export const [screen, setScreen] = createStore({
   channelId: null as string | null,
   connected: false,
   sharing: false,
+  cameraOn: false,
+  viewingCameras: false,
   /** your stream includes computer sound */
   sharingAudio: false,
   /** who is sharing right now (not you) */
@@ -51,13 +55,19 @@ export const [screen, setScreen] = createStore({
   /** the floating mini player was opened by hand (shows even in the voice room) */
   popped: false,
   /** Prefer 720p30 sharing and keep only one remote stream subscribed. */
-  lowResource: false,
+  lowResource: (() => { try { return localStorage.getItem("hopon.lowResource") === "1"; } catch { return false; } })(),
 });
 
 let lk: typeof import("livekit-client") | null = null;
 let room: Room | null = null;
-let connecting: Promise<void> | null = null;
+let connecting: Promise<Room | null> | null = null;
+let closing = Promise.resolve();
 let local: LocalTrack[] = [];
+let camera: LocalVideoTrack | null = null;
+let shareStarting: number | null = null;
+let cameraStarting: number | null = null;
+let watchRequests = 0;
+let generation = 0;
 let myUser = "";
 let voiceChannel: string | null = null;
 /** The one <video> per watched stream, and the slots that want it (last = on top). */
@@ -73,6 +83,32 @@ let target: string | null = null;
 const audios = new Map<string, RemoteAudioTrack>();
 /** The screen participant, rather than the same user's separate voice participant. */
 const watchedParticipants = new Map<string, string>();
+type CameraTrack = LocalVideoTrack | RemoteVideoTrack;
+const [cameraTracks, setCameraTracks] = createSignal<Record<string, CameraTrack>>({});
+
+export const cameraTrack = (userId: string) => cameraTracks()[userId];
+
+function showCamera(userId: string, track: CameraTrack) {
+  if (cameraTrack(userId) === track) return;
+  setCameraTracks((tracks) => ({ ...tracks, [userId]: track }));
+}
+
+function hideCamera(userId: string, track?: RemoteTrack) {
+  const current = cameraTrack(userId);
+  if (!current || (track && current !== track)) return;
+  setCameraTracks(({ [userId]: _removed, ...tracks }) => tracks);
+}
+
+function advertise(channelId: string, source: MediaSource, active: boolean) {
+  return call("media_presence", { channelId, source, active });
+}
+
+function disconnectIfIdle() {
+  if (room && !local.length && !camera && !screen.viewingCameras && !screen.watching.length
+      && shareStarting === null && cameraStarting === null && !watchRequests) {
+    void disconnectScreens();
+  }
+}
 
 const userOf = (identity: string) => identity.split(":")[0];
 
@@ -81,6 +117,7 @@ export const streamVolume = (userId: string) => prefs.streamVolumes[userId] ?? 1
 
 export function setLowResourceMode(enabled: boolean) {
   setScreen("lowResource", enabled);
+  try { localStorage.setItem("hopon.lowResource", enabled ? "1" : "0"); } catch {}
   if (enabled) for (const user of [...screen.watching].slice(1)) unwatch(user);
 }
 
@@ -95,7 +132,10 @@ function refresh() {
   setScreen("shares", out);
   // Stop watching streams that ended.
   const ended = screen.watching.filter((u) => !out.some((s) => s.userId === u));
-  for (const u of ended) dropViews(u);
+  for (const u of ended) {
+    watchedParticipants.delete(u);
+    dropViews(u);
+  }
   if (ended.length) {
     setScreen("watching", (w) => w.filter((u) => !ended.includes(u)));
     publishWatching();
@@ -103,7 +143,26 @@ function refresh() {
   if (screen.full && screen.full !== SELF && !out.some((s) => s.userId === screen.full)) setFullscreen(null);
   if (!screen.watching.length && screen.popped) setScreen("popped", false);
   recountViewers();
-  if (ended.length && !screen.sharing && room) void disconnectScreens();
+  if (ended.length) disconnectIfIdle();
+}
+
+function updateCameraSubscriptions() {
+  if (!room || !lk) return;
+  for (const participant of room.remoteParticipants.values()) {
+    const publication = participant.getTrackPublication(lk.Track.Source.Camera);
+    if (!publication) continue;
+    if (publication.isDesired !== screen.viewingCameras) publication.setSubscribed(screen.viewingCameras);
+    const userId = userOf(participant.identity);
+    if (screen.viewingCameras && publication.track instanceof lk.RemoteVideoTrack) showCamera(userId, publication.track);
+    else hideCamera(userId);
+  }
+}
+
+// Capture is only restarted by an explicit user action. Presence is refreshed
+// by the media session if LiveKit reconnects while the chat socket stays up.
+function refreshLocalMedia(channelId: string) {
+  if (screen.sharing) void advertise(channelId, "screen", true).catch(() => {});
+  if (screen.cameraOn) void advertise(channelId, "camera", true).catch(() => {});
 }
 
 /** Viewers announce what they watch as a participant attribute; count them per stream. */
@@ -182,63 +241,79 @@ function dropViews(userId: string) {
   const el = players.get(userId);
   if (el) { el.srcObject = null; el.remove(); }
   players.delete(userId);
+  const audio = audios.get(userId);
+  if (audio) detachTrack(audio);
   audios.delete(userId);
   setScreen("live", produce((l) => void delete l[userId]));
 }
 
 /** Track voice context without opening the optional screen-media connection. */
 export function setScreenContext(channelId: string, me: string) {
-  const changed = voiceChannel !== null && voiceChannel !== channelId;
+  if (voiceChannel !== null && (voiceChannel !== channelId || myUser !== me)) void disconnectScreens();
   voiceChannel = channelId;
   myUser = me;
-  if (changed) void disconnectScreens();
 }
 
-/** Join the screen-media room on first Watch or Share. */
-async function connectScreens(channelId: string, me: string) {
-  myUser = me;
-  if (target === channelId) return connecting ?? undefined;
+/** Voice alone doesn't open a second connection. */
+async function connectScreens(channelId: string) {
+  if (target === channelId) return connecting ?? room;
   target = channelId;
+  const request = generation;
+  const current = () => request === generation && target === channelId;
   const job = (async () => {
-    await disconnectRoom();
-    if (target !== channelId) return;
-    setScreen("channelId", channelId);
-    lk ??= await import("livekit-client");
-    const [url, token] = await call<[string, string]>("screen_grant", { channelId });
-    if (target !== channelId) return;
-    const r = new lk.Room({ adaptiveStream: true, dynacast: true });
-    const E = lk.RoomEvent;
-    r.on(E.TrackPublished, refresh).on(E.TrackUnpublished, refresh)
-      .on(E.ParticipantConnected, refresh).on(E.ParticipantDisconnected, refresh)
-      .on(E.ParticipantAttributesChanged, recountViewers)
-      .on(E.TrackSubscribed, (t, _pub, p) => attach(t, p.identity))
-      .on(E.TrackUnsubscribed, (t, _pub, p) => {
-        detachTrack(t);
-        const u = userOf(p.identity);
-        if (t.kind === "video") setScreen("live", produce((l) => void delete l[u]));
-        else audios.delete(u);
-      })
-      .on(E.LocalTrackUnpublished, () => { if (!local.length) setScreen({ sharing: false, sharingAudio: false }); })
-      .on(E.Disconnected, () => {
-        if (room !== r) return; // an old connection closing
-        if (local.length) void call("screen_presence", { active: false }).catch(() => {});
-        room = null;
-        target = null; // let the next connectScreens reconnect
-        for (const track of local) track.stop();
-        local = [];
-        watchedParticipants.clear();
-        resetState(null);
-      });
+    let connected: Room | undefined;
     try {
+      await closing;
+      if (!current()) return null;
+      const sdk = lk ??= await import("livekit-client");
+      const [url, token] = await call<[string, string]>("screen_grant", { channelId });
+      if (!current()) return null;
+      const r = connected = new sdk.Room({ adaptiveStream: true, dynacast: true });
+      const E = sdk.RoomEvent;
+      const changed = () => {
+        if (room !== r) return;
+        refresh();
+        updateCameraSubscriptions();
+      };
+      r.on(E.TrackPublished, changed).on(E.TrackUnpublished, (pub, participant) => {
+        if (room !== r) return;
+        if (pub.source === sdk.Track.Source.Camera) hideCamera(userOf(participant.identity));
+        changed();
+      }).on(E.ParticipantConnected, changed).on(E.ParticipantDisconnected, (participant) => {
+        if (room !== r) return;
+        hideCamera(userOf(participant.identity));
+        changed();
+      }).on(E.ParticipantAttributesChanged, () => { if (room === r) recountViewers(); })
+        .on(E.Reconnected, () => { if (room === r) { changed(); refreshLocalMedia(channelId); } })
+        .on(E.TrackSubscribed, (track, pub, participant) => {
+          if (room !== r) return;
+          if (pub.source === sdk.Track.Source.Camera) {
+            if (screen.viewingCameras && track instanceof sdk.RemoteVideoTrack) showCamera(userOf(participant.identity), track);
+          } else {
+            attach(track, participant.identity);
+          }
+        }).on(E.TrackUnsubscribed, (track, pub, participant) => {
+          if (room !== r) return;
+          const user = userOf(participant.identity);
+          if (pub.source === sdk.Track.Source.Camera) {
+            hideCamera(user, track);
+          } else {
+            detachTrack(track);
+            if (track.kind === "video") setScreen("live", produce((l) => void delete l[user]));
+            else audios.delete(user);
+          }
+        }).on(E.Disconnected, () => { if (room === r) void disconnectScreens(); });
       await r.connect(url, token, { autoSubscribe: false });
+      if (!current()) { await r.disconnect(); return null; }
+      room = r;
+      setScreen({ channelId, connected: true });
+      changed();
+      return r;
     } catch (e) {
-      if (target === channelId) target = null;
+      if (current()) target = null;
+      await connected?.disconnect().catch(() => {});
       throw e;
     }
-    if (target !== channelId) { await r.disconnect(); return; }
-    room = r;
-    setScreen("connected", true);
-    refresh();
   })().finally(() => { if (connecting === job) connecting = null; });
   connecting = job;
   return job;
@@ -248,119 +323,244 @@ function resetState(channelId: string | null) {
   for (const u of [...players.keys()]) dropViews(u);
   audios.clear();
   if (screen.full) setFullscreen(null);
-  setScreen({ channelId, connected: false, sharing: false, sharingAudio: false, shares: [], watching: [], live: {}, viewers: {}, popped: false });
+  setCameraTracks({});
+  watchedParticipants.clear();
+  setScreen({ channelId, connected: false, sharing: false, sharingAudio: false, cameraOn: false, viewingCameras: false, shares: [], watching: [], live: {}, viewers: {}, popped: false });
 }
 
-async function disconnectRoom() {
-  await stopShare();
-  const r = room;
-  room = null;
-  resetState(screen.channelId);
-  await r?.disconnect().catch(() => {});
-}
-
-export async function disconnectScreens(clearContext = false) {
-  target = null;
-  await disconnectRoom();
-  setScreen("channelId", null);
+export function disconnectScreens(clearContext = false) {
   if (clearContext) { voiceChannel = null; myUser = ""; }
+  generation++;
+  target = null;
+  const r = room;
+  const pending = connecting;
+  connecting = null;
+  const channelId = screen.channelId;
+  const wasSharing = local.length > 0;
+  const hadCamera = !!camera;
+  const previousClosing = closing;
+  for (const track of local) track.stop();
+  camera?.stop();
+  camera = null;
+  local = [];
+  shareStarting = null;
+  cameraStarting = null;
+  room = null;
+  resetState(null);
+  closing = Promise.allSettled([
+    previousClosing, pending, r?.disconnect(),
+    channelId && wasSharing ? advertise(channelId, "screen", false) : undefined,
+    channelId && hadCamera ? advertise(channelId, "camera", false) : undefined,
+  ]).then(() => {});
+  return closing;
 }
 
 /** Pick a screen/window (the system picker) and stream it. */
 export async function startShare(quality: Quality, audio: boolean) {
-  if (!room) {
-    if (!voiceChannel || !myUser) throw new Error("Join voice first");
-    await connectScreens(voiceChannel, myUser);
-  }
-  if (connecting) await connecting;
-  if (!room || !lk) throw new Error("Join voice first");
-  const q = QUALITIES[quality];
-  const tracks = await room.localParticipant.createScreenTracks({
-    // Computer sound as-is: no voice processing (it would duck and smear
-    // music and game audio), stereo at 48 kHz.
-    audio: audio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2, sampleRate: 48000 } : false,
-    systemAudio: audio ? "include" : "exclude",
-    resolution: { width: q.width, height: q.height, frameRate: q.fps },
-    contentHint: "motion", // games and video: keep the frame rate up
-    selfBrowserSurface: "exclude",
-    surfaceSwitching: "include",
-  });
-  // Keep the captured tracks reachable if any later publish rejects.
-  local = tracks;
-  const enc = { maxBitrate: q.bitrate, maxFramerate: q.fps };
-  try { for (const t of tracks) {
-    if (t.kind === "video") {
-      await room.localParticipant.publishTrack(t, {
-        source: lk.Track.Source.ScreenShare,
-        videoCodec: "h264", // hardware encode on Windows; the SDK falls back if unavailable
-        backupCodec: false,
-        simulcast: false,
-        screenShareEncoding: enc,
-        videoEncoding: enc,
-        degradationPreference: "maintain-framerate",
-      });
-    } else {
-      // Music, not speech: high bitrate, stereo, no DTX (it gates quiet
-      // passages), no RED (doubles the bitrate for loss recovery we don't need).
-      t.mediaStreamTrack.contentHint = "music";
-      await room.localParticipant.publishTrack(t, {
-        source: lk.Track.Source.ScreenShareAudio,
-        audioPreset: { maxBitrate: AUDIO_BITRATE },
-        forceStereo: true,
-        dtx: false,
-        red: false,
-      });
+  const channelId = voiceChannel;
+  if (!channelId) throw new Error("Join voice first");
+  if (local.length || shareStarting !== null) return;
+  const request = shareStarting = generation;
+  let stream: MediaStream | undefined;
+  let tracks: LocalTrack[] = [];
+  let publisher: Room | null = null;
+  try {
+    const q = QUALITIES[quality];
+    // The picker needs the click's activation, even on the first SDK load.
+    const options = {
+      audio: audio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2, sampleRate: 48000 } : false,
+      systemAudio: audio ? "include" : "exclude",
+      video: { width: { ideal: q.width }, height: { ideal: q.height }, frameRate: q.fps },
+      selfBrowserSurface: "exclude",
+      surfaceSwitching: "include",
+    };
+    if (!navigator.mediaDevices?.getDisplayMedia) throw new Error("Screen sharing is unavailable in this webview");
+    stream = await navigator.mediaDevices.getDisplayMedia(options);
+    if (request !== generation) return;
+    const sdk = lk ??= await import("livekit-client");
+    if (request !== generation) return;
+    const [videoTrack] = stream.getVideoTracks();
+    const [audioTrack] = stream.getAudioTracks();
+    if (!videoTrack) throw new Error("The screen picker did not return video");
+    videoTrack.contentHint = "motion";
+    tracks = [new sdk.LocalVideoTrack(videoTrack, undefined, false)];
+    if (audioTrack) tracks.push(new sdk.LocalAudioTrack(audioTrack, undefined, false));
+    local = tracks;
+    for (const track of tracks) {
+      track.mediaStreamTrack.addEventListener("ended", () => {
+        if (local === tracks) void stopShare();
+      }, { once: true });
     }
-    // "Stop sharing" in the system UI ends the track.
-    t.mediaStreamTrack.addEventListener("ended", () => void stopShare());
-  } } catch (error) {
-    await stopShare();
-    throw error;
+    publisher = await connectScreens(channelId);
+    if (!publisher || request !== generation || local !== tracks) return;
+    const enc = { maxBitrate: q.bitrate, maxFramerate: q.fps };
+    for (const t of tracks) {
+      if (t.kind === "video") {
+        await publisher.localParticipant.publishTrack(t, {
+          source: sdk.Track.Source.ScreenShare,
+          videoCodec: "h264",
+          backupCodec: false,
+          simulcast: false,
+          screenShareEncoding: enc,
+          videoEncoding: enc,
+          degradationPreference: "maintain-framerate",
+        });
+      } else {
+        t.mediaStreamTrack.contentHint = "music";
+        await publisher.localParticipant.publishTrack(t, {
+          source: sdk.Track.Source.ScreenShareAudio,
+          audioPreset: { maxBitrate: AUDIO_BITRATE },
+          forceStereo: true,
+          dtx: false,
+          red: false,
+        });
+      }
+      if (request !== generation || local !== tracks) return;
+    }
+    if (local !== tracks || tracks.some((track) => track.mediaStreamTrack.readyState === "ended")) return;
+    await advertise(channelId, "screen", true);
+    if (request !== generation || local !== tracks) return;
+    setScreen({ sharing: true, sharingAudio: tracks.some((t) => t.kind === "audio") });
+  } finally {
+    if (shareStarting === request) shareStarting = null;
+    if (local !== tracks || !screen.sharing) stream?.getTracks().forEach((track) => track.stop());
+    if (local === tracks && !screen.sharing) await stopShare();
+    else if (local !== tracks) {
+      for (const track of tracks) {
+        track.stop();
+        await publisher?.localParticipant.unpublishTrack(track).catch(() => {});
+      }
+    }
+    disconnectIfIdle();
   }
-  setScreen({ sharing: true, sharingAudio: tracks.some((t) => t.kind === "audio") });
-  try { await call("screen_presence", { active: true }); }
-  catch (error) { await stopShare(); throw error; }
-  return tracks.find((t) => t.kind === "video") ?? null;
 }
 
 export async function stopShare() {
   const tracks = local;
+  const publisher = room;
+  const channelId = screen.channelId;
+  const request = generation;
   local = [];
-  for (const t of tracks) {
-    await room?.localParticipant.unpublishTrack(t).catch(() => {});
-    t.stop();
-  }
   if (screen.full === SELF) setFullscreen(null);
   setScreen({ sharing: false, sharingAudio: false });
-  if (tracks.length) {
-    await call("screen_presence", { active: false }).catch(() => {});
-    if (!screen.watching.length && room) void disconnectScreens();
+  if (!tracks.length) return;
+  for (const track of tracks) track.stop();
+  await Promise.allSettled([
+    ...tracks.map((track) => publisher?.localParticipant.unpublishTrack(track)),
+    channelId ? advertise(channelId, "screen", false) : undefined,
+  ]);
+  if (generation === request) disconnectIfIdle();
+}
+
+export async function setCameraEnabled(enabled: boolean) {
+  if (!enabled) {
+    const track = camera;
+    const publisher = room;
+    const channelId = screen.channelId;
+    if (!track) return;
+    camera = null;
+    hideCamera(myUser);
+    setScreen("cameraOn", false);
+    track.stop();
+    await Promise.allSettled([
+      publisher?.localParticipant.unpublishTrack(track),
+      channelId ? advertise(channelId, "camera", false) : undefined,
+    ]);
+    disconnectIfIdle();
+    return;
+  }
+  const channelId = voiceChannel;
+  if (!channelId) throw new Error("Join voice first");
+  if (camera || cameraStarting !== null) return;
+  const request = cameraStarting = generation;
+  let track: LocalVideoTrack | undefined;
+  let publisher: Room | null = null;
+  try {
+    const sdk = lk ??= await import("livekit-client");
+    if (request !== generation) return;
+    track = await sdk.createLocalVideoTrack({ resolution: { width: 640, height: 360, frameRate: 24 } });
+    if (request !== generation) return;
+    const captured = track;
+    camera = captured;
+    captured.mediaStreamTrack.addEventListener("ended", () => {
+      if (camera === captured) void setCameraEnabled(false);
+    }, { once: true });
+    publisher = await connectScreens(channelId);
+    if (!publisher || request !== generation || camera !== captured) return;
+    await publisher.localParticipant.publishTrack(captured, { source: sdk.Track.Source.Camera });
+    if (request !== generation || camera !== captured || captured.mediaStreamTrack.readyState === "ended") return;
+    await advertise(channelId, "camera", true);
+    if (request !== generation || camera !== captured) return;
+    showCamera(myUser, captured);
+    setScreen("cameraOn", true);
+  } finally {
+    if (cameraStarting === request) cameraStarting = null;
+    if (track && camera === track && !screen.cameraOn) await setCameraEnabled(false);
+    else if (track && camera !== track) {
+      track.stop();
+      await publisher?.localParticipant.unpublishTrack(track).catch(() => {});
+    }
+    disconnectIfIdle();
+  }
+}
+
+export async function setViewingCameras(enabled: boolean) {
+  const channelId = voiceChannel;
+  if (!channelId) throw new Error("Join voice first");
+  const request = generation;
+  setScreen("viewingCameras", enabled);
+  try {
+    if (enabled) await connectScreens(channelId);
+    if (request !== generation) return;
+    if (!enabled) {
+      for (const userId of Object.keys(cameraTracks())) {
+        if (userId !== myUser) hideCamera(userId);
+      }
+    }
+    updateCameraSubscriptions();
+  } catch (error) {
+    if (request === generation) setScreen("viewingCameras", false);
+    throw error;
+  } finally {
+    if (request === generation) disconnectIfIdle();
   }
 }
 
 /** Start watching someone's stream (subscribes; views bind with bindVideo). */
 export async function watch(userId: string) {
-  if (!voiceChannel || !myUser) throw new Error("Join voice first");
-  if (!room) await connectScreens(voiceChannel, myUser);
-  if (!room || !lk) return;
-  const deadline = Date.now() + 5000;
-  let p = [...room.remoteParticipants.values()].find((x) => userOf(x.identity) === userId && x.getTrackPublication(lk!.Track.Source.ScreenShare));
-  while (!p && Date.now() < deadline && room) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    p = [...room.remoteParticipants.values()].find((x) => userOf(x.identity) === userId && x.getTrackPublication(lk!.Track.Source.ScreenShare));
-  }
-  if (!p) return;
-  if (screen.lowResource) for (const user of [...screen.watching]) if (user !== userId) unwatch(user);
-  watchedParticipants.set(userId, p.identity);
-  if (!screen.watching.includes(userId)) {
-    setScreen("watching", (w) => [...w, userId]);
-    publishWatching();
-  }
-  for (const src of [lk.Track.Source.ScreenShare, lk.Track.Source.ScreenShareAudio]) {
-    const pub = p.getTrackPublication(src);
-    if (!pub) continue;
-    pub.setSubscribed(true);
-    if (pub.track) attach(pub.track as RemoteTrack, p.identity);
+  const channelId = voiceChannel;
+  if (!channelId) throw new Error("Join voice first");
+  const request = generation;
+  watchRequests++;
+  try {
+    const viewer = await connectScreens(channelId);
+    const sdk = lk;
+    if (!viewer || !sdk || request !== generation) return;
+    const findShare = () => [...viewer.remoteParticipants.values()].find((p) =>
+      userOf(p.identity) === userId && p.getTrackPublication(sdk.Track.Source.ScreenShare));
+    const deadline = Date.now() + 5000;
+    let participant = findShare();
+    while (!participant && Date.now() < deadline && request === generation) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      participant = findShare();
+    }
+    if (request !== generation) return;
+    if (!participant) throw new Error("This screen share is no longer available");
+    if (screen.lowResource) for (const user of [...screen.watching]) if (user !== userId) unwatch(user);
+    watchedParticipants.set(userId, participant.identity);
+    if (!screen.watching.includes(userId)) {
+      setScreen("watching", (w) => [...w, userId]);
+      publishWatching();
+    }
+    for (const source of [sdk.Track.Source.ScreenShare, sdk.Track.Source.ScreenShareAudio]) {
+      const publication = participant.getTrackPublication(source);
+      if (!publication) continue;
+      publication.setSubscribed(true);
+      if (publication.track) attach(publication.track, participant.identity);
+    }
+  } finally {
+    watchRequests--;
+    disconnectIfIdle();
   }
 }
 
@@ -380,12 +580,13 @@ export function unwatch(userId: string) {
     if (pub?.track) detachTrack(pub.track as RemoteTrack);
     pub?.setSubscribed(false);
   }
-  if (!screen.watching.length && !local.length && room) void disconnectScreens();
+  disconnectIfIdle();
 }
 
 function videoTrackOf(userId: string) {
   if (!room || !lk) return null;
-  const p = [...room.remoteParticipants.values()].find((x) => userOf(x.identity) === userId);
+  const identity = watchedParticipants.get(userId);
+  const p = identity ? room.remoteParticipants.get(identity) : undefined;
   return p?.getTrackPublication(lk.Track.Source.ScreenShare)?.track ?? null;
 }
 

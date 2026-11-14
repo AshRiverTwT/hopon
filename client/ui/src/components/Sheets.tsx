@@ -1,9 +1,65 @@
 import { createSignal, For, Show } from "solid-js";
 import { call } from "../ipc";
-import { currentServer, isOwner, loadMoreMembers, s, selectServer, serverUsers, toast } from "../store";
+import { currentServer, isOwner, jumpTo, loadMoreMembers, loadOlder, s, selectChannel, selectServer, serverUsers, toast, userName } from "../store";
 import { Confirm } from "./ServerSettings";
 import { Overlay } from "./Overlay";
 import { Avatar } from "./Avatar";
+import { createMemo } from "solid-js";
+import { savedMessages } from "../localFeatures";
+
+export function BookmarksSheet(p: { close: () => void }) {
+  const items = createMemo(() => savedMessages().map((saved) => ({
+    ...saved,
+    channel: s.servers.flatMap((server) => server.channels).find((channel) => channel.id === saved.channelId),
+    message: s.selChannel === saved.channelId ? s.msgs.find((message) => message.id === saved.messageId) : undefined,
+  })));
+  return <Overlay title="Saved messages" close={p.close}>
+    <ol class="index">
+      <For each={items()} fallback={<li class="muted">Saved messages will appear here.</li>}>
+        {(item) => <li><button class="index-row" disabled={!item.channel} onClick={async () => {
+          if (item.channel) {
+            const server = s.servers.find((entry) => entry.channels.some((channel) => channel.id === item.channelId));
+            if (server && server.id !== s.selServer) selectServer(server.id);
+            await selectChannel(item.channelId);
+            await jumpTo(item.messageId);
+          }
+          p.close();
+        }}>
+          <span class="index-name">{item.channel?.name ?? "Channel unavailable"}</span>
+          <span class="index-meta">{item.message ? `${userName(item.message.authorId)} · ${item.message.content}` : "Open its channel to view this message"}</span>
+        </button></li>}
+      </For>
+    </ol>
+  </Overlay>;
+}
+
+export function SearchSheet(p: { close: () => void }) {
+  const [query, setQuery] = createSignal("");
+  const [searchingOlder, setSearchingOlder] = createSignal(false);
+  const matches = createMemo(() => {
+    const q = query().trim().toLocaleLowerCase();
+    return q ? s.msgs.filter((message) => message.content.toLocaleLowerCase().includes(q)).slice(-100).reverse() : [];
+  });
+  return <Overlay title="Search this channel" close={p.close}>
+    <input class="line big" autofocus placeholder="Search loaded messages" value={query()} onInput={(event) => setQuery(event.currentTarget.value)} />
+    <ol class="index">
+      <For each={matches()} fallback={<li class="muted">Enter a word or phrase to search this channel.</li>}>
+        {(message) => <li><button class="index-row" onClick={() => { void jumpTo(message.id); p.close(); }}>
+          <span class="index-name">{userName(message.authorId)}</span><span class="index-meta">{message.content}</span>
+        </button></li>}
+      </For>
+    </ol>
+    <Show when={s.more && s.msgs.length && query().trim()}>
+      <button class="pill" disabled={searchingOlder()} onClick={async () => {
+        setSearchingOlder(true);
+        try {
+          for (let page = 0; page < 8 && s.more && s.selChannel; page++) await loadOlder();
+        } catch (error) { toast(String(error)); }
+        finally { setSearchingOlder(false); }
+      }}>{searchingOlder() ? "Searching older messages…" : "Search older messages"}</button>
+    </Show>
+  </Overlay>;
+}
 
 export function ServersSheet(p: { close: () => void }) {
   const [name, setName] = createSignal("");

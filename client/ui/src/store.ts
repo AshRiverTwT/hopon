@@ -24,7 +24,7 @@ export const [s, set] = createStore({
   memberLoaded: {} as Record<string, number>,
   presence: {} as Record<string, Presence & { serverId: string }>,
   speaking: [] as string[],
-  screenShares: {} as Record<string, string>,
+  media: { screen: {} as Record<string, string>, camera: {} as Record<string, string> },
   voice: { channelId: null, state: "idle", muted: false, deafened: false, detail: null } as VoiceState,
   selServer: null as string | null,
   selChannel: null as string | null,
@@ -47,6 +47,8 @@ export const [s, set] = createStore({
   msgs: [] as Msg[],
   more: true,
   loadingOlder: false,
+  channelLoading: false,
+  channelError: null as string | null,
   toast: null as string | null,
   editing: null as string | null,
 });
@@ -76,6 +78,14 @@ export function rememberMentionCandidates(serverId: string, users: User[]) {
   set("mentionCandidates", serverId, users);
 }
 export const isOwner = () => !!s.user && currentServer()?.ownerId === s.user.id;
+
+function clearChannelMedia(channelId: string) {
+  for (const source of ["camera", "screen"] as const) {
+    for (const [userId, channel] of Object.entries(s.media[source])) {
+      if (channel === channelId) set("media", source, userId, undefined!);
+    }
+  }
+}
 
 // ---------- typing ----------
 // Separate signal (not the store) so typing churn never touches the list.
@@ -233,6 +243,9 @@ function apply(e: UiEvent, painted: string[]) {
       const changedUser = s.user?.id !== e.user?.id;
       const loggingOut = !e.user && !!s.user;
       set("user", e.user);
+      for (const source of ["screen", "camera"] as const) {
+        set("media", source, reconcile(Object.fromEntries(e.media.filter((p) => p.active && p.source === source).map((p) => [p.userId, p.channelId]))));
+      }
       set("servers", reconcile(e.servers, { key: "id" }));
       const users = Object.fromEntries(e.users.map((u) => [u.id, u]));
       set("users", reconcile(users));
@@ -247,7 +260,7 @@ function apply(e: UiEvent, painted: string[]) {
       absorbServers(e.servers, true);
       if (loggingOut) resetPrefs();
       if (changedUser) {
-        set({ selServer: null, selChannel: null, stage: null, msgs: [], screenShares: {} });
+        set({ selServer: null, selChannel: null, stage: null, msgs: [] });
       }
       if (e.user && !s.selServer && e.servers.length) {
         const last = prefs.lastServer;
@@ -340,7 +353,11 @@ function apply(e: UiEvent, painted: string[]) {
       });
       break;
     case "serverRemoved": {
-      const name = s.servers.find((x) => x.id === e.serverId)?.name ?? "the server";
+      const server = s.servers.find((x) => x.id === e.serverId);
+      const name = server?.name ?? "the server";
+      for (const channel of server?.channels ?? []) {
+        if (channel.voice) clearChannelMedia(channel.id);
+      }
       set("servers", (l) => l.filter((x) => x.id !== e.serverId));
       if (s.selServer === e.serverId) {
         set({ selServer: null, selChannel: null, stage: null, msgs: [] });
@@ -351,6 +368,7 @@ function apply(e: UiEvent, painted: string[]) {
       break;
     }
     case "channelDeleted": {
+      clearChannelMedia(e.channelId);
       if (s.stage === e.channelId) set("stage", null);
       if (s.selChannel === e.channelId) {
         set({ selChannel: null, msgs: [] });
@@ -361,8 +379,13 @@ function apply(e: UiEvent, painted: string[]) {
     }
     case "userUpdated": {
       const u = e.user;
-      if (s.user?.id === u.id) set("user", "avatarV", u.avatarV);
+      if (s.user?.id === u.id) set("user", u);
       set("users", u.id, u);
+      for (const [server, candidates] of Object.entries(s.mentionCandidates)) {
+        if (candidates.some((candidate) => candidate.id === u.id)) {
+          set("mentionCandidates", server, candidates.map((candidate) => candidate.id === u.id ? u : candidate));
+        }
+      }
       break;
     }
     case "messages":
@@ -434,10 +457,12 @@ function apply(e: UiEvent, painted: string[]) {
       if (sv) queueMicrotask(() => { if (s.selServer !== sv.id) selectServer(sv.id); if (s.selChannel !== id || s.stage) void selectChannel(id); });
       break;
     }
-    case "screenShare":
-      if (e.active) set("screenShares", e.userId, e.channelId);
-      else if (s.screenShares[e.userId] === e.channelId) set("screenShares", e.userId, undefined!);
+    case "mediaPresence": {
+      const { source, userId, channelId, active } = e.media;
+      if (active) set("media", source, userId, channelId);
+      else if (s.media[source][userId] === channelId) set("media", source, userId, undefined!);
       break;
+    }
     case "error":
       toast(e.message);
       break;
@@ -447,29 +472,39 @@ function apply(e: UiEvent, painted: string[]) {
 // ---------- actions ----------
 
 export function selectServer(id: string) {
-  set({ selServer: id, stage: null });
+  set({ selServer: id, stage: null, selChannel: null, msgs: [], channelError: null, channelLoading: false });
   if (prefs.lastServer !== id) setPrefs({ lastServer: id });
   const sv = s.servers.find((x) => x.id === id);
   const last = prefs.lastChannel[id];
   const ch = sv?.channels.find((c) => c.id === last && !c.voice) ?? sv?.channels.find((c) => !c.voice);
   if (ch) selectChannel(ch.id);
+  else set({ stage: null, selChannel: null, msgs: [], more: false, channelLoading: false });
 }
 
 let openSeq = 0;
 export async function selectChannel(id: string) {
   const seq = ++openSeq;
   batch(() => {
-    set({ selChannel: id, stage: null, msgs: [], more: true, loadingOlder: false, editing: null, replyTo: null, jump: null, dividerAfter: s.reads[id] ?? null });
+    set({ selChannel: id, stage: null, msgs: [], more: true, loadingOlder: false, channelLoading: true, channelError: null, editing: null, replyTo: null, jump: null, dividerAfter: s.reads[id] ?? null });
     set("mentions", id, 0);
     clearBanners(id);
     const sv = s.servers.find((x) => x.channels.some((c) => c.id === id));
     if (sv && prefs.lastChannel[sv.id] !== id) setPrefs({ lastChannel: { ...prefs.lastChannel, [sv.id]: id } });
   });
-  const msgs = await call<Msg[]>("open_channel", { channelId: id });
-  if (seq !== openSeq) return;
-  const r = mergeMsgs([...s.msgs], msgs);
-  set("msgs", reconcile(r.list, { key: "id", merge: false }));
-  maybeMarkRead();
+  try {
+    const msgs = await call<Msg[]>("open_channel", { channelId: id });
+    if (seq !== openSeq || s.selChannel !== id) return;
+    const r = mergeMsgs([...s.msgs], msgs);
+    set("msgs", reconcile(r.list, { key: "id", merge: false }));
+    set("channelLoading", false);
+    maybeMarkRead();
+  } catch (error) {
+    if (seq === openSeq && s.selChannel === id) set({ channelError: String(error), channelLoading: false });
+  }
+}
+
+export function retryOpenChannel() {
+  if (s.selChannel) void selectChannel(s.selChannel);
 }
 
 export function showStage(id: string) {
