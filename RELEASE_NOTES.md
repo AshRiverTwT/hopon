@@ -2,6 +2,50 @@
 
 **Download the latest:** [HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe)
 
+## HopOn 0.6.0
+
+**Update the app and the server together** (new protocol: a 0.5 app shows
+*Update needed* on a 0.6 server and offers the one-click update).
+
+### New
+
+- **Friends and direct messages.** **Friends** in the top bar: add people by
+  their username (shown on that page, so you can share yours), accept or
+  decline requests, and message any friend. Conversations are listed on the
+  left, online friends (and what they're playing) on the right. Removing a
+  friend keeps your messages but closes the conversation until you're
+  friends again.
+- **Tiles view in voice rooms.** The small switch next to the room's name
+  shows everyone as a picture: their stream if they're sharing, else their
+  camera, else their avatar.
+- **1440p · 60 fps** streaming.
+- Stream volume goes up to **200 %**.
+
+### Changed
+
+- **The voice room is back to the old, clean layout**, with just **Leave**,
+  **Camera** (on/off) and **Stream** (pick a quality, then *Stop streaming*).
+  *Low resource streams* moved to Settings → Display.
+- **Streams always include sound** (when you share a whole screen; Windows
+  doesn't share sound from a single window). Viewers on speakers may hear
+  voice chat echoed through the stream.
+- **Polls** have their own *New poll* page and a new look in chat: each
+  option is a bar filled by its share of the votes.
+- **The in-game overlay** now looks like the rest of HopOn.
+- Search and Saved are icons in the channel header (a magnifying glass and a bookmark), so the
+  top bar stays uncluttered.
+- Icons are drawn in HopOn's own style everywhere: the favorite star and the
+  emoji picker's category tabs were colour emoji and are now line icons.
+
+### Fixed
+
+- Stream sound could keep playing after **Stop watching** if you stopped (or
+  clicked Watch twice) while the stream was still connecting.
+- Camera pictures were cut off in smaller windows; they're always shown
+  whole now.
+- The top bar ran off the edge of narrower windows.
+- Polls showed as raw data in notifications, reply quotes and the overlay.
+
 ## HopOn 0.5.2
 
 **Update the app and the server together** (new protocol: a 0.5.1 app shows

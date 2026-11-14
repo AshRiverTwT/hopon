@@ -515,7 +515,10 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 .emoji-search:focus { border-color: var(--cream-35); }
 .emoji-tabs { display: flex; gap: 2px; }
 .emoji-tabs button { flex: 1; height: 28px; border-radius: 4px; font-size: 16px; }
-.emoji-tabs button:hover { background: var(--cream-10); }
+.emoji-tabs button { display: grid; place-items: center; color: var(--cream-35); }
+.emoji-tabs button:hover { background: var(--cream-10); color: var(--cream-80); }
+.emoji-tabs button.on { color: var(--cream); box-shadow: inset 0 -2px 0 var(--hot); border-radius: 4px 4px 0 0; }
+.icon-btn.fav.on { color: var(--hot); background: none; }
 .emoji-grid { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--cream-20) transparent; }
 .emoji-cat { position: sticky; top: 0; background: var(--ink-2); padding: 6px 2px 4px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--cream-55); }
 .emoji-cells { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }

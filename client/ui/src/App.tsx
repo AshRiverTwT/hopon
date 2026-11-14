@@ -2,7 +2,7 @@ import { Match, Show, Switch, createEffect, createSignal, onCleanup, onMount } f
 import { call } from "./ipc";
 import { closeFriends, currentDm, currentServer, cycleChannel, cycleServer, friendOf, friendsAttention, isOwner, maybeMarkRead, openFriends, s, toast } from "./store";
 import { DmClosed, DmHeader, FriendsHome, FriendsNav, FriendsRail } from "./components/Friends";
-import { BookmarkIcon, SearchIcon } from "./components/icons";
+import { BookmarkIcon, SearchIcon, StarIcon } from "./components/icons";
 import { comboOf, type Action } from "./hotkeys";
 import { applyScale, prefs, SCALES, setPrefs } from "./prefs";
 import { addFilesToComposer } from "./components/Composer";
@@ -201,7 +201,7 @@ export default function App() {
                     <header class="head">
                       <div class="head-row">
                         <h1 class="display title" title={channel()?.name}>{channel()?.name}</h1>
-                        <button class="pill ghost" aria-pressed={isFavorite(s.selChannel!)} title="Favorite channel" onClick={() => toggleFavorite(s.selChannel!)}>{isFavorite(s.selChannel!) ? "★" : "☆"}</button>
+                        <button class="icon-btn fav" classList={{ on: isFavorite(s.selChannel!) }} aria-pressed={isFavorite(s.selChannel!)} title={isFavorite(s.selChannel!) ? "Favorite channel (click to remove)" : "Favorite channel"} aria-label="Favorite channel" onClick={() => toggleFavorite(s.selChannel!)}><StarIcon filled={isFavorite(s.selChannel!)} /></button>
                         <ChannelBell channelId={s.selChannel!} />
                         <button class="icon-btn" title="Search this channel" aria-label="Search this channel" onClick={() => setSheet({ k: "search" })}><SearchIcon /></button>
                         <button class="icon-btn" title="Saved messages" aria-label="Saved messages" onClick={() => setSheet({ k: "bookmarks" })}><BookmarkIcon /></button>

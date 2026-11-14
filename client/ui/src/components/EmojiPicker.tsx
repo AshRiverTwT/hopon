@@ -1,5 +1,6 @@
 // Emoji picker shared by the composer and reactions: search, recent, and
 // categories. Built only while open.
+import { EMOJI_TAB_ICONS } from "./icons";
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { CATEGORIES, searchEmoji } from "../emoji";
 import { prefs, setPrefs } from "../prefs";
@@ -28,6 +29,7 @@ export function EmojiPicker(p: { pick: (e: string, keepOpen: boolean) => void; c
     if (e.key === "Escape") { e.preventDefault(); p.close(); }
     if (e.key === "Enter") { e.preventDefault(); const first = q() ? results()[0]?.e : prefs.recentEmoji[0]; if (first) choose(first); }
   };
+  const [cat, setCat] = createSignal(prefs.recentEmoji.length ? "Recent" : "Smileys");
   const jump = (name: string) => grid.querySelector(`[data-cat="${name}"]`)?.scrollIntoView({ block: "start" });
 
   return (
@@ -35,11 +37,16 @@ export function EmojiPicker(p: { pick: (e: string, keepOpen: boolean) => void; c
       <input ref={input} class="emoji-search" placeholder="Search emoji" value={q()} onInput={(e) => setQ(e.currentTarget.value)} />
       <Show when={!q()}>
         <nav class="emoji-tabs">
-          <Show when={prefs.recentEmoji.length}><button title="Recent" onClick={() => jump("Recent")}>🕘</button></Show>
-          <For each={CATEGORIES}>{(c) => <button title={c.name} onClick={() => jump(c.name)}>{c.list[0].e}</button>}</For>
+          <Show when={prefs.recentEmoji.length}><button title="Recent" aria-label="Recent" classList={{ on: cat() === "Recent" }} onClick={() => jump("Recent")}>{EMOJI_TAB_ICONS.Recent()}</button></Show>
+          <For each={CATEGORIES}>{(c) => <button title={c.name} aria-label={c.name} classList={{ on: cat() === c.name }} onClick={() => jump(c.name)}>{(EMOJI_TAB_ICONS[c.name] ?? EMOJI_TAB_ICONS.Symbols)()}</button>}</For>
         </nav>
       </Show>
-      <div class="emoji-grid" ref={grid}>
+      <div class="emoji-grid" ref={grid} onScroll={() => {
+        // The category you're scrolled to lights up in the tabs.
+        let at = "";
+        for (const h of grid.querySelectorAll<HTMLElement>("[data-cat]")) { if (h.offsetTop - grid.offsetTop <= grid.scrollTop + 6) at = h.dataset.cat ?? ""; }
+        setCat(at);
+      }}>
         <Show when={q()} fallback={
           <>
             <Show when={prefs.recentEmoji.length}>

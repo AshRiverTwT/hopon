@@ -71,7 +71,7 @@ test("text, emoji and mention drafts survive channel switches and voice view", a
   await channel(p, "general");
   await value(p, "@mira ");
   await p.getByRole("option", { name: /^Lounge/ }).click();
-  await p.getByRole("button", { name: "Join voice", exact: true }).waitFor();
+  await p.getByRole("button", { name: "Join", exact: true }).waitFor();
   await channel(p, "general");
   await value(p, "@mira ");
 });
@@ -119,10 +119,13 @@ test("failed uploads block sending until removed", async (t) => {
 
 test("poll creation, live vote counts, removal and unrelated reactions", async (t) => {
   const p = await fixture(t);
-  const answers = ["Which game?", "Chess, Wordle"];
-  p.on("dialog", (d) => d.accept(answers.shift()));
-  await p.getByRole("button", { name: "Create a poll" }).click();
-  await p.locator(".poll-card").waitFor();
+  // The New poll sheet (no browser dialogs).
+  await p.getByRole("button", { name: "New poll" }).click();
+  await p.getByPlaceholder("Ask a question").fill("Which game?");
+  await p.getByPlaceholder("Option 1").fill("Chess");
+  await p.getByPlaceholder("Option 2").fill("Wordle");
+  await p.getByRole("button", { name: "Post poll" }).click();
+  await p.locator(".poll").waitFor();
   await p.evaluate(async () => {
     const { s, set } = await import("/src/store.ts");
     const pending = s.msgs.at(-1);
@@ -131,28 +134,29 @@ test("poll creation, live vote counts, removal and unrelated reactions", async (
       if (cmd === "react") { window.__push({ t: "reaction", ...args, userId: "1001" }); return null; }
     };
   });
-  const chess = p.locator(".poll-option").filter({ hasText: "Chess" });
+  const chess = p.locator(".poll-opt").filter({ hasText: "Chess" });
   await chess.click();
-  await p.waitForFunction(() => document.querySelector(".poll-option")?.classList.contains("mine"));
-  assert.match(await chess.innerText(), /Chess\s+1$/);
+  await p.waitForFunction(() => document.querySelector(".poll-opt")?.classList.contains("mine"));
+  assert.equal(await chess.locator(".poll-count").innerText(), "1");
   await p.evaluate(() => window.__push({ t: "reaction", channelId: "7001", messageId: "999999999", emoji: "🔥", userId: "1002", add: true }));
   await p.waitForFunction(() => document.querySelector(".reactions")?.textContent.includes("🔥"));
-  assert.match(await p.locator(".poll-card .muted").innerText(), /^1 votes$/);
+  assert.match(await p.locator(".poll-foot").innerText(), /^1 person voted/);
+  // Poll votes aren't repeated as reaction chips; other reactions are.
+  assert.equal(await p.locator(".reactions .chip").count(), 1);
   await chess.click();
-  await p.waitForFunction(() => document.querySelector(".poll-card .muted")?.textContent === "0 votes");
-  assert.match(await chess.innerText(), /Chess\s+0$/);
+  await p.waitForFunction(() => document.querySelector(".poll-foot")?.textContent.startsWith("0 people voted"));
+  assert.equal(await chess.locator(".poll-count").innerText(), "0");
 });
 
-test("favorites persist and saved messages open from a voice room", async (t) => {
+test("favorites persist and saved messages open the message", async (t) => {
   const p = await fixture(t);
   await p.locator('button[title*="Favorite"],button[title*="favorite"]').click();
   assert.deepEqual(await p.evaluate(() => JSON.parse(localStorage.getItem("hopon.favorites"))), ["7001"]);
   await p.evaluate(async () => { (await import("/src/localFeatures.ts")).toggleBookmark("7001", "10002006"); });
-  await p.getByRole("option", { name: /^Lounge/ }).click();
-  await p.getByRole("button", { name: "Saved", exact: true }).click();
+  await p.getByRole("button", { name: "Saved messages", exact: true }).click();
   await p.locator(".sheet .index-row").first().click();
   await composer(p).waitFor();
-  assert.equal(await p.locator(".stage").count(), 0);
+  assert.equal(await p.locator(".sheet").count(), 0);
   await p.reload();
   await composer(p).waitFor();
   assert.deepEqual(await p.evaluate(() => JSON.parse(localStorage.getItem("hopon.favorites"))), ["7001"]);
@@ -160,7 +164,7 @@ test("favorites persist and saved messages open from a voice room", async (t) =>
 
 test("channel search finds loaded text", async (t) => {
   const p = await fixture(t);
-  await p.getByRole("button", { name: "Search", exact: true }).click();
+  await p.getByRole("button", { name: "Search this channel", exact: true }).click();
   await p.getByPlaceholder("Search loaded messages").fill("sunset");
   await p.locator(".sheet .index-row").filter({ hasText: "sunset" }).waitFor();
   await p.locator(".sheet .index-row").filter({ hasText: "sunset" }).click();
@@ -210,15 +214,20 @@ test("display name editor validates and submits, mouse push-to-talk binds", asyn
   assert.equal(await p.evaluate(() => window.testCalls.findLast((x) => x.cmd === "voice_ptt")?.args.keyCode), 0x1004);
 });
 
-test("voice stage exposes media controls; disconnect clears media presence", async (t) => {
+test("voice room: Camera and Stream (quality menu) only; Leave clears media presence", async (t) => {
   const p = await fixture(t, "voice");
   await p.getByRole("option", { name: /^Lounge/ }).click();
-  await p.getByRole("button", { name: "Turn camera on", exact: true }).waitFor();
-  assert.equal(await p.getByRole("button", { name: "Turn camera on", exact: true }).isEnabled(), true);
-  await p.getByRole("button", { name: "Share screen", exact: true }).waitFor();
-  await p.getByRole("radio", { name: /Low resource/ }).click();
-  assert.equal(await p.getByRole("radio", { name: /Low resource/ }).getAttribute("aria-checked"), "true");
-  await p.getByRole("button", { name: "Leave call", exact: true }).click();
+  await p.getByRole("button", { name: "Camera", exact: true }).waitFor();
+  assert.equal(await p.getByRole("button", { name: "Camera", exact: true }).isEnabled(), true);
+  await p.getByRole("button", { name: "Stream", exact: true }).click();
+  const qualities = await p.getByRole("menuitem").allInnerTexts();
+  assert.deepEqual(qualities.map((q) => q.split("\n")[0]), ["720p · 30 fps", "720p · 60 fps", "1080p · 60 fps", "1440p · 60 fps"]);
+  await p.keyboard.press("Escape");
+  assert.equal(await p.getByRole("menu").count(), 0);
+  for (const gone of ["Show cameras", "Include audio", "Low resource", "Mic on", "Leave call"]) {
+    assert.equal(await p.locator(".stage").getByText(gone, { exact: true }).count(), 0, `${gone} is gone from the room`);
+  }
+  await p.getByRole("button", { name: "Leave", exact: true }).click();
   assert.equal(await p.evaluate(() => window.testCalls.some((x) => x.cmd === "voice_leave")), true);
   await p.evaluate(() => window.__push({ t: "channelDeleted", serverId: "9001", channelId: "7101" }));
   await p.waitForFunction(async () => { const { s } = await import("/src/store.ts"); return !s.media.screen["1002"]; });
