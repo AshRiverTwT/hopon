@@ -46,103 +46,119 @@ function Editable(p: { value: string; placeholder?: string; max: number; save: (
   );
 }
 
-function ChannelRow(p: { c: Channel }) {
+/** One channel: a compact line; click to edit its name and topic, or delete it. */
+function ChannelRow(p: { c: Channel; open: boolean; toggle: () => void }) {
   return (
-    <li class="admin-row">
-      <div class="admin-row-head">
-        <Show when={p.c.voice} fallback={<span class="kind">Text</span>}><span class="kind"><VoiceGlyph /> Voice</span></Show>
-        <Confirm name={p.c.name} action="Delete channel" onConfirm={() => call("delete_channel", { channelId: p.c.id })}>
-          <span class="muted small">Deletes the channel and all of its messages{p.c.voice ? " and ends the call" : ""}.</span>
-        </Confirm>
-      </div>
-      <Editable value={p.c.name} max={64} class="big" save={(name) => call("update_channel", { channelId: p.c.id, name, topic: null })} />
-      <Show when={!p.c.voice}>
-        <Editable value={p.c.topic} placeholder="Topic (optional)" max={256} save={(topic) => call("update_channel", { channelId: p.c.id, name: null, topic })} />
+    <li class="ss-item" classList={{ open: p.open }}>
+      <button class="ss-line" aria-expanded={p.open} onClick={p.toggle}>
+        <span class="ss-glyph"><Show when={p.c.voice} fallback="#"><VoiceGlyph /></Show></span>
+        <span class="ss-name">{p.c.name}</span>
+        <span class="ss-meta">{p.c.voice ? "Voice" : p.c.topic}</span>
+      </button>
+      <Show when={p.open}>
+        <div class="ss-edit">
+          <Editable value={p.c.name} max={64} save={(name) => call("update_channel", { channelId: p.c.id, name, topic: null })} />
+          <Show when={!p.c.voice}>
+            <Editable value={p.c.topic} placeholder="Topic" max={256} save={(topic) => call("update_channel", { channelId: p.c.id, name: null, topic })} />
+          </Show>
+          <Confirm name={p.c.name} action="Delete channel" onConfirm={() => call("delete_channel", { channelId: p.c.id })}>
+            <span class="muted small">Deletes it and all of its messages{p.c.voice ? " and ends the call" : ""}.</span>
+          </Confirm>
+        </div>
       </Show>
     </li>
   );
 }
 
-/** Invite link (anyone in the server can make one). */
-function InviteSection(p: { serverId: string }) {
+/** Invite link (anyone in the server can make one); the owner can revoke them all. */
+function InviteRow(p: { serverId: string; owner: boolean }) {
   const [link, setLink] = createSignal("");
   const make = async () => { try { setLink(await call<string>("create_invite", { serverId: p.serverId })); } catch (e) { toast(String(e)); } };
   return (
-    <section>
-      <div class="eyebrow">Invite</div>
-      <Show when={link()} fallback={<button class="pill solid" onClick={() => void make()}>Create invite link</button>}>
-        <div class="field-row">
-          <input class="line big" readonly value={link()} onFocus={(e) => e.currentTarget.select()} />
-          <button class="pill solid" onClick={() => { void navigator.clipboard.writeText(link()); toast("Copied"); }}>Copy</button>
+    <div class="row">
+      <span class="eyebrow">Invite</span>
+      <div class="row-body">
+        <Show when={link()} fallback={<div class="inline"><button class="pill solid" onClick={() => void make()}>Create invite link</button></div>}>
+          <div class="inline">
+            <input class="line ss-link" readonly value={link()} onFocus={(e) => e.currentTarget.select()} />
+            <button class="pill solid" onClick={() => { void navigator.clipboard.writeText(link()); toast("Copied"); }}>Copy</button>
+          </div>
+        </Show>
+        <div class="inline">
+          <span class="muted small">Links work for 7 days.</span>
+          <Show when={p.owner}>
+            <button class="link" onClick={() => call("revoke_invites", { serverId: p.serverId }).then(() => { setLink(""); toast("All invite links revoked"); }).catch(err)}>Revoke all links</button>
+          </Show>
         </div>
-        <p class="muted small">Works for 7 days.</p>
-      </Show>
-    </section>
+      </div>
+    </div>
   );
 }
 
 export function ServerSettingsSheet(p: { close: () => void }) {
   const sv = currentServer;
+  const [open, setOpen] = createSignal<string | null>(null);
   return (
     <Overlay title={currentServer()?.name ?? "Server"} close={p.close}>
       <Show when={sv()}>
         {(server) => (
-          <Show when={isOwner()} fallback={
-            <div class="admin">
-              <InviteSection serverId={server().id} />
-              <Confirm name={server().name} action="Leave server" onConfirm={async () => { await call("leave_server", { serverId: server().id }); p.close(); }} />
-            </div>
-          }>
-            <div class="admin">
-              <InviteSection serverId={server().id} />
-              <section>
-                <div class="eyebrow">Name</div>
-                <Editable value={server().name} max={64} class="big" save={(name) => call("rename_server", { serverId: server().id, name })} />
-              </section>
-
-              <section>
-                <div class="eyebrow">Channels</div>
-                <ol class="admin-list">
-                  <For each={server().channels}>{(c) => <ChannelRow c={c} />}</For>
-                </ol>
-              </section>
-
-              <section>
-                <div class="eyebrow">People</div>
-                <ol class="admin-list">
-                  <For each={serverUsers(server())}>
-                    {(m) => (
-                      <li class="admin-row person">
-                        <Avatar id={m.id} size={32} />
-                        <span class="person-name">{m.name}</span>
-                        <Show when={m.id === server().ownerId} fallback={
-                          <Confirm name={m.name} action="Remove" onConfirm={() => call("kick_member", { serverId: server().id, userId: m.id })} />
-                        }><span class="muted small">Owner</span></Show>
-                      </li>
-                    )}
-                  </For>
-                </ol>
-                <Show when={server().memberIds.length < server().memberCount}>
-                  <button class="link" onClick={() => loadMoreMembers(server().id)}>Load more members ({server().memberIds.length}/{server().memberCount})</button>
-                </Show>
-              </section>
-
-              <section>
-                <div class="eyebrow">Invites</div>
-                <div class="field-row">
-                  <span class="muted">Links you've shared stop working immediately.</span>
-                  <button class="pill" onClick={() => call("revoke_invites", { serverId: server().id }).then(() => toast("All invite links revoked")).catch(err)}>Revoke all invites</button>
+          <div class="rows">
+            <InviteRow serverId={server().id} owner={isOwner()} />
+            <Show when={isOwner()} fallback={
+              <div class="row">
+                <span class="eyebrow">Leave</span>
+                <div class="row-body"><Confirm name={server().name} action="Leave server" onConfirm={async () => { await call("leave_server", { serverId: server().id }); p.close(); }} /></div>
+              </div>
+            }>
+              <div class="row">
+                <span class="eyebrow">Name</span>
+                <div class="row-body"><Editable value={server().name} max={64} class="big" save={(name) => call("rename_server", { serverId: server().id, name })} /></div>
+              </div>
+              <div class="row">
+                <span class="eyebrow">Channels</span>
+                <div class="row-body">
+                  <ol class="ss-list">
+                    <For each={[...server().channels.filter((c) => !c.voice), ...server().channels.filter((c) => c.voice)]}>
+                      {(c) => <ChannelRow c={c} open={open() === c.id} toggle={() => setOpen((x) => (x === c.id ? null : c.id))} />}
+                    </For>
+                  </ol>
                 </div>
-              </section>
-
-              <section class="danger-zone">
-                <div class="eyebrow">Delete server</div>
-                <Confirm name={server().name} action="Delete server" onConfirm={async () => { await call("delete_server", { serverId: server().id }); p.close(); }}>
-                  <span class="muted small">Removes every channel and message for everyone. This can't be undone.</span>
-                </Confirm>
-              </section>
-            </div>
-          </Show>
+              </div>
+              <div class="row">
+                <span class="eyebrow">People · {server().memberCount}</span>
+                <div class="row-body">
+                  <ol class="ss-list">
+                    <For each={serverUsers(server())}>
+                      {(m) => (
+                        <li class="ss-item">
+                          <div class="ss-line static">
+                            <Avatar id={m.id} size={26} />
+                            <span class="ss-name">{m.name}</span>
+                            <span class="ss-meta">
+                              <Show when={m.id === server().ownerId} fallback={
+                                <Confirm name={m.name} action="Remove" onConfirm={() => call("kick_member", { serverId: server().id, userId: m.id })} />
+                              }>Owner</Show>
+                            </span>
+                          </div>
+                        </li>
+                      )}
+                    </For>
+                  </ol>
+                  <Show when={server().memberIds.length < server().memberCount}>
+                    <button class="link" onClick={() => loadMoreMembers(server().id)}>Show more ({server().memberIds.length} of {server().memberCount})</button>
+                  </Show>
+                </div>
+              </div>
+              <div class="row">
+                <span class="eyebrow">Delete</span>
+                <div class="row-body">
+                  <Confirm name={server().name} action="Delete server" onConfirm={async () => { await call("delete_server", { serverId: server().id }); p.close(); }}>
+                    <span class="muted small">Every channel and message, for everyone. Can't be undone.</span>
+                  </Confirm>
+                </div>
+              </div>
+            </Show>
+          </div>
         )}
       </Show>
     </Overlay>

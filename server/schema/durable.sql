@@ -39,3 +39,15 @@ CREATE TABLE IF NOT EXISTS friendships (
     CHECK (user_a < user_b)
 );
 CREATE INDEX IF NOT EXISTS friendships_b ON friendships (user_b);
+
+-- 0.7: profiles. custom_status (above) holds the status text.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS accent SMALLINT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS banner BYTEA;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS banner_v INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status_emoji TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status_until BIGINT NOT NULL DEFAULT 0;
+-- 0 online, 2 do not disturb, 3 invisible (idle is never stored).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status_mode SMALLINT NOT NULL DEFAULT 0;
+-- No default: existing memberships stay "unknown" instead of all joining today.
+ALTER TABLE members ADD COLUMN IF NOT EXISTS joined_at TIMESTAMPTZ;

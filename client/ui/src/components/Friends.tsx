@@ -9,6 +9,8 @@ import type { Friend } from "../types";
 import { Avatar } from "./Avatar";
 import { FitTitle } from "./FitTitle";
 import { BookmarkIcon, SearchIcon } from "./icons";
+import { PresenceDot, StatusLine } from "./PresenceDot";
+import { customOf, openProfile, presenceOf, SHOWN_LABEL } from "../profile";
 
 const err = (e: unknown) => toast(String(e).replace(/^Error: /, ""));
 const gameOf = (userId: string) => {
@@ -34,7 +36,7 @@ export function FriendsNav() {
             return (
               <li>
                 <button class="dm-row" classList={{ on: currentDm()?.id === d.sv.id, unread: unread() }} onClick={() => openDm(d.user)}>
-                  <span class="rail-av"><Avatar id={d.user} size={28} /><Show when={s.online[d.user]}><i class="rail-dot" /></Show></span>
+                  <span class="rail-av"><Avatar id={d.user} size={28} /><PresenceDot id={d.user} /></span>
                   <span class="dm-name">{userName(d.user)}</span>
                   <Show when={unread()}><i class="dm-unread" aria-label="New messages" /></Show>
                 </button>
@@ -110,9 +112,11 @@ export function FriendsHome() {
             {(f) => (
               <li class="index-row static" classList={{ off: !s.online[f.user.id] }}>
                 <span class="index-name">
-                  <span class="rail-av"><Avatar id={f.user.id} size={40} /><Show when={s.online[f.user.id]}><i class="rail-dot" /></Show></span>
-                  {f.user.name}
-                  <Show when={gameOf(f.user.id)}><span class="handle"><span class="game">Playing {gameOf(f.user.id)}</span></span></Show>
+                  <button class="rail-av person" aria-label={`${f.user.name}'s profile`} onClick={(e) => openProfile(f.user.id, e.currentTarget, e)}><Avatar id={f.user.id} size={40} /><PresenceDot id={f.user.id} /></button>
+                  <button class="person" onClick={(e) => openProfile(f.user.id, e.currentTarget, e)}>{f.user.name}</button>
+                  <Show when={gameOf(f.user.id)} fallback={<Show when={customOf(f.user.id)}>{(c) => <span class="handle"><StatusLine emoji={c().emoji} text={c().text} /></span>}</Show>}>
+                    <span class="handle"><span class="game">Playing {gameOf(f.user.id)}</span></span>
+                  </Show>
                 </span>
                 <span class="index-meta">
                   <button class="pill" onClick={() => openDm(f.user.id)}>Message</button>
@@ -138,9 +142,9 @@ export function DmHeader(p: { search: () => void; saved: () => void }) {
     <>
       <div class="eyebrow">Direct message{f() ? ` · @${f()!.username}` : ""}</div>
       <div class="head-row">
-        <Avatar id={other()} size={40} />
+        <button class="person" aria-label={`${userName(other())}'s profile`} onClick={(e) => openProfile(other(), e.currentTarget, e)}><Avatar id={other()} size={40} /></button>
         <FitTitle text={userName(other())} reserve={200} />
-        <Show when={s.online[other()]}><span class="dm-online">Online</span></Show>
+        <Show when={presenceOf(other()) !== "offline"}><span class={`dm-online ${presenceOf(other())}`}>{SHOWN_LABEL[presenceOf(other())]}</span></Show>
         <button class="icon-btn" title="Search this conversation" aria-label="Search this conversation" onClick={p.search}><SearchIcon /></button>
         <button class="icon-btn" title="Saved messages" aria-label="Saved messages" onClick={p.saved}><BookmarkIcon /></button>
       </div>
@@ -175,11 +179,13 @@ export function FriendsRail() {
       <ul>
         <For each={online()} fallback={<li class="rail-none muted small">No friends online</li>}>
           {(f) => (
-            <li class="rail-click" onClick={() => openDm(f.user.id)} title={`Message ${f.user.name}`}>
-              <span class="rail-av"><Avatar id={f.user.id} size={28} /><i class="rail-dot" /></span>
+            <li class="rail-click" onClick={(e) => openProfile(f.user.id, e.currentTarget, e)} title={f.user.name}>
+              <span class="rail-av"><Avatar id={f.user.id} size={28} /><PresenceDot id={f.user.id} /></span>
               <span class="rail-text">
                 <span class="rail-name">{f.user.name}</span>
-                <Show when={gameOf(f.user.id)}><span class="rail-sub game">Playing {gameOf(f.user.id)}</span></Show>
+                <Show when={gameOf(f.user.id)} fallback={<Show when={customOf(f.user.id)}>{(c) => <span class="rail-sub"><StatusLine emoji={c().emoji} text={c().text} /></span>}</Show>}>
+                  <span class="rail-sub game">Playing {gameOf(f.user.id)}</span>
+                </Show>
               </span>
             </li>
           )}

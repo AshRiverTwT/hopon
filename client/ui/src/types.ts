@@ -1,9 +1,17 @@
 // Mirrors client/src-tauri/src/ui.rs. IDs are decimal strings (63-bit).
-export interface User { id: string; name: string; avatarV: number }
+export interface User { id: string; name: string; avatarV: number;
+  /** Profile colour: index into ACCENTS (0 = none). */
+  accent: number }
+export type StatusMode = "online" | "idle" | "dnd" | "invisible";
+/** Presence mode plus an optional custom status that can expire (until: Unix ms, 0 = never). */
+export interface Status { mode: StatusMode; emoji: string; text: string; until: number }
+export interface Profile { user: User; username: string; bio: string; bannerV: number; createdAt: number; joinedAt: number }
 export interface Channel { id: string; serverId: string; name: string; voice: boolean; topic: string; lastId: string }
 export interface Server { id: string; name: string; ownerId: string; channels: Channel[]; memberIds: string[]; memberCount: number; reads: Record<string, string>; online: string[];
   /** user → game they're playing right now */
   activities: Record<string, string>;
+  /** user → status, for online members who aren't plain "online" */
+  statuses: Record<string, Status>;
   /** A direct message with this person (a hidden two-person server). */
   dmWith?: string | null }
 export type FriendState = "friends" | "incoming" | "outgoing";
@@ -28,13 +36,13 @@ export interface MediaPresence { userId: string; channelId: string; source: Medi
 
 export type UiEvent =
   | { t: "conn"; state: "connecting" | "online" | "offline"; rttMs: number | null }
-  | { t: "session"; user: User | null; servers: Server[]; users: User[]; voice: Presence[]; media: MediaPresence[]; username: string; friends: Friend[] }
+  | { t: "session"; user: User | null; servers: Server[]; users: User[]; voice: Presence[]; media: MediaPresence[]; username: string; friends: Friend[]; status: Status }
   | { t: "friend"; friend: Friend }
   | { t: "friendRemoved"; userId: string }
   | { t: "server"; server: Server }
   | { t: "channelCreated"; channel: Channel }
   | { t: "memberJoined"; serverId: string; user: User }
-  | { t: "memberPage"; serverId: string; offset: number; users: User[]; online: string[]; activities: Record<string, string> }
+  | { t: "memberPage"; serverId: string; offset: number; users: User[]; online: string[]; activities: Record<string, string>; statuses: Record<string, Status> }
   | { t: "memberSearch"; serverId: string; users: User[] }
   | { t: "userUpdated"; user: User }
   | { t: "serverRemoved"; serverId: string; reason: "deleted" | "kicked" | "left" }
@@ -48,6 +56,7 @@ export type UiEvent =
   | { t: "prefs"; json: string }
   | { t: "userPresence"; userId: string; online: boolean }
   | { t: "activity"; userId: string; game: string }
+  | { t: "status"; userId: string; status: Status }
   | { t: "messages"; channelId: string; msgs: Msg[] }
   | { t: "msgState"; channelId: string; nonce: string; id: string; state: number }
   | { t: "edited"; channelId: string; id: string; content: string; editedAt: number }

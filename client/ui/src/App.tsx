@@ -27,6 +27,9 @@ import CallView from "./components/CallView";
 import { Banners, ChannelBell } from "./components/Banners";
 import { installUpdate, startUpdateChecks, upd } from "./update";
 import { ServerSettingsSheet } from "./components/ServerSettings";
+import { ProfileCardHost } from "./components/ProfileCard";
+import { ProfileEditor } from "./components/ProfileEditor";
+import { closeProfileEditor, profileEditorOpen, startIdleWatch } from "./profile";
 import { BookmarksSheet, InviteSheet, MembersSheet, NewChannelSheet, SearchSheet, ServersSheet } from "./components/Sheets";
 import { isFavorite, toggleFavorite } from "./localFeatures";
 
@@ -100,6 +103,7 @@ export default function App() {
   });
   onMount(() => {
     startUpdateChecks();
+    startIdleWatch();
     call<{ testOpenGames?: boolean }>("get_config").then((c) => c?.testOpenGames && setGames(true)).catch(() => {});
     const k = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.code === "KeyP") { e.preventDefault(); setPerf((v) => !v); return; }
@@ -283,7 +287,11 @@ export default function App() {
           </Switch>
         </Show>
       </Show>
-      <Show when={s.user}><MiniPlayer /><Show when={screen.full}><CallView /></Show><Banners /></Show>
+      <Show when={s.user}>
+        <MiniPlayer /><Show when={screen.full}><CallView /></Show><Banners />
+        <ProfileCardHost />
+        <Show when={profileEditorOpen()}><ProfileEditor close={closeProfileEditor} /></Show>
+      </Show>
       <Show when={perf()}><PerfOverlay close={() => setPerf(false)} /></Show>
       <UpdatePrompt />
       <Show when={dropping()}><div class="drop-hint"><span class="display">Drop to attach</span></div></Show>

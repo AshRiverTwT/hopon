@@ -8,12 +8,13 @@ const scene = new URLSearchParams(location.search).get("s") ?? "chat";
 // ?lk=<token>&lkurl=ws://…: screen share against a real LiveKit server (tests).
 const lk = new URLSearchParams(location.search).get("lk");
 const lkUrl = new URLSearchParams(location.search).get("lkurl") ?? "ws://127.0.0.1:7880";
-const me = { id: "1001", name: "ash", avatarV: 1, status: "" };
+const me = { id: "1001", name: "ash", avatarV: 1, accent: 1, status: "" };
 const names = ["ash", "mira", "jun", "tobias", "nell", "kaito", "rosa", "ezra"];
-const members = names.map((n, i) => ({ id: String(1001 + i), name: n, avatarV: i % 3 === 2 ? 0 : 1, status: "" }));
+const members = names.map((n, i) => ({ id: String(1001 + i), name: n, avatarV: i % 3 === 2 ? 0 : 1, accent: i === 0 ? 1 : (i * 3) % 9, status: "" }));
 const server: Server = {
   id: "9001", name: "Night Shift", ownerId: new URLSearchParams(location.search).has("member") ? "1002" : "1001", memberIds: members.map((m) => m.id), memberCount: members.length,
   reads: { "7003": "1", "7001": "10001997" }, online: ["1001", "1002", "1003", "1005"], activities: { "1002": "VALORANT", "1005": "Counter-Strike 2" },
+  statuses: { "1003": { mode: "idle", emoji: "", text: "", until: 0 }, "1004": { mode: "online", emoji: "📚", text: "studying, ping me later", until: 0 }, "1005": { mode: "dnd", emoji: "", text: "", until: 0 } },
   channels: [
     { id: "7001", serverId: "9001", name: "general", voice: false, topic: "Anything goes. Be kind.", lastId: "0" },
     { id: "7002", serverId: "9001", name: "design-crit", voice: false, topic: "", lastId: "0" },
@@ -80,6 +81,10 @@ mockIPC((cmd, args) => {
     case "perf_stats": return { rows: [{ name: "text: remote input->paint (synced)", count: 600, p50_ms: 21.3, p95_ms: 28.7, p99_ms: 33.1, max_ms: 40 }], startup: { processToPaintMs: 657, mainToPaintMs: 610, mainToConnectedMs: 2.5 }, clockOffsetMs: 0.1, bestRttMs: 0.4, rssMb: 41 };
     case "create_invite": return "hopon://invite/Kq7xN2pLmA";
     case "avatar": return fakeAvatar(String((args as { userId: string }).userId));
+    case "get_profile": { const id = String((args as { userId: string }).userId); const u = [me, ...members].find((m) => m.id === id) ?? me;
+      return { user: u, username: u.name.toLowerCase(), bio: id === "1002" ? "Diamond 2 on a good day. Duo queue after 9." : "", bannerV: 0, createdAt: Date.UTC(2025, 2, 14), joinedAt: Date.UTC(2025, 5, 2) }; }
+    case "banner": return null;
+    case "idle_seconds": return null;
     case "screen_grant": return lk ? [lkUrl, lk] : new Promise(() => {}); // never connects in the preview (unless ?lk=)
     case "update_check": return { current: "0.4.2", latest: "0.4.3", available: true, notes: "" };
     case "gif_search": return { enabled: true, results: Array.from({ length: 12 }, (_, i) => ({ id: `klipy:${i}`, title: `gif ${i}`, preview: `https://media.example/g${i}.gif`, width: 320, height: 200 + (i % 3) * 60 })) };
@@ -111,7 +116,7 @@ const voice = scene === "voice" || scene === "chat"
   ? [{ userId: "1002", channelId: "7101", muted: false, deafened: false }, { userId: "1004", channelId: "7101", muted: true, deafened: false }, ...(scene === "voice" ? [{ userId: "1001", channelId: "7101", muted: false, deafened: false }] : [])]
   : [];
 onEvent({ t: "conn", state: "online", rttMs: 0.4 });
-onEvent({ t: "session", user, servers: scene === "login" ? servers : [...servers, dmServer], users: members, voice, username: "ash", friends, media: scene === "voice" && !lk
+onEvent({ t: "session", user, servers: scene === "login" ? servers : [...servers, dmServer], users: members, voice, username: "ash", friends, status: { mode: "online", emoji: "", text: "", until: 0 }, media: scene === "voice" && !lk
   ? [{ userId: "1002", channelId: "7101", source: "screen", active: true }]
   : [] });
 if (scene === "voice") {

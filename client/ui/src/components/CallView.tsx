@@ -5,10 +5,10 @@
 // Controls along the bottom: Camera, Stream, Mic, Leave; on the right the
 // stream's volume, picture in picture and Exit.
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { cameraTrack, disconnectScreens, GRID, popOut, screen, SELF, setCameraEnabled, setFullscreen, setScreen, setViewingCameras, watch } from "../screen";
+import { cameraTrack, disconnectScreens, GRID, popOut, screen, SELF, setCameraEnabled, setFullscreen, setScreen, setViewingCameras, setWindowFull, watch } from "../screen";
 import { StreamVideo, StreamVolume } from "./Streams";
 import { mediaErr, StreamButton } from "./Stage";
-import { CameraIcon, ExitFullIcon, FocusIcon, MicIcon, MicOffIcon, PhoneOffIcon, PipIcon, TilesIcon } from "./icons";
+import { CameraIcon, CloseIcon, ExitFullIcon, FocusIcon, FullIcon, MicIcon, MicOffIcon, PhoneOffIcon, PipIcon, TilesIcon } from "./icons";
 import { Avatar } from "./Avatar";
 import { call } from "../ipc";
 import { s, userName } from "../store";
@@ -53,7 +53,8 @@ export default function CallView() {
   let t = 0;
   const poke = () => { setIdle(false); clearTimeout(t); t = window.setTimeout(() => setIdle(true), 2500); };
   const key = (e: KeyboardEvent) => {
-    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setFullscreen(null); }
+    // Esc leaves window fullscreen first (the call view stays, windowed); again closes it.
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); if (screen.windowFull) setWindowFull(false); else setFullscreen(null); }
   };
   onMount(() => { window.addEventListener("keydown", key, true); poke(); });
   onCleanup(() => { window.removeEventListener("keydown", key, true); clearTimeout(t); });
@@ -171,7 +172,12 @@ export default function CallView() {
           <Show when={focus() && (focus() === me() ? screen.sharing : screen.watching.includes(focus()!))}>
             <button class="icon-btn" title="Picture in picture: keep watching while you use HopOn" aria-label="Picture in picture" onClick={pip}><PipIcon /></button>
           </Show>
-          <button class="icon-btn" title="Exit fullscreen (Esc)" aria-label="Exit fullscreen" onClick={() => setFullscreen(null)}><ExitFullIcon /></button>
+          <Show when={screen.windowFull} fallback={
+            <button class="icon-btn" title="Fullscreen" aria-label="Fullscreen" onClick={() => setWindowFull(true)}><FullIcon /></button>
+          }>
+            <button class="icon-btn" title="Exit fullscreen (Esc): keep this view in the window, beside other apps" aria-label="Exit fullscreen" onClick={() => setWindowFull(false)}><ExitFullIcon /></button>
+          </Show>
+          <button class="icon-btn" title="Close call view" aria-label="Close call view" onClick={() => setFullscreen(null)}><CloseIcon /></button>
         </span>
       </footer>
     </div>

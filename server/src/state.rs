@@ -7,7 +7,7 @@ use crate::{auth::Keys, config::Config, metrics::Metrics, persist::PersistOp};
 use anyhow::Result;
 use bytes::Bytes;
 use dashmap::DashMap;
-use hopon_shared::{encode, ids::IdGen, ChannelInfo, ChannelKind, Friend, FriendState, Id, MediaPresence, MediaSource, ServerFrame, ServerInfo, UserInfo, S2C};
+use hopon_shared::{encode, ids::IdGen, ChannelInfo, ChannelKind, Friend, FriendState, Id, MediaPresence, MediaSource, ServerFrame, ServerInfo, StatusMode, UserInfo, UserStatus, S2C};
 use parking_lot::{Mutex, RwLock};
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
@@ -118,6 +118,10 @@ pub struct State {
     pub gifs: DashMap<String, (hopon_shared::Attachment, std::time::Instant)>,
     /// What each connected user is playing (cleared when they go offline).
     pub activities: DashMap<Id, String>,
+    /// Chosen presence and custom status of each connected user (loaded at sign-in).
+    pub statuses: DashMap<Id, UserStatus>,
+    /// Connections whose device reported idle, per user.
+    pub idle_conns: DashMap<Id, HashSet<u64>>,
     next_conn: AtomicU64,
 }
 
@@ -160,6 +164,8 @@ impl State {
             nonce_locks: DashMap::new(),
             gifs: DashMap::new(),
             activities: DashMap::new(),
+            statuses: DashMap::new(),
+            idle_conns: DashMap::new(),
             next_conn: AtomicU64::new(1),
         }
     }
@@ -195,9 +201,65 @@ impl State {
         self.conns.get(&user).map_or(false, |v| !v.is_empty())
     }
 
-    /// Tell every server the user is in about an online/offline change.
-    /// Tell the user's servers what they're playing ("" = nothing).
+    pub fn is_invisible(&self, user: Id) -> bool {
+        self.statuses.get(&user).map_or(false, |s| s.mode == StatusMode::Invisible)
+    }
+
+    /// Connected and not invisible: what everyone else sees as online.
+    pub fn is_visible(&self, user: Id) -> bool {
+        self.is_online(user) && !self.is_invisible(user)
+    }
+
+    /// Every connection of the user reported idle.
+    pub fn is_idle(&self, user: Id) -> bool {
+        let Some(idle) = self.idle_conns.get(&user) else { return false };
+        self.conns.get(&user).map_or(false, |v| !v.is_empty() && v.iter().all(|(c, _)| idle.contains(c)))
+    }
+
+    /// How others see the user right now (None while offline or invisible).
+    pub fn shown_status(&self, user: Id) -> Option<UserStatus> {
+        if !self.is_visible(user) {
+            return None;
+        }
+        let mut s = self.statuses.get(&user).map(|s| s.current(hopon_shared::time::now_us() / 1000)).unwrap_or_default();
+        if s.mode != StatusMode::Dnd && self.is_idle(user) {
+            s.mode = StatusMode::Idle;
+        }
+        Some(s)
+    }
+
+    /// (user, status) for the visible users among `users` whose status isn't plain online.
+    pub fn statuses_of(&self, users: impl IntoIterator<Item = Id>) -> Vec<(Id, UserStatus)> {
+        let now = hopon_shared::time::now_us() / 1000;
+        users
+            .into_iter()
+            .filter_map(|u| self.shown_status(u).filter(|s| !s.is_plain(now)).map(|s| (u, s)))
+            .collect()
+    }
+
+    /// Tell the user's servers (and their own devices) about a status change.
+    pub fn announce_status(&self, user: Id) {
+        let shown = self.shown_status(user);
+        if let Some(status) = shown.clone() {
+            let f = Bytes::from(encode(&ServerFrame { req: 0, msg: S2C::Status { user_id: user, status } }));
+            for g in self.guilds.iter().filter(|g| g.is_member(user)) {
+                g.publish(f.clone());
+            }
+        }
+        // Your own devices get your chosen status (they may not share a server
+        // with you, and while invisible nothing goes to the servers).
+        let own = self.statuses.get(&user).map(|s| s.clone()).unwrap_or_default();
+        let own = UserStatus { mode: shown.map_or(own.mode, |s| if s.mode == StatusMode::Idle { StatusMode::Idle } else { own.mode }), ..own };
+        let f = Bytes::from(encode(&ServerFrame { req: 0, msg: S2C::Status { user_id: user, status: own } }));
+        self.to_user(user, || Out::Frame(f.clone()));
+    }
+
+    /// Tell the user's servers what they're playing ("" = nothing). Nothing
+    /// is announced while they're invisible.
     pub fn announce_activity(&self, user: Id, game: &str) {
+        if !game.is_empty() && !self.is_visible(user) {
+            return;
+        }
         let f = Bytes::from(hopon_shared::encode(&hopon_shared::ServerFrame {
             req: 0,
             msg: hopon_shared::S2C::Activity {
@@ -210,8 +272,10 @@ impl State {
         }
     }
 
+    /// Online/offline as others see it. Going offline clears the game shown;
+    /// coming online re-sends the game and status.
     pub fn announce_presence(&self, user: Id, online: bool) {
-        if !online && self.activities.remove(&user).is_some() {
+        if !online && self.activities.contains_key(&user) {
             self.announce_activity(user, "");
         }
         let f = Bytes::from(hopon_shared::encode(&hopon_shared::ServerFrame {
@@ -224,6 +288,24 @@ impl State {
         for g in self.guilds.iter().filter(|g| g.is_member(user)) {
             g.publish(f.clone());
         }
+        if online {
+            if let Some(game) = self.activities.get(&user).map(|g| g.clone()) {
+                self.announce_activity(user, &game);
+            }
+            self.announce_status(user);
+        }
+    }
+
+    /// The user's last connection is gone for good: forget their live state and
+    /// tell everyone who could see them.
+    pub fn went_offline(&self, user: Id) {
+        let was_visible = !self.is_invisible(user);
+        if was_visible {
+            self.announce_presence(user, false);
+        }
+        self.activities.remove(&user);
+        self.statuses.remove(&user);
+        self.idle_conns.remove(&user);
     }
 
     /// Owner of a server (DB lookup; admin actions are rare).
@@ -407,8 +489,8 @@ impl State {
 
     /// Everyone `user` is friends with or has a request with, seen from `user`'s side.
     pub async fn load_friends(&self, user: Id) -> Result<Vec<Friend>> {
-        let rows: Vec<(i64, String, String, i32, i64, bool, Option<i64>)> = sqlx::query_as(
-            "SELECT u.id, u.name, COALESCE(u.display_name, u.name), u.avatar_v, f.requested_by, f.accepted, \
+        let rows: Vec<(i64, String, String, i32, i16, i64, bool, Option<i64>)> = sqlx::query_as(
+            "SELECT u.id, u.name, COALESCE(u.display_name, u.name), u.avatar_v, u.accent, f.requested_by, f.accepted, \
                     (SELECT s.id FROM servers s WHERE s.dm_pair = f.user_a::text || ':' || f.user_b::text) \
              FROM friendships f JOIN users u ON u.id = CASE WHEN f.user_a = $1 THEN f.user_b ELSE f.user_a END \
              WHERE f.user_a = $1 OR f.user_b = $1 ORDER BY u.name_lower",
@@ -418,8 +500,8 @@ impl State {
         .await?;
         Ok(rows
             .into_iter()
-            .map(|(id, username, name, avatar_v, by, accepted, dm)| Friend {
-                user: UserInfo { id, name, avatar_v: avatar_v as u32 },
+            .map(|(id, username, name, avatar_v, accent, by, accepted, dm)| Friend {
+                user: UserInfo { id, name, avatar_v: avatar_v as u32, accent: accent as u8 },
                 username,
                 state: if accepted { FriendState::Friends } else if by == user { FriendState::Outgoing } else { FriendState::Incoming },
                 dm_server: dm,
@@ -497,28 +579,30 @@ impl State {
                 reads: vec![],
                 online: vec![],
                 activities: vec![],
+                statuses: vec![],
                 dm_with: dm.as_deref().and_then(parse_dm).map(|(a, b)| if a == user { b } else { a }),
             })
             .collect();
         // A DM's two people travel with it (the other person may not be a friend any more).
         let dm_ids: Vec<i64> = out.iter().filter(|s| s.dm_with.is_some()).map(|s| s.id).collect();
         if !dm_ids.is_empty() {
-            let people: Vec<(i64, i64, String, i32)> = sqlx::query_as(
-                "SELECT m.server_id, u.id, COALESCE(u.display_name, u.name), u.avatar_v FROM members m JOIN users u ON u.id = m.user_id WHERE m.server_id = ANY($1)",
+            let people: Vec<(i64, i64, String, i32, i16)> = sqlx::query_as(
+                "SELECT m.server_id, u.id, COALESCE(u.display_name, u.name), u.avatar_v, u.accent FROM members m JOIN users u ON u.id = m.user_id WHERE m.server_id = ANY($1)",
             )
             .bind(&dm_ids)
             .fetch_all(&self.db)
             .await?;
-            for (sid, uid, name, av) in people {
+            for (sid, uid, name, av, accent) in people {
                 if let Some(s) = out.iter_mut().find(|s| s.id == sid) {
-                    s.members.push(UserInfo { id: uid, name, avatar_v: av as u32 });
+                    s.members.push(UserInfo { id: uid, name, avatar_v: av as u32, accent: accent as u8 });
                     s.member_ids.push(uid);
-                    if self.is_online(uid) {
+                    if self.is_visible(uid) {
                         s.online.push(uid);
+                        if let Some(g) = self.activities.get(&uid) {
+                            s.activities.push((uid, g.clone()));
+                        }
                     }
-                    if let Some(g) = self.activities.get(&uid) {
-                        s.activities.push((uid, g.clone()));
-                    }
+                    s.statuses.extend(self.statuses_of([uid]));
                 }
             }
         }
@@ -558,11 +642,11 @@ impl State {
         server_id: Id,
         offset: u32,
         limit: u16,
-    ) -> Result<(Vec<UserInfo>, Vec<Id>, Vec<(Id, String)>)> {
+    ) -> Result<(Vec<UserInfo>, Vec<Id>, Vec<(Id, String)>, Vec<(Id, UserStatus)>)> {
         let guild = self.guild(server_id).await?;
         anyhow::ensure!(guild.is_member(user), "not a member");
-        let rows: Vec<(i64, String, i32)> = sqlx::query_as(
-            "SELECT u.id, COALESCE(u.display_name, u.name), u.avatar_v FROM members m JOIN users u ON u.id = m.user_id \
+        let rows: Vec<(i64, String, i32, i16)> = sqlx::query_as(
+            "SELECT u.id, COALESCE(u.display_name, u.name), u.avatar_v, u.accent FROM members m JOIN users u ON u.id = m.user_id \
              WHERE m.server_id = $1 ORDER BY u.name_lower, u.id LIMIT $2 OFFSET $3",
         )
         .bind(server_id)
@@ -572,22 +656,24 @@ impl State {
         .await?;
         let users: Vec<UserInfo> = rows
             .into_iter()
-            .map(|(id, name, avatar_v)| UserInfo {
+            .map(|(id, name, avatar_v, accent)| UserInfo {
                 id,
                 name,
                 avatar_v: avatar_v as u32,
+                accent: accent as u8,
             })
             .collect();
-        let online = users
+        let online: Vec<Id> = users
             .iter()
-            .filter(|u| self.is_online(u.id))
+            .filter(|u| self.is_visible(u.id))
             .map(|u| u.id)
             .collect();
-        let activities = users
+        let activities = online
             .iter()
-            .filter_map(|u| self.activities.get(&u.id).map(|g| (u.id, g.clone())))
+            .filter_map(|u| self.activities.get(u).map(|g| (*u, g.clone())))
             .collect();
-        Ok((users, online, activities))
+        let statuses = self.statuses_of(online.iter().copied());
+        Ok((users, online, activities, statuses))
     }
 
     pub async fn search_members(
@@ -600,18 +686,19 @@ impl State {
         let guild = self.guild(server_id).await?;
         anyhow::ensure!(guild.is_member(user), "not a member");
         let prefix = query.to_lowercase();
-        let rows: Vec<(i64, String, i32)> = sqlx::query_as(
-            "SELECT u.id, COALESCE(u.display_name, u.name), u.avatar_v FROM members m JOIN users u ON u.id = m.user_id \
+        let rows: Vec<(i64, String, i32, i16)> = sqlx::query_as(
+            "SELECT u.id, COALESCE(u.display_name, u.name), u.avatar_v, u.accent FROM members m JOIN users u ON u.id = m.user_id \
              WHERE m.server_id = $1 AND (left(lower(COALESCE(u.display_name, u.name)), char_length($2)) = $2 \
                OR left(u.name_lower, char_length($2)) = $2) ORDER BY u.name_lower, u.id LIMIT $3",
         )
         .bind(server_id).bind(prefix).bind(limit as i64).fetch_all(&self.db).await?;
         Ok(rows
             .into_iter()
-            .map(|(id, name, avatar_v)| UserInfo {
+            .map(|(id, name, avatar_v, accent)| UserInfo {
                 id,
                 name,
                 avatar_v: avatar_v as u32,
+                accent: accent as u8,
             })
             .collect())
     }
@@ -624,14 +711,15 @@ impl State {
     ) -> Result<Option<UserInfo>> {
         let guild = self.guild(server_id).await?;
         anyhow::ensure!(guild.is_member(user), "not a member");
-        let row: Option<(i64, String, i32)> = sqlx::query_as(
-            "SELECT u.id, COALESCE(u.display_name, u.name), u.avatar_v FROM members m JOIN users u ON u.id = m.user_id WHERE m.server_id = $1 AND u.id = $2",
+        let row: Option<(i64, String, i32, i16)> = sqlx::query_as(
+            "SELECT u.id, COALESCE(u.display_name, u.name), u.avatar_v, u.accent FROM members m JOIN users u ON u.id = m.user_id WHERE m.server_id = $1 AND u.id = $2",
         )
         .bind(server_id).bind(user_id).fetch_optional(&self.db).await?;
-        Ok(row.map(|(id, name, avatar_v)| UserInfo {
+        Ok(row.map(|(id, name, avatar_v, accent)| UserInfo {
             id,
             name,
             avatar_v: avatar_v as u32,
+            accent: accent as u8,
         }))
     }
 }

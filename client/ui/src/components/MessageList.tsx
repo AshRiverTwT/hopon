@@ -11,6 +11,7 @@ import { EmojiPicker } from "./EmojiPicker";
 import { showsHeader } from "../merge";
 import { cmpId, type Msg } from "../types";
 import { Avatar } from "./Avatar";
+import { accentOf, openProfile } from "../profile";
 import { cellClass, GAMES, parseGameResult } from "../games";
 import Attachments from "./Attachments";
 import { fitBox } from "../media";
@@ -270,8 +271,8 @@ function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean;
       </Show>
       <Show when={p.header}>
         <div class="meta">
-          <Avatar id={p.m.authorId} size={40} class="gutter-av" />
-          <span class="author">{userName(p.m.authorId)}</span>
+          <button class="gutter-av" tabIndex={-1} aria-label={`${userName(p.m.authorId)}'s profile`} onClick={(e) => openProfile(p.m.authorId, e.currentTarget, e)}><Avatar id={p.m.authorId} size={40} /></button>
+          <button class="author" style={{ color: accentOf(p.m.authorId) || undefined }} onClick={(e) => openProfile(p.m.authorId, e.currentTarget, e)}>{userName(p.m.authorId)}</button>
           <span class="time" title={new Date(p.m.ts).toLocaleString()}>{fmtTime(p.m.ts)}</span>
         </div>
       </Show>

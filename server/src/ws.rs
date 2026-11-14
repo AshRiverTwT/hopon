@@ -247,6 +247,9 @@ impl Session {
 
     fn cleanup(&mut self) {
         if let Some((uid, _)) = self.user.take() {
+            if let Some(mut idle) = self.st.idle_conns.get_mut(&uid) {
+                idle.remove(&self.conn);
+            }
             if self.st.unregister(uid, self.conn) {
                 // Grace period: a quick reconnect shouldn't flash "offline".
                 let st = self.st.clone();
@@ -254,9 +257,12 @@ impl Session {
                     tokio::time::sleep(std::time::Duration::from_millis(st.cfg.presence_grace_ms))
                         .await;
                     if !st.is_online(uid) {
-                        st.announce_presence(uid, false);
+                        st.went_offline(uid);
                     }
                 });
+            } else if self.st.is_visible(uid) {
+                // Idle is "every device idle": this device leaving can change it.
+                self.st.announce_status(uid);
             }
             self.leave_voice(uid);
         }
@@ -450,17 +456,27 @@ impl Session {
                 })
                 .collect()
         };
+        // Status first: an invisible user must never be announced online.
+        let (avatar_v, prefs, display_name, accent, status_text, status_emoji, status_until, status_mode): (i32, String, String, i16, String, String, i64, i16) =
+            sqlx::query_as(
+                "SELECT avatar_v, prefs, COALESCE(display_name, name), accent, custom_status, status_emoji, status_until, status_mode \
+                 FROM users WHERE id = $1",
+            )
+            .bind(uid)
+            .fetch_one(&self.st.db)
+            .await
+            .map_err(internal)?;
+        let status = UserStatus { mode: mode_from_i16(status_mode), emoji: status_emoji, text: status_text, until: status_until }
+            .current(now_us() / 1000);
+        self.st.statuses.insert(uid, status.clone());
         self.user = Some((uid, name.clone()));
-        if self.st.register(uid, self.conn, self.tx.clone()) {
+        let first = self.st.register(uid, self.conn, self.tx.clone());
+        if first && self.st.is_visible(uid) {
             self.st.announce_presence(uid, true);
+        } else if self.st.is_visible(uid) {
+            self.st.announce_status(uid);
         }
         let access_token = self.st.keys.access_token(uid, &name);
-        let (avatar_v, prefs, display_name): (i32, String, String) =
-            sqlx::query_as("SELECT avatar_v, prefs, COALESCE(display_name, name) FROM users WHERE id = $1")
-                .bind(uid)
-                .fetch_one(&self.st.db)
-                .await
-                .map_err(internal)?;
         let media = self.st.media.iter()
             .filter(|entry| self.guilds.contains(&entry.server_id))
             .map(|entry| *entry.value())
@@ -473,6 +489,7 @@ impl Session {
                     id: uid,
                     name: display_name,
                     avatar_v: avatar_v as u32,
+                    accent: accent as u8,
                 },
                 access_token,
                 refresh_token,
@@ -482,6 +499,7 @@ impl Session {
                 prefs,
                 username: name.to_owned(),
                 friends,
+                status,
             },
         )
         .await;
@@ -833,7 +851,7 @@ impl Session {
                     return Err((ErrorCode::Forbidden, "not a member".into()));
                 }
                 let limit = limit.clamp(1, 100);
-                let (members, online, activities) = self
+                let (members, online, activities, statuses) = self
                     .st
                     .load_members(uid, server_id, offset, limit)
                     .await
@@ -846,6 +864,7 @@ impl Session {
                         members,
                         online,
                         activities,
+                        statuses,
                     },
                 )
                 .await;
@@ -971,7 +990,7 @@ impl Session {
                     .execute(&mut *tx)
                     .await
                     .map_err(internal)?;
-                sqlx::query("INSERT INTO members (server_id, user_id) VALUES ($1, $2)")
+                sqlx::query("INSERT INTO members (server_id, user_id, joined_at) VALUES ($1, $2, now())")
                     .bind(sid)
                     .bind(uid)
                     .execute(&mut *tx)
@@ -1062,12 +1081,12 @@ impl Session {
                 if self.st.guild(sid).await.map_err(internal)?.is_dm() {
                     return Err((ErrorCode::NotFound, "invite is invalid or expired".into()));
                 }
-                let inserted = sqlx::query("INSERT INTO members (server_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+                let inserted = sqlx::query("INSERT INTO members (server_id, user_id, joined_at) VALUES ($1, $2, now()) ON CONFLICT DO NOTHING")
                     .bind(sid).bind(uid).execute(&self.st.db).await.map_err(internal)?.rows_affected() == 1;
                 let g = self.st.guild(sid).await.map_err(internal)?;
                 g.members.write().insert(uid);
                 if inserted {
-                    let (av, display_name): (i32, String) = sqlx::query_as("SELECT avatar_v, COALESCE(display_name, name) FROM users WHERE id = $1")
+                    let (av, display_name, accent): (i32, String, i16) = sqlx::query_as("SELECT avatar_v, COALESCE(display_name, name), accent FROM users WHERE id = $1")
                         .bind(uid)
                         .fetch_one(&self.st.db)
                         .await
@@ -1080,6 +1099,7 @@ impl Session {
                                 id: uid,
                                 name: display_name,
                                 avatar_v: av as u32,
+                                accent: accent as u8,
                             },
                         },
                     ));
@@ -1205,12 +1225,12 @@ impl Session {
                 if name.chars().count() > 32 || name.chars().any(char::is_control) {
                     return Err((ErrorCode::BadRequest, "display name must be at most 32 characters with no control characters".into()));
                 }
-                let (name, avatar_v): (String, i32) = sqlx::query_as(
+                let (name, avatar_v, accent): (String, i32, i16) = sqlx::query_as(
                     "UPDATE users SET display_name = NULLIF($2, '') WHERE id = $1 \
-                     RETURNING COALESCE(display_name, name), avatar_v",
+                     RETURNING COALESCE(display_name, name), avatar_v, accent",
                 )
                 .bind(uid).bind(name).fetch_one(&self.st.db).await.map_err(internal)?;
-                self.send_profile(req, UserInfo { id: uid, name, avatar_v: avatar_v as u32 }).await;
+                self.send_profile(req, UserInfo { id: uid, name, avatar_v: avatar_v as u32, accent: accent as u8 }).await;
                 Ok(())
             }
             C2S::SetAvatar { data } => {
@@ -1224,12 +1244,13 @@ impl Session {
                     ));
                 }
                 let blob = (!data.is_empty()).then_some(data);
-                let (v, display_name): (i32, String) = sqlx::query_as("UPDATE users SET avatar = $2, avatar_v = avatar_v + 1 WHERE id = $1 RETURNING avatar_v, COALESCE(display_name, name)")
+                let (v, display_name, accent): (i32, String, i16) = sqlx::query_as("UPDATE users SET avatar = $2, avatar_v = avatar_v + 1 WHERE id = $1 RETURNING avatar_v, COALESCE(display_name, name), accent")
                     .bind(uid).bind(blob).fetch_one(&self.st.db).await.map_err(internal)?;
                 let user = UserInfo {
                     id: uid,
                     name: display_name,
                     avatar_v: v as u32,
+                    accent: accent as u8,
                 };
                 self.send_profile(req, user).await;
                 Ok(())
@@ -1249,6 +1270,156 @@ impl Session {
                         avatar_v: v as u32,
                         data: data.unwrap_or_default(),
                     },
+                )
+                .await;
+                Ok(())
+            }
+            C2S::SetStatus { status } => {
+                let text: String = status.text.trim().chars().filter(|c| !c.is_control()).collect();
+                if text.chars().count() > MAX_STATUS_CHARS {
+                    return Err((ErrorCode::BadRequest, format!("status must be at most {MAX_STATUS_CHARS} characters")));
+                }
+                if !status.emoji.is_empty() && !valid_emoji(&status.emoji) {
+                    return Err((ErrorCode::BadRequest, "status emoji must be one emoji".into()));
+                }
+                // Idle comes from SetIdle; a stored mode is online, do not disturb or invisible.
+                let mode = if status.mode == StatusMode::Idle { StatusMode::Online } else { status.mode };
+                let status = UserStatus { mode, emoji: status.emoji, text, until: status.until.max(0) }.current(now_us() / 1000);
+                sqlx::query("UPDATE users SET custom_status = $2, status_emoji = $3, status_until = $4, status_mode = $5 WHERE id = $1")
+                    .bind(uid)
+                    .bind(&status.text)
+                    .bind(&status.emoji)
+                    .bind(status.until)
+                    .bind(mode_to_i16(mode))
+                    .execute(&self.st.db)
+                    .await
+                    .map_err(internal)?;
+                let was_visible = self.st.is_visible(uid);
+                self.st.statuses.insert(uid, status);
+                match (was_visible, self.st.is_visible(uid)) {
+                    (true, false) => self.st.announce_presence(uid, false),
+                    (false, true) => self.st.announce_presence(uid, true),
+                    _ => {}
+                }
+                self.st.announce_status(uid);
+                self.send(req, S2C::Ok).await;
+                Ok(())
+            }
+            C2S::SetIdle { idle } => {
+                let before = self.st.is_idle(uid);
+                {
+                    let mut set = self.st.idle_conns.entry(uid).or_default();
+                    if idle {
+                        set.insert(self.conn);
+                    } else {
+                        set.remove(&self.conn);
+                    }
+                }
+                if before != self.st.is_idle(uid) {
+                    self.st.announce_status(uid);
+                }
+                self.send(req, S2C::Ok).await;
+                Ok(())
+            }
+            C2S::SetProfile { bio, accent } => {
+                let bio = bio.trim();
+                if bio.chars().count() > MAX_BIO_CHARS || bio.chars().any(|c| c.is_control() && c != '\n') {
+                    return Err((ErrorCode::BadRequest, format!("bio must be at most {MAX_BIO_CHARS} characters")));
+                }
+                if accent > MAX_ACCENT {
+                    return Err((ErrorCode::BadRequest, "unknown accent colour".into()));
+                }
+                let (name, avatar_v): (String, i32) = sqlx::query_as(
+                    "UPDATE users SET bio = $2, accent = $3 WHERE id = $1 RETURNING COALESCE(display_name, name), avatar_v",
+                )
+                .bind(uid)
+                .bind(bio)
+                .bind(accent as i16)
+                .fetch_one(&self.st.db)
+                .await
+                .map_err(internal)?;
+                self.send_profile(req, UserInfo { id: uid, name, avatar_v: avatar_v as u32, accent }).await;
+                Ok(())
+            }
+            C2S::SetBanner { data } => {
+                if data.len() > MAX_BANNER_BYTES {
+                    return Err((ErrorCode::BadRequest, "image too large (max 56 KB)".into()));
+                }
+                if !data.is_empty() && image_mime(&data).is_none() {
+                    return Err((ErrorCode::BadRequest, "banner must be PNG, JPEG or WebP".into()));
+                }
+                let blob = (!data.is_empty()).then_some(data);
+                let removed = blob.is_none();
+                let v: i32 = sqlx::query_scalar("UPDATE users SET banner = $2, banner_v = CASE WHEN $3 THEN 0 ELSE banner_v + 1 END WHERE id = $1 RETURNING banner_v")
+                    .bind(uid)
+                    .bind(blob)
+                    .bind(removed)
+                    .fetch_one(&self.st.db)
+                    .await
+                    .map_err(internal)?;
+                self.send(req, S2C::Banner { user_id: uid, banner_v: v as u32, data: vec![] }).await;
+                Ok(())
+            }
+            C2S::GetBanner { user_id } => {
+                let row: Option<(Option<Vec<u8>>, i32)> = sqlx::query_as("SELECT banner, banner_v FROM users WHERE id = $1")
+                    .bind(user_id)
+                    .fetch_optional(&self.st.db)
+                    .await
+                    .map_err(internal)?;
+                let (data, v) = row.ok_or((ErrorCode::NotFound, "no such user".into()))?;
+                self.send(req, S2C::Banner { user_id, banner_v: v as u32, data: data.unwrap_or_default() }).await;
+                Ok(())
+            }
+            C2S::GetProfile { user_id, server_id } => {
+                // Only people you share a server with, or have a friendship or request with.
+                let shared = user_id == uid
+                    || self.guilds.iter().any(|g| self.st.guilds.get(g).map_or(false, |g| g.is_member(user_id)))
+                    || {
+                        let (a, b) = crate::state::pair(uid, user_id);
+                        sqlx::query_scalar::<_, i32>("SELECT 1 FROM friendships WHERE user_a = $1 AND user_b = $2")
+                            .bind(a)
+                            .bind(b)
+                            .fetch_optional(&self.st.db)
+                            .await
+                            .map_err(internal)?
+                            .is_some()
+                    };
+                if !shared {
+                    return Err((ErrorCode::NotFound, "no such user".into()));
+                }
+                let row: Option<(String, String, i32, i16, String, i32, i64)> = sqlx::query_as(
+                    "SELECT name, COALESCE(display_name, name), avatar_v, accent, bio, banner_v, \
+                            (extract(epoch FROM created_at) * 1000)::bigint FROM users WHERE id = $1",
+                )
+                .bind(user_id)
+                .fetch_optional(&self.st.db)
+                .await
+                .map_err(internal)?;
+                let (username, name, avatar_v, accent, bio, banner_v, created_at) =
+                    row.ok_or((ErrorCode::NotFound, "no such user".into()))?;
+                let joined_at = match server_id {
+                    Some(sid) if self.guilds.contains(&sid) => sqlx::query_scalar::<_, Option<i64>>(
+                        "SELECT (extract(epoch FROM joined_at) * 1000)::bigint FROM members WHERE server_id = $1 AND user_id = $2",
+                    )
+                    .bind(sid)
+                    .bind(user_id)
+                    .fetch_optional(&self.st.db)
+                    .await
+                    .map_err(internal)?
+                    .flatten()
+                    .unwrap_or(0),
+                    _ => 0,
+                };
+                self.send(
+                    req,
+                    S2C::Profile(Profile {
+                        user: UserInfo { id: user_id, name, avatar_v: avatar_v as u32, accent: accent as u8 },
+                        username,
+                        bio,
+                        banner_v: banner_v as u32,
+                        created_at,
+                        joined_at,
+                    }),
                 )
                 .await;
                 Ok(())
@@ -1465,7 +1636,7 @@ impl Session {
                     .bind(sid).bind(uid).bind(crate::state::dm_key(uid, other))
                     .execute(&mut *tx).await.map_err(internal)?.rows_affected() == 1;
                 if made {
-                    sqlx::query("INSERT INTO members (server_id, user_id) VALUES ($1, $2), ($1, $3)")
+                    sqlx::query("INSERT INTO members (server_id, user_id, joined_at) VALUES ($1, $2, now()), ($1, $3, now())")
                         .bind(sid).bind(uid).bind(other).execute(&mut *tx).await.map_err(internal)?;
                     sqlx::query("INSERT INTO channels (id, server_id, name, kind) VALUES ($1, $2, 'dm', 0)")
                         .bind(text_id).bind(sid).execute(&mut *tx).await.map_err(internal)?;
@@ -1777,4 +1948,20 @@ pub async fn welcome(st: &Arc<State>, server_id: Id, user: Id) {
 fn internal<E: std::fmt::Display>(e: E) -> (ErrorCode, String) {
     tracing::error!("internal: {e}");
     (ErrorCode::Internal, "internal error".into())
+}
+
+fn mode_from_i16(m: i16) -> StatusMode {
+    match m {
+        2 => StatusMode::Dnd,
+        3 => StatusMode::Invisible,
+        _ => StatusMode::Online,
+    }
+}
+
+fn mode_to_i16(m: StatusMode) -> i16 {
+    match m {
+        StatusMode::Online | StatusMode::Idle => 0,
+        StatusMode::Dnd => 2,
+        StatusMode::Invisible => 3,
+    }
 }

@@ -7,7 +7,10 @@ let closeTimer = 0;
 
 import { prefs } from "./prefs";
 
-export const soundsEnabled = () => prefs.sounds;
+let quiet = () => false;
+/** Do not disturb silences the join/leave chimes too (set by profile.ts). */
+export const setQuietCheck = (f: () => boolean) => { quiet = f; };
+export const soundsEnabled = () => prefs.sounds && !quiet();
 
 /** Call from the click that joins voice (satisfies autoplay rules). */
 export function openAudio() {

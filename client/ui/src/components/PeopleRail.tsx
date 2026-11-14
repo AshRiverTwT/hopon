@@ -4,6 +4,8 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { call } from "../ipc";
 import { currentServer, loadMoreMembers, s, serverUsers } from "../store";
 import { Avatar } from "./Avatar";
+import { PresenceDot, StatusLine } from "./PresenceDot";
+import { customOf, openProfile } from "../profile";
 
 export default function PeopleRail() {
   const ROW = 54;
@@ -75,11 +77,16 @@ export default function PeopleRail() {
         <li class="rail-spacer" style={{ height: `${topSpace()}px` }} aria-hidden="true" />
         <For each={page()}>
           {(p) => (
-            <li ref={(el) => observeRow(el, p.id)} classList={{ off: !p.online, speaking: s.speaking.includes(p.id) }} title={p.game ? `${p.name} · Playing ${p.game}` : p.name}>
-              <span class="rail-av"><Avatar id={p.id} size={28} /><Show when={p.online}><i class="rail-dot" /></Show></span>
+            <li ref={(el) => observeRow(el, p.id)} class="rail-click" classList={{ off: !p.online, speaking: s.speaking.includes(p.id) }}
+              title={p.game ? `${p.name} · Playing ${p.game}` : p.name} onClick={(e) => openProfile(p.id, e.currentTarget, e)}>
+              <span class="rail-av"><Avatar id={p.id} size={28} /><PresenceDot id={p.id} /></span>
               <span class="rail-text">
                 <span class="rail-name">{p.name}</span>
-                <Show when={p.game} fallback={<Show when={p.voice}><span class="rail-sub">In voice</span></Show>}>
+                <Show when={p.game} fallback={
+                  <Show when={customOf(p.id)} fallback={<Show when={p.voice}><span class="rail-sub">In voice</span></Show>}>
+                    {(c) => <span class="rail-sub"><StatusLine emoji={c().emoji} text={c().text} /></span>}
+                  </Show>
+                }>
                   <span class="rail-sub game">Playing {p.game}</span>
                 </Show>
               </span>

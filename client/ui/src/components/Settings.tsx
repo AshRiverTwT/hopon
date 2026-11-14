@@ -5,7 +5,11 @@ import { call } from "../ipc";
 import { s, toast } from "../store";
 import { applyOverlayKeys, applyScale, prefs, SCALES, setPrefs } from "../prefs";
 import { ACTIONS, comboLabel, comboOf, RESERVED, type Action } from "../hotkeys";
-import { toAvatarBytes } from "./Avatar";
+import { openProfileEditor, setMode } from "../profile";
+import type { StatusMode } from "../types";
+
+const MODE_ORDER: StatusMode[] = ["online", "dnd", "invisible"];
+const MODE_LABEL: Record<StatusMode, string> = { online: "Online", idle: "Online", dnd: "Do not disturb", invisible: "Invisible" };
 import { checkUpdate, installUpdate, upd } from "../update";
 import { screen, setLowResourceMode } from "../screen";
 
@@ -38,32 +42,6 @@ export default function Settings(p: { close: () => void }) {
   const pttKey = () => prefs.pttKey;
   /** Waiting for a key: "ptt" or a hotkey action. */
   const [capturing, setCapturing] = createSignal<null | "ptt" | Action>(null);
-  const [nameDraft, setNameDraft] = createSignal<string | null>(null);
-  const [nameError, setNameError] = createSignal("");
-  const [savingName, setSavingName] = createSignal(false);
-  let fileInput!: HTMLInputElement;
-  let nameButton: HTMLButtonElement | undefined;
-
-  const closeNameEditor = () => {
-    setNameDraft(null);
-    queueMicrotask(() => nameButton?.focus());
-  };
-  const saveName = async (e: SubmitEvent) => {
-    e.preventDefault();
-    const name = nameDraft()?.trim();
-    if (name === undefined || savingName()) return;
-    if ([...name].length > 32) return void setNameError("Use 32 characters or fewer.");
-    setSavingName(true);
-    setNameError("");
-    try {
-      await call("set_display_name", { name });
-      closeNameEditor();
-    } catch (error) {
-      setNameError(String(error));
-    } finally {
-      setSavingName(false);
-    }
-  };
 
   const savePtt = (en: boolean, k: number) => {
     setPrefs({ ptt: en, pttKey: k });
@@ -106,12 +84,10 @@ export default function Settings(p: { close: () => void }) {
 
   const cats = createMemo<{ name: string; opts: Opt[] }[]>(() => [
     { name: "Profile", opts: [
-      { label: "Picture", value: () => (s.user?.avatarV ? "Change" : "Upload"), step: () => fileInput.click() },
-      { label: "Remove picture", value: () => (s.user?.avatarV ? "Remove" : "—"), step: (d) => { if (d === 0 && s.user?.avatarV) call("set_avatar", { data: [] }).catch(err); } },
-      { label: "Display name", value: () => s.user?.name ?? "", step: (dir) => {
-        if (dir !== 0 || !s.user) return;
-        setNameError("");
-        setNameDraft(s.user.name);
+      { label: "Profile · picture, banner, colour, about me", value: () => "Edit", step: (d) => { if (d === 0) { p.close(); openProfileEditor(); } } },
+      { label: "Status · idle is automatic after 10 minutes away", value: () => MODE_LABEL[s.myStatus.mode], step: (d) => {
+        const i = MODE_ORDER.indexOf(s.myStatus.mode);
+        void setMode(MODE_ORDER[(Math.max(0, i) + (d === -1 ? MODE_ORDER.length - 1 : 1)) % MODE_ORDER.length]);
       } },
       { label: "Show what I'm playing", value: () => onOff(prefs.showActivity), step: () => { setPrefs({ showActivity: !prefs.showActivity }); call("activity_sharing", { enabled: prefs.showActivity }).catch(err); } },
     ] },
@@ -162,14 +138,6 @@ export default function Settings(p: { close: () => void }) {
   const current = () => cats()[cat()];
 
   const onKey = (e: KeyboardEvent) => {
-    if (nameDraft() !== null) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!savingName()) closeNameEditor();
-      }
-      return;
-    }
     const cap = capturing();
     if (cap === "ptt") {
       e.preventDefault(); e.stopPropagation();
@@ -213,12 +181,6 @@ export default function Settings(p: { close: () => void }) {
     });
   });
 
-  const pickFile = async () => {
-    const f = fileInput.files?.[0];
-    fileInput.value = "";
-    if (!f) return;
-    try { await call("set_avatar", { data: await toAvatarBytes(f) }); toast("Picture updated"); } catch (e) { err(e); }
-  };
 
   return (
     <div class="sheet menu-sheet" role="dialog" aria-label="Settings">
@@ -226,7 +188,6 @@ export default function Settings(p: { close: () => void }) {
         <span class="wordmark"><span class="mark" aria-hidden="true">H</span>HopOn</span>
         <button class="pill" onClick={p.close}>Close</button>
       </div>
-      <Show when={nameDraft() === null}>
       <div class="cascade">
         <ol class="cascade-cats">
           <For each={cats()}>
@@ -247,7 +208,7 @@ export default function Settings(p: { close: () => void }) {
                 <div class="cap">{o.label}</div>
                 <div class="val">
                   <button class="chev" aria-label="Previous" onClick={() => o.step(-1)}>‹</button>
-                  <button class="v" ref={(el) => { if (o.label === "Display name") nameButton = el; }} onClick={() => o.step(0)}>{o.value()}</button>
+                  <button class="v" onClick={() => o.step(0)}>{o.value()}</button>
                   <button class="chev" aria-label="Next" onClick={() => o.step(1)}>›</button>
                 </div>
               </li>
@@ -255,25 +216,9 @@ export default function Settings(p: { close: () => void }) {
           </For>
         </ol>
       </div>
-      </Show>
-      <Show when={nameDraft() !== null}>
-        <form class="profile-name-editor" onSubmit={saveName}>
-          <label for="display-name">Display name</label>
-          <input id="display-name" class="line" ref={(el) => queueMicrotask(() => { el.focus(); el.select(); })}
-            value={nameDraft() ?? ""} onInput={(e) => setNameDraft(e.currentTarget.value)} disabled={savingName()}
-            aria-describedby="display-name-help" />
-          <p id="display-name-help" class="muted small">Leave blank to show your sign-in username. Up to 32 characters.</p>
-          <Show when={nameError()}><p role="alert">{nameError()}</p></Show>
-          <div class="field-row">
-            <button class="pill solid" type="submit" disabled={savingName()}>{savingName() ? "Saving…" : "Save name"}</button>
-            <button class="pill" type="button" onClick={closeNameEditor} disabled={savingName()}>Cancel</button>
-          </div>
-        </form>
-      </Show>
-      <Show when={nameDraft() === null && !devs() && !devs.loading}>
+      <Show when={!devs() && !devs.loading}>
         <p class="cascade-note muted">Audio devices are unavailable in this build.</p>
       </Show>
-      <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={pickFile} />
     </div>
   );
 }

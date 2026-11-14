@@ -10,11 +10,12 @@ import { call } from "../ipc";
 import { currentServer, s, toast, userName } from "../store";
 import { Avatar } from "./Avatar";
 import { FitTitle } from "./FitTitle";
+import { openProfile } from "../profile";
 import { openAudio } from "../sounds";
 import { prefs, setPrefs } from "../prefs";
 
 /** 0–200 %, remembered per person (follows your account). */
-function VolumeSlider(p: { userId: string }) {
+export function VolumeSlider(p: { userId: string }) {
   const v = () => prefs.userVolumes[p.userId] ?? 100;
   const set = (n: number) => {
     setPrefs({ userVolumes: { ...prefs.userVolumes, [p.userId]: n } });
@@ -181,13 +182,13 @@ export default function Stage() {
         <For each={here()} fallback={<li class="muted lede">Nobody is here yet.</li>}>
           {(id) => (
             <li class="index-row static" classList={{ speaking: s.speaking.includes(id) }}>
-              <span class="index-name">
+              <button class="index-name person" onClick={(e) => openProfile(id, e.currentTarget, e)}>
                 <Avatar id={id} size={40} class={s.speaking.includes(id) ? "speaking" : ""} />
                 {userName(id)}
                 <Show when={s.speaking.includes(id)}><span class="live-dot" /></Show>
                 <Show when={camera(id)}><span class="cam-mark" title="Camera on"><CameraIcon /></span></Show>
                 <Show when={sharing(id)}><span class="live-badge">LIVE</span><Show when={localMedia() && viewerCount(id)}><Viewers userId={id} /></Show></Show>
-              </span>
+              </button>
               <span class="index-meta">
                 <Show when={connected() && id !== s.user?.id && sharing(id) && !screen.watching.includes(id)}>
                   <button class="pill" disabled={screen.pending.includes(id)} onClick={() => void watch(id).catch(mediaErr)}>

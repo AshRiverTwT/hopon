@@ -59,6 +59,9 @@ export const [screen, setScreen] = createStore({
   viewers: {} as Record<string, string[]>,
   /** Fullscreen call view: GRID (everyone as tiles) or the user id (or SELF) shown big. null = closed. */
   full: null as string | null,
+  /** The window itself is fullscreen. The call view stays open without it,
+   *  so HopOn can sit beside another app. */
+  windowFull: false,
   /** the floating mini player was opened by hand (shows even in the voice room) */
   popped: false,
   /** Prefer 720p30 sharing and keep only one remote stream subscribed. */
@@ -680,11 +683,13 @@ export async function popOut(userId: string) {
   if (userId !== SELF) setScreen("popped", true);
 }
 
-/** Fullscreen a stream: the window goes fullscreen with the stream filling it. */
+/** Open the call view (GRID or one picture) and make the window fullscreen;
+ *  null closes the view and leaves fullscreen. */
 export function setFullscreen(userId: string | null) {
   const was = screen.full;
   setScreen("full", userId);
-  if (!!was !== !!userId) call("set_fullscreen", { on: !!userId }).catch(() => {});
+  if (!was && userId) setWindowFull(true);
+  else if (was && !userId && screen.windowFull) setWindowFull(false);
 }
 
 /** Your own stream's preview. */
@@ -698,3 +703,19 @@ export async function shareStats() {
   const v = local.find((t) => t.kind === "video") as (LocalTrack & { getSenderStats?: () => Promise<unknown> }) | undefined;
   return v?.getSenderStats ? await v.getSenderStats() : null;
 }
+
+/** Window fullscreen on or off, keeping whatever view is open. */
+export function setWindowFull(on: boolean) {
+  setScreen("windowFull", on);
+  call("set_fullscreen", { on }).catch(() => {});
+}
+
+// The OS can take the window out of fullscreen (snapping it beside another
+// app, Win+arrows): follow it instead of closing the call view.
+let syncTimer = 0;
+window.addEventListener("resize", () => {
+  clearTimeout(syncTimer);
+  syncTimer = window.setTimeout(() => {
+    call<boolean>("is_fullscreen").then((on) => { if (typeof on === "boolean" && on !== screen.windowFull) setScreen("windowFull", on); }).catch(() => {});
+  }, 150);
+});

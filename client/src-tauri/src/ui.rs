@@ -2,7 +2,8 @@
 //! so they cross the IPC boundary as decimal strings.
 
 use hopon_shared::{
-    Attachment, ChannelInfo, ChannelKind, Id, MediaPresence, MediaSource, Message, ServerInfo, UserInfo, VoicePresence,
+    Attachment, ChannelInfo, ChannelKind, Id, MediaPresence, MediaSource, Message, ServerInfo, StatusMode, UserInfo, UserStatus,
+    VoicePresence,
 };
 use serde::Serialize;
 
@@ -20,6 +21,8 @@ pub struct UiUser {
     pub name: String,
     /// 0 = no avatar; otherwise fetch with `avatar(id, v)`.
     pub avatar_v: u32,
+    /// Profile colour: palette index (0 = none).
+    pub accent: u8,
 }
 impl From<&UserInfo> for UiUser {
     fn from(u: &UserInfo) -> Self {
@@ -27,8 +30,56 @@ impl From<&UserInfo> for UiUser {
             id: sid(u.id),
             name: u.name.clone(),
             avatar_v: u.avatar_v,
+            accent: u.accent,
         }
     }
+}
+
+/// Presence mode ("online" | "idle" | "dnd" | "invisible") and custom status.
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UiStatus {
+    pub mode: &'static str,
+    pub emoji: String,
+    pub text: String,
+    /// Unix ms the custom part clears (0 = never).
+    pub until: i64,
+}
+impl From<&UserStatus> for UiStatus {
+    fn from(s: &UserStatus) -> Self {
+        Self {
+            mode: match s.mode {
+                StatusMode::Online => "online",
+                StatusMode::Idle => "idle",
+                StatusMode::Dnd => "dnd",
+                StatusMode::Invisible => "invisible",
+            },
+            emoji: s.emoji.clone(),
+            text: s.text.clone(),
+            until: s.until,
+        }
+    }
+}
+pub fn mode_of(s: &str) -> StatusMode {
+    match s {
+        "idle" => StatusMode::Idle,
+        "dnd" => StatusMode::Dnd,
+        "invisible" => StatusMode::Invisible,
+        _ => StatusMode::Online,
+    }
+}
+
+/// A profile card.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct UiProfile {
+    pub user: UiUser,
+    pub username: String,
+    pub bio: String,
+    pub banner_v: u32,
+    pub created_at: i64,
+    /// 0 = unknown.
+    pub joined_at: i64,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -68,6 +119,8 @@ pub struct UiServer {
     pub online: Vec<String>,
     /// user → game they're playing.
     pub activities: std::collections::HashMap<String, String>,
+    /// user → status, for online members who aren't plain "online".
+    pub statuses: std::collections::HashMap<String, UiStatus>,
     /// A direct message with this person (hidden from the server list).
     pub dm_with: Option<String>,
 }
@@ -87,6 +140,7 @@ impl From<&ServerInfo> for UiServer {
                 .iter()
                 .map(|(u, g)| (sid(*u), g.clone()))
                 .collect(),
+            statuses: s.statuses.iter().map(|(u, st)| (sid(*u), st.into())).collect(),
             dm_with: s.dm_with.map(sid),
         }
     }
@@ -231,6 +285,8 @@ pub enum UiEvent {
         /// Your unique login name.
         username: String,
         friends: Vec<UiFriend>,
+        /// Your chosen presence and custom status.
+        status: UiStatus,
     },
     /// A friendship or request was added or changed.
     Friend { friend: UiFriend },
@@ -252,6 +308,7 @@ pub enum UiEvent {
         users: Vec<UiUser>,
         online: Vec<String>,
         activities: std::collections::HashMap<String, String>,
+        statuses: std::collections::HashMap<String, UiStatus>,
     },
     MemberSearch {
         server_id: String,
@@ -305,6 +362,11 @@ pub enum UiEvent {
     UserPresence {
         user_id: String,
         online: bool,
+    },
+    /// Someone's status changed (for you: your own, from any device).
+    Status {
+        user_id: String,
+        status: UiStatus,
     },
     /// A member started/stopped playing ("" = stopped).
     Activity {

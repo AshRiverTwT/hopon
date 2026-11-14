@@ -38,6 +38,7 @@ enum UiCoalesceKey {
     Presence(String, String),
     UserPresence(String),
     Activity(String),
+    Status(String),
     Speaking,
     ChannelActivity(String),
 }
@@ -60,6 +61,7 @@ impl UiEvent {
                 Some(UiCoalesceKey::UserPresence(user_id.clone()))
             }
             UiEvent::Activity { user_id, .. } => Some(UiCoalesceKey::Activity(user_id.clone())),
+            UiEvent::Status { user_id, .. } => Some(UiCoalesceKey::Status(user_id.clone())),
             UiEvent::Speaking { .. } => Some(UiCoalesceKey::Speaking),
             UiEvent::ChannelActivity { channel_id, .. } => {
                 Some(UiCoalesceKey::ChannelActivity(channel_id.clone()))
@@ -113,6 +115,8 @@ pub struct Store {
     /// Your unique login name, and your friends and requests.
     pub username: String,
     pub friends: Vec<hopon_shared::Friend>,
+    /// Your chosen presence and custom status.
+    pub my_status: hopon_shared::UserStatus,
 }
 
 impl Store {
@@ -167,6 +171,7 @@ impl Store {
             media: self.media.values().map(Into::into).collect(),
             username: self.username.clone(),
             friends: self.friends.iter().map(Into::into).collect(),
+            status: (&self.my_status).into(),
         }
     }
 
@@ -443,7 +448,7 @@ impl Core {
     }
 
     pub fn set_visible_members(self: &Arc<Self>, members: HashSet<Id>) {
-        let (online, activities, presences) = {
+        let (online, activities, statuses, presences) = {
             let mut store = self.store.lock();
             store.visible_members = members.clone();
             let online = store
@@ -462,6 +467,14 @@ impl Core {
                 .filter(|(id, _)| members.contains(id))
                 .map(|(id, game)| (*id, game.clone()))
                 .collect::<Vec<_>>();
+            let statuses = store
+                .servers
+                .iter()
+                .filter(|sv| Some(sv.id) == store.visible_server)
+                .flat_map(|sv| sv.statuses.iter())
+                .filter(|(id, _)| members.contains(id))
+                .map(|(id, st)| (*id, st.clone()))
+                .collect::<Vec<_>>();
             let presences = store
                 .voice
                 .iter()
@@ -472,8 +485,11 @@ impl Core {
                 })
                 .map(|(id, (server, p))| (*server, *id, p.channel_id, p.muted, p.deafened))
                 .collect::<Vec<_>>();
-            (online, activities, presences)
+            (online, activities, statuses, presences)
         };
+        for (user_id, status) in statuses {
+            self.emit(UiEvent::Status { user_id: sid(user_id), status: (&status).into() });
+        }
         for user_id in online {
             self.emit(UiEvent::UserPresence {
                 user_id: sid(user_id),
@@ -1000,6 +1016,7 @@ impl Core {
                 prefs,
                 username,
                 friends,
+                status,
             } => {
                 // Before the session snapshot, so the UI can pick your last server.
                 self.store.lock().prefs = Some(prefs.clone());
@@ -1023,6 +1040,7 @@ impl Core {
                     s.users_by_id.insert(user.id, user.clone());
                     s.username = username.clone();
                     s.friends = friends.clone();
+                    s.my_status = status.clone();
                     for f in friends.iter() {
                         s.users_by_id.insert(f.user.id, f.user.clone());
                     }
@@ -1055,6 +1073,32 @@ impl Core {
                 let ev = self.session_snapshot();
                 self.emit(ev);
                 crate::activity::Activity::start(self.clone());
+            }
+            S2C::Status { user_id, status } => {
+                let now = now_us() / 1000;
+                let visible = {
+                    let mut s = self.store.lock();
+                    let mine = s.me.as_ref().map(|u| u.id) == Some(*user_id);
+                    if mine {
+                        // Keep the chosen mode; Idle only shows for others.
+                        let mode = if status.mode == hopon_shared::StatusMode::Idle { s.my_status.mode } else { status.mode };
+                        s.my_status = hopon_shared::UserStatus { mode, ..status.clone() };
+                    }
+                    let visible_members = s.visible_members.clone();
+                    let mut visible = mine;
+                    for sv in s.servers.iter_mut() {
+                        let is_member = sv.member_ids.contains(user_id) || sv.dm_with == Some(*user_id);
+                        sv.statuses.retain(|(u, _)| u != user_id);
+                        if is_member && !status.is_plain(now) && status.mode != hopon_shared::StatusMode::Invisible {
+                            sv.statuses.push((*user_id, status.clone()));
+                        }
+                        visible |= is_member && visible_members.contains(user_id);
+                    }
+                    visible || s.is_friend(*user_id)
+                };
+                if visible {
+                    self.emit(UiEvent::Status { user_id: sid(*user_id), status: status.into() });
+                }
             }
             S2C::Activity { user_id, game } => {
                 let visible = {
@@ -1283,7 +1327,9 @@ impl Core {
                 members,
                 online,
                 activities,
+                statuses,
             } => {
+                let status_map = statuses.iter().map(|(u, st)| (sid(*u), st.into())).collect();
                 let page_users = members.iter().map(UiUser::from).collect::<Vec<_>>();
                 let activity_map = activities
                     .iter()
@@ -1309,6 +1355,10 @@ impl Core {
                             server.activities.retain(|(id, _)| id != user_id);
                             server.activities.push((*user_id, game.clone()));
                         }
+                        for (user_id, st) in statuses {
+                            server.statuses.retain(|(id, _)| id != user_id);
+                            server.statuses.push((*user_id, st.clone()));
+                        }
                     }
                 }
                 self.emit(UiEvent::MemberPage {
@@ -1317,6 +1367,7 @@ impl Core {
                     users: page_users,
                     online: online.iter().map(|id| sid(*id)).collect(),
                     activities: activity_map,
+                    statuses: status_map,
                 });
             }
             S2C::MemberSearch { server_id, members } => {
@@ -1613,6 +1664,8 @@ impl Core {
             | S2C::Invite { .. }
             | S2C::VoiceGrant { .. }
             | S2C::Avatar { .. }
+            | S2C::Banner { .. }
+            | S2C::Profile(_)
             | S2C::Ok => {}
         }
     }
@@ -1958,6 +2011,27 @@ impl Core {
             "data:{mime};base64,{}",
             base64::engine::general_purpose::STANDARD.encode(&bytes)
         ))
+    }
+
+    /// Profile banner as a data URL, cached like avatars.
+    pub async fn banner(&self, user: Id, v: u32) -> Option<String> {
+        if v == 0 {
+            return None;
+        }
+        let key = format!("bn:{user}:{v}");
+        let bytes = match self.cache.kv_get(&key).await {
+            Some(b) => b,
+            None => match self.request(C2S::GetBanner { user_id: user }).await {
+                Ok(S2C::Banner { data, banner_v, .. }) if !data.is_empty() => {
+                    self.cache.kv_set(&format!("bn:{user}:{banner_v}"), Some(data.clone()));
+                    data
+                }
+                _ => return None,
+            },
+        };
+        let mime = hopon_shared::image_mime(&bytes)?;
+        use base64::Engine;
+        Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes)))
     }
 
     /// Older page: server when online (authoritative), local cache when offline.

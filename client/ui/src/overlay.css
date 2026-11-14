@@ -88,7 +88,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ov-input { margin: 0 6px 6px; padding: 12px 10px 8px; resize: none; outline: none; background: transparent; border: 0; border-top: 1px solid var(--cream-20);
   color: var(--cream); font: inherit; font-size: 14px; }
 .ov-input::placeholder { color: var(--cream-35); }
-.ov-input.typing { border-top-color: var(--hot); }
+.ov-input.typing { border-top-color: var(--cream-35); }
 
 /* Voice: the app's people list. */
 .ov-voice { width: 210px; flex: none; align-self: stretch; padding: 12px 10px; display: flex; flex-direction: column; gap: 10px; }

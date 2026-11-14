@@ -74,3 +74,9 @@ fn show(_app: &tauri::AppHandle, _core: Arc<Core>, title: &str, body: &str, _sou
 pub async fn set_fullscreen(window: tauri::WebviewWindow, on: bool) -> Result<(), String> {
     window.set_fullscreen(on).map_err(|e| e.to_string())
 }
+
+/// Whether the window is fullscreen now (the OS can take it out, e.g. when snapping).
+#[tauri::command]
+pub fn is_fullscreen(window: tauri::WebviewWindow) -> bool {
+    window.is_fullscreen().unwrap_or(false)
+}

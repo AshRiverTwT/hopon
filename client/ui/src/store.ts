@@ -2,7 +2,7 @@ import { batch, createSignal } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import { call, markPainted, now, randomNonce } from "./ipc";
 import { findId, mergeMsgs, trimTop } from "./merge";
-import { cmpId, SYSTEM_USER, type Attachment, type Channel, type Friend, type Gif, type Msg, type Presence, type Server, type UiEvent, type User } from "./types";
+import { cmpId, SYSTEM_USER, type Attachment, type Channel, type Friend, type Gif, type Msg, type Presence, type Server, type Status, type UiEvent, type User } from "./types";
 import { chime, closeAudio } from "./sounds";
 import { encodeMentions } from "./rich";
 import { applyPrefs, prefs, resetPrefs, setPrefs } from "./prefs";
@@ -39,6 +39,10 @@ export const [s, set] = createStore({
   reads: {} as Record<string, string>,
   /** users currently online */
   online: {} as Record<string, boolean>,
+  /** other people's status when not plain online (idle, do not disturb, custom) */
+  statuses: {} as Record<string, Status>,
+  /** your chosen presence and custom status */
+  myStatus: { mode: "online", emoji: "", text: "", until: 0 } as Status,
   /** the open list is scrolled to the newest message */
   atBottom: true,
   /** message being replied to in the composer */
@@ -161,13 +165,16 @@ function setRead(channelId: string, id: string) {
 function absorbServers(servers: Server[], replace: boolean) {
   const reads: Record<string, string> = replace ? {} : { ...s.reads };
   const online: Record<string, boolean> = replace ? {} : { ...s.online };
+  const statuses: Record<string, Status> = replace ? {} : { ...s.statuses };
   for (const sv of servers) {
     for (const [c, r] of Object.entries(sv.reads ?? {})) if (!reads[c] || cmpId(r, reads[c]) > 0) reads[c] = r;
     for (const u of sv.online ?? []) online[u] = true;
+    Object.assign(statuses, sv.statuses ?? {});
   }
   if (s.user) online[s.user.id] = true;
   set("reads", reconcile(reads));
   set("online", reconcile(online));
+  set("statuses", reconcile(statuses));
 }
 
 /** Track the newest id per channel; your own messages count as read. */
@@ -215,6 +222,8 @@ let scheduled = false;
 const notifyCtx = {
   get me() { return s.user?.id ?? null; },
   get openChannel() { return s.stage ? null : s.selChannel; },
+  /** Do not disturb: nothing pops up or plays. */
+  get quiet() { return s.myStatus.mode === "dnd"; },
   channelName: (id: string) => { const dm = dmOfChannel(id); return dm ? "Direct message" : `#${s.servers.flatMap((x) => x.channels).find((c) => c.id === id)?.name ?? "channel"}`; },
   serverName: (id: string) => (dmOfChannel(id) ? "" : s.servers.find((x) => x.channels.some((c) => c.id === id))?.name ?? ""),
   userName: (id: string) => userName(id),
@@ -271,6 +280,7 @@ function apply(e: UiEvent, painted: string[]) {
       }
       set("presence", reconcile(pres));
       set("username", e.username ?? "");
+      if (e.status) set("myStatus", reconcile(e.status));
       set("friends", reconcile(e.friends ?? []));
       for (const f of e.friends ?? []) set("users", f.user.id, f.user);
       absorbServers(e.servers, true);
@@ -326,6 +336,7 @@ function apply(e: UiEvent, painted: string[]) {
         set("memberLoaded", e.serverId, Math.max(s.memberLoaded[e.serverId] ?? 0, e.offset + e.users.length));
         for (const u of e.users) set("online", u.id, e.online.includes(u.id));
         set("servers", i, "activities", (a) => ({ ...a, ...e.activities }));
+        for (const [u, st] of Object.entries(e.statuses ?? {})) set("statuses", u, st);
       }
       break;
     }
@@ -372,6 +383,17 @@ function apply(e: UiEvent, painted: string[]) {
     }
     case "userPresence":
       set("online", e.userId, e.online);
+      if (!e.online) set("statuses", produce((m: Record<string, Status>) => { delete m[e.userId]; }));
+      break;
+    case "status":
+      if (e.userId === s.user?.id) {
+        // Your own: keep the mode you picked (idle is only what others see).
+        set("myStatus", { ...e.status, mode: e.status.mode === "idle" ? s.myStatus.mode : e.status.mode });
+      } else if (e.status.mode === "online" && !e.status.text && !e.status.emoji) {
+        set("statuses", produce((m: Record<string, Status>) => { delete m[e.userId]; }));
+      } else {
+        set("statuses", e.userId, reconcile(e.status));
+      }
       break;
     case "activity":
       s.servers.forEach((sv, i) => {

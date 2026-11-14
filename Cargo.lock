@@ -1824,7 +1824,7 @@ dependencies = [
 
 [[package]]
 name = "hopon-bench"
-version = "0.6.4"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -1841,7 +1841,7 @@ dependencies = [
 
 [[package]]
 name = "hopon-client"
-version = "0.6.4"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1869,7 +1869,7 @@ dependencies = [
 
 [[package]]
 name = "hopon-server"
-version = "0.6.4"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1897,7 +1897,7 @@ dependencies = [
 
 [[package]]
 name = "hopon-shared"
-version = "0.6.4"
+version = "0.7.0"
 dependencies = [
  "hdrhistogram",
  "rmp-serde",

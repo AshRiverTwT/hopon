@@ -30,3 +30,9 @@ ARCH=x86_64 "$TOOLS/usr/bin/appimagetool" -n \
   target/release/bundle/appimage/HopOn.AppDir "$OUT" >/dev/null
 ls -l "$OUT"
 echo "AppImage: $(du -h "$OUT" | cut -f1)"
+# The downloads branch is plain git on GitHub: files over 100 MB are refused.
+SIZE=$(stat -c %s "$OUT")
+if [ "$SIZE" -gt $((99 * 1024 * 1024)) ]; then
+  echo "AppImage is $((SIZE / 1048576)) MB: over GitHub's 100 MB file limit" >&2
+  exit 1
+fi

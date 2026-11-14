@@ -4,6 +4,7 @@
 use anyhow::{bail, ensure, Result};
 use hopon_bench::{arg, Client};
 use hopon_shared::time::now_us;
+use std::time::Duration;
 use hopon_shared::*;
 
 async fn next_msg(c: &mut Client) -> Result<S2C> {
@@ -664,6 +665,97 @@ async fn main() -> Result<()> {
         let S2C::Authed { username, friends, servers, .. } = a2.call(C2S::Login { username: ua.name.clone(), password: "benchmark-pass".into() }).await? else { bail!("login") };
         ensure!(username == ua.name && friends.iter().any(|f| f.user.id == ub.id && f.state == FriendState::Friends), "snapshot friends");
         ensure!(servers.iter().any(|s| s.id == dm.id && s.dm_with == Some(ub.id)), "snapshot DM");
+        Ok(())
+    });
+    pass &= check!("profiles: accent, bio, banner, card access, joined date", {
+        let mut a = Client::connect(&url).await?;
+        let ua = a.signup("pfa").await?;
+        let S2C::ServerJoined(s) = a.call(C2S::CreateServer { name: "Profiles".into() }).await? else { bail!("create") };
+        let S2C::Invite { code, .. } = a.call(C2S::CreateInvite { server_id: s.id }).await? else { bail!("invite") };
+        let mut b = Client::connect(&url).await?;
+        let ub = b.signup("pfb").await?;
+        b.call(C2S::JoinInvite { code }).await?;
+        ensure!(a.call(C2S::SetProfile { bio: "hi there".into(), accent: MAX_ACCENT + 1 }).await.is_err(), "bad accent accepted");
+        ensure!(a.call(C2S::SetProfile { bio: "x".repeat(MAX_BIO_CHARS + 1), accent: 1 }).await.is_err(), "long bio accepted");
+        a.call(C2S::SetProfile { bio: "hi there".into(), accent: 3 }).await?;
+        let acc = wait_for(&mut b, |e| if let S2C::UserUpdated(u) = e { (u.id == ua.id).then_some(u.accent) } else { None }).await?;
+        ensure!(acc == 3, "accent broadcast");
+        let png: Vec<u8> = [&[0x89u8, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a][..], &[1u8; 100][..]].concat();
+        ensure!(a.call(C2S::SetBanner { data: vec![1; 50] }).await.is_err(), "non-image banner");
+        a.call(C2S::SetBanner { data: png.clone() }).await?;
+        let S2C::Profile(p) = b.call(C2S::GetProfile { user_id: ua.id, server_id: Some(s.id) }).await? else { bail!("profile") };
+        ensure!(p.bio == "hi there" && p.user.accent == 3 && p.banner_v == 1 && p.username == ua.name && p.created_at > 0, "card: {p:?}");
+        let S2C::Profile(pb) = a.call(C2S::GetProfile { user_id: ub.id, server_id: Some(s.id) }).await? else { bail!("profile b") };
+        ensure!(pb.joined_at > 0, "joined date for a new member");
+        let S2C::Banner { data, banner_v, .. } = b.call(C2S::GetBanner { user_id: ua.id }).await? else { bail!("banner") };
+        ensure!(data == png && banner_v == 1, "banner bytes");
+        a.call(C2S::SetBanner { data: vec![] }).await?;
+        let S2C::Profile(p) = b.call(C2S::GetProfile { user_id: ua.id, server_id: None }).await? else { bail!("profile") };
+        ensure!(p.banner_v == 0, "banner removed");
+        // A stranger can't read the card.
+        let mut c = Client::connect(&url).await?;
+        c.signup("pfc").await?;
+        ensure!(c.call(C2S::GetProfile { user_id: ua.id, server_id: None }).await.is_err(), "stranger read a profile");
+        Ok(())
+    });
+    pass &= check!("statuses: custom status + expiry, do not disturb, idle needs every device, invisible never shows online", {
+        let mut a = Client::connect(&url).await?;
+        let ua = a.signup("sta").await?;
+        let S2C::ServerJoined(s) = a.call(C2S::CreateServer { name: "Status".into() }).await? else { bail!("create") };
+        let S2C::Invite { code, .. } = a.call(C2S::CreateInvite { server_id: s.id }).await? else { bail!("invite") };
+        let mut b = Client::connect(&url).await?;
+        b.signup("stb").await?;
+        b.call(C2S::JoinInvite { code }).await?;
+        let status_of = |e: &S2C| if let S2C::Status { user_id, status } = e { (*user_id == ua.id).then(|| status.clone()) } else { None };
+        // Custom status, seen live and in member pages.
+        ensure!(a.call(C2S::SetStatus { status: UserStatus { text: "x".repeat(MAX_STATUS_CHARS + 1), ..Default::default() } }).await.is_err(), "long status");
+        ensure!(a.call(C2S::SetStatus { status: UserStatus { emoji: "ab".into(), ..Default::default() } }).await.is_err(), "bad emoji");
+        a.call(C2S::SetStatus { status: UserStatus { mode: StatusMode::Online, emoji: "📚".into(), text: "studying".into(), until: 0 } }).await?;
+        let st = wait_for(&mut b, status_of).await?;
+        ensure!(st.text == "studying" && st.emoji == "📚", "live status {st:?}");
+        let S2C::Members { statuses, .. } = b.call(C2S::Members { server_id: s.id, offset: 0, limit: 50 }).await? else { bail!("members") };
+        ensure!(statuses.iter().any(|(u, x)| *u == ua.id && x.text == "studying"), "status in member page");
+        // Expired: stored but never shown.
+        a.call(C2S::SetStatus { status: UserStatus { mode: StatusMode::Online, emoji: String::new(), text: "gone".into(), until: now_us() / 1000 + 400 } }).await?;
+        wait_for(&mut b, status_of).await?;
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        let S2C::Members { statuses, .. } = b.call(C2S::Members { server_id: s.id, offset: 0, limit: 50 }).await? else { bail!("members") };
+        ensure!(!statuses.iter().any(|(u, _)| *u == ua.id), "expired status still shown: {statuses:?}");
+        // Do not disturb.
+        a.call(C2S::SetStatus { status: UserStatus { mode: StatusMode::Dnd, ..Default::default() } }).await?;
+        ensure!(wait_for(&mut b, status_of).await?.mode == StatusMode::Dnd, "dnd shown");
+        a.call(C2S::SetStatus { status: UserStatus::default() }).await?;
+        wait_for(&mut b, status_of).await?;
+        // Idle: only once every device is idle.
+        let mut a2 = Client::connect(&url).await?;
+        a2.call(C2S::Login { username: ua.name.clone(), password: "benchmark-pass".into() }).await?;
+        a.call(C2S::SetIdle { idle: true }).await?;
+        ensure!(quiet(&mut b, 300, |e| matches!(status_of(e), Some(s) if s.mode == StatusMode::Idle)).await, "idle with one device still active");
+        a2.call(C2S::SetIdle { idle: true }).await?;
+        ensure!(wait_for(&mut b, status_of).await?.mode == StatusMode::Idle, "idle when both are idle");
+        a2.call(C2S::SetIdle { idle: false }).await?;
+        ensure!(wait_for(&mut b, status_of).await?.mode == StatusMode::Online, "back from idle");
+        drop(a2);
+        // Invisible: offline to others, and still offline after reconnecting.
+        a.call(C2S::SetStatus { status: UserStatus { mode: StatusMode::Invisible, ..Default::default() } }).await?;
+        let off = wait_for(&mut b, |e| if let S2C::UserPresence { user_id, online } = e { (*user_id == ua.id).then_some(*online) } else { None }).await?;
+        ensure!(!off, "invisible should look offline");
+        let S2C::Members { online, .. } = b.call(C2S::Members { server_id: s.id, offset: 0, limit: 50 }).await? else { bail!("members") };
+        ensure!(!online.contains(&ua.id), "invisible listed online");
+        drop(a);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut a3 = Client::connect(&url).await?;
+        let S2C::Authed { status, .. } = a3.call(C2S::Login { username: ua.name.clone(), password: "benchmark-pass".into() }).await? else { bail!("login") };
+        ensure!(status.mode == StatusMode::Invisible, "mode remembered: {status:?}");
+        ensure!(quiet(&mut b, 400, |e| matches!(e, S2C::UserPresence { user_id, online: true } if *user_id == ua.id)).await, "invisible flashed online on reconnect");
+        a3.call(C2S::SetActivity { game: "Chess".into() }).await?;
+        ensure!(quiet(&mut b, 300, |e| matches!(e, S2C::Activity { user_id, .. } if *user_id == ua.id)).await, "invisible leaked a game");
+        // Back to online: presence and the game come back.
+        a3.call(C2S::SetStatus { status: UserStatus::default() }).await?;
+        let on = wait_for(&mut b, |e| if let S2C::UserPresence { user_id, online } = e { (*user_id == ua.id).then_some(*online) } else { None }).await?;
+        ensure!(on, "visible again");
+        let g = wait_for(&mut b, |e| if let S2C::Activity { user_id, game } = e { (*user_id == ua.id).then(|| game.clone()) } else { None }).await?;
+        ensure!(g == "Chess", "game re-announced");
         Ok(())
     });
     let mut fa = Client::connect(&url).await?;

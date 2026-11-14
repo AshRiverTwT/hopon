@@ -463,6 +463,59 @@ pub async fn set_avatar(core: C<'_>, data: Vec<u8>) -> Res<()> {
     core.request(C2S::SetAvatar { data }).await.map(|_| ())
 }
 
+#[tauri::command]
+pub async fn banner(core: C<'_>, user_id: String, v: u32) -> Res<Option<String>> {
+    Ok(core.banner(pid(&user_id)?, v).await)
+}
+
+/// The webview resizes to 600 × 200 WebP before calling this. Empty removes it.
+#[tauri::command]
+pub async fn set_banner(core: C<'_>, data: Vec<u8>) -> Res<()> {
+    core.request(C2S::SetBanner { data }).await.map(|_| ())
+}
+
+#[tauri::command]
+pub async fn set_profile(core: C<'_>, bio: String, accent: u8) -> Res<()> {
+    core.request(C2S::SetProfile { bio, accent }).await.map(|_| ())
+}
+
+/// Someone's profile card (`server_id` adds when they joined it).
+#[tauri::command]
+pub async fn get_profile(core: C<'_>, user_id: String, server_id: Option<String>) -> Res<crate::ui::UiProfile> {
+    let server_id = server_id.as_deref().map(pid).transpose()?;
+    match core.request(C2S::GetProfile { user_id: pid(&user_id)?, server_id }).await? {
+        S2C::Profile(p) => Ok(crate::ui::UiProfile {
+            user: (&p.user).into(),
+            username: p.username,
+            bio: p.bio,
+            banner_v: p.banner_v,
+            created_at: p.created_at,
+            joined_at: p.joined_at,
+        }),
+        _ => Err("unexpected reply".into()),
+    }
+}
+
+/// Presence ("online" | "dnd" | "invisible") and custom status.
+#[tauri::command]
+pub async fn set_status(core: C<'_>, mode: String, emoji: String, text: String, until: i64) -> Res<()> {
+    let status = hopon_shared::UserStatus { mode: crate::ui::mode_of(&mode), emoji, text, until };
+    core.request(C2S::SetStatus { status }).await.map(|_| ())
+}
+
+/// This device is idle (no input for a while) or back.
+#[tauri::command]
+pub async fn set_idle(core: C<'_>, idle: bool) -> Res<()> {
+    core.request(C2S::SetIdle { idle }).await.map(|_| ())
+}
+
+/// Seconds since the last keyboard or mouse input anywhere on the system, where
+/// the OS tells us (Windows). None: the webview tracks its own input instead.
+#[tauri::command]
+pub fn idle_seconds() -> Option<u64> {
+    crate::sys::idle_seconds()
+}
+
 // ---------- voice ----------
 
 #[tauri::command]

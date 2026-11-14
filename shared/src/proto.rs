@@ -11,7 +11,7 @@ pub type Id = i64;
 /// Bumped on every wire-incompatible change. Sent as `?v=` on the WebSocket
 /// URL; the server answers HTTP 426 to any other version before any
 /// MessagePack is exchanged, so old and new builds fail loudly, not silently.
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// Append the protocol version to a chat URL (`ws://host:port/ws`).
 pub fn versioned_url(url: &str) -> String {
@@ -45,6 +45,71 @@ pub struct UserInfo {
     /// Avatar version; 0 = no avatar. Clients fetch with `GetAvatar` and
     /// cache by (id, version).
     pub avatar_v: u32,
+    /// Profile colour: an index into the client's palette (0 = none, 1..=MAX_ACCENT).
+    pub accent: u8,
+}
+
+/// Highest profile accent index.
+pub const MAX_ACCENT: u8 = 8;
+pub const MAX_BIO_CHARS: usize = 190;
+pub const MAX_STATUS_CHARS: usize = 80;
+/// Profile banners (the client uploads a 600 × 200 WebP). Under the frame limit.
+pub const MAX_BANNER_BYTES: usize = 56 * 1024;
+
+/// How you show up to others. Idle is set by the app when you're away; the
+/// rest you pick. Others see Invisible as offline.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatusMode {
+    #[default]
+    Online,
+    Idle,
+    Dnd,
+    Invisible,
+}
+
+/// Presence mode plus an optional custom status ("studying 📚") that can expire.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+pub struct UserStatus {
+    pub mode: StatusMode,
+    /// One emoji (may be empty).
+    pub emoji: String,
+    pub text: String,
+    /// Unix ms when the emoji and text clear (0 = never).
+    pub until: i64,
+}
+
+impl UserStatus {
+    /// The custom part has expired (or was never set).
+    pub fn custom_live(&self, now_ms: i64) -> bool {
+        (!self.text.is_empty() || !self.emoji.is_empty()) && (self.until == 0 || self.until > now_ms)
+    }
+    /// The same status with an expired custom part dropped.
+    pub fn current(&self, now_ms: i64) -> UserStatus {
+        if self.custom_live(now_ms) {
+            self.clone()
+        } else {
+            UserStatus { mode: self.mode, ..Default::default() }
+        }
+    }
+    /// Plain "online" with no custom status: not worth sending in lists.
+    pub fn is_plain(&self, now_ms: i64) -> bool {
+        self.mode == StatusMode::Online && !self.custom_live(now_ms)
+    }
+}
+
+/// What a profile card shows beyond `UserInfo` (fetched when it opens).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Profile {
+    pub user: UserInfo,
+    /// Unique login name (what friends add you by).
+    pub username: String,
+    pub bio: String,
+    /// Banner image version; 0 = none. Fetch with `GetBanner`.
+    pub banner_v: u32,
+    /// Account created, Unix ms.
+    pub created_at: i64,
+    /// Joined the server asked about, Unix ms (0 = unknown).
+    pub joined_at: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -101,6 +166,9 @@ pub struct ServerInfo {
     pub online: Vec<Id>,
     /// What members are playing right now (user, game name).
     pub activities: Vec<(Id, String)>,
+    /// Members online with a status other than plain online (idle, do not
+    /// disturb, or a custom status).
+    pub statuses: Vec<(Id, UserStatus)>,
     /// A direct message: the other person (the server is hidden, has one text
     /// channel, and `members` holds both people). None for normal servers.
     pub dm_with: Option<Id>,
@@ -409,6 +477,33 @@ pub enum C2S {
     GetAvatar {
         user_id: Id,
     },
+    /// Your presence mode (not Idle; use `SetIdle`) and custom status.
+    SetStatus {
+        status: UserStatus,
+    },
+    /// This device has been away (no input) for a while. You show as idle when
+    /// every device you're signed in on is idle.
+    SetIdle {
+        idle: bool,
+    },
+    /// Bio and accent colour.
+    SetProfile {
+        bio: String,
+        accent: u8,
+    },
+    /// PNG, JPEG or WebP, at most `MAX_BANNER_BYTES`. Empty removes it.
+    SetBanner {
+        #[serde(with = "serde_bytes")]
+        data: Vec<u8>,
+    },
+    GetBanner {
+        user_id: Id,
+    },
+    /// Someone's profile card; `server_id` adds when they joined that server.
+    GetProfile {
+        user_id: Id,
+        server_id: Option<Id>,
+    },
     /// Replace your saved preferences (a JSON object, at most MAX_PREFS_BYTES).
     SavePrefs {
         json: String,
@@ -485,6 +580,8 @@ pub enum S2C {
         /// Your unique login name (friends add you by it).
         username: String,
         friends: Vec<Friend>,
+        /// Your chosen presence and custom status.
+        status: UserStatus,
     },
     Error {
         code: ErrorCode,
@@ -535,6 +632,7 @@ pub enum S2C {
         members: Vec<UserInfo>,
         online: Vec<Id>,
         activities: Vec<(Id, String)>,
+        statuses: Vec<(Id, UserStatus)>,
     },
     MemberSearch {
         server_id: Id,
@@ -640,6 +738,19 @@ pub enum S2C {
         #[serde(with = "serde_bytes")]
         data: Vec<u8>,
     },
+    /// Someone's status changed (to plain online too). Also sent to your
+    /// other devices when you change yours.
+    Status {
+        user_id: Id,
+        status: UserStatus,
+    },
+    Profile(Profile),
+    Banner {
+        user_id: Id,
+        banner_v: u32,
+        #[serde(with = "serde_bytes")]
+        data: Vec<u8>,
+    },
 }
 
 /// Image type by magic bytes; only these are accepted as avatars.
@@ -694,6 +805,16 @@ pub fn decode<'a, T: Deserialize<'a>>(b: &'a [u8]) -> Result<T, DecodeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_expiry() {
+        let s = UserStatus { mode: StatusMode::Online, emoji: "📚".into(), text: "studying".into(), until: 1000 };
+        assert!(s.custom_live(999) && !s.custom_live(1000));
+        assert!(!s.is_plain(500) && s.is_plain(2000));
+        assert_eq!(s.current(2000), UserStatus::default());
+        let forever = UserStatus { until: 0, ..s.clone() };
+        assert!(forever.custom_live(i64::MAX));
+    }
 
     #[test]
     fn emoji_and_mentions() {

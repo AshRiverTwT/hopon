@@ -31,13 +31,15 @@ export interface NotifyCtx {
   channelName: (id: string) => string;
   serverName: (channelId: string) => string;
   userName: (id: string) => string;
+  /** Do not disturb. */
+  quiet?: boolean;
 }
 
 /** HopOn is what you're looking at (focused and visible). */
 const looking = () => document.hasFocus() && !document.hidden;
 
 export function onMessages(channelId: string, msgs: Msg[], ctx: NotifyCtx) {
-  if (!ctx.me) return;
+  if (!ctx.me || ctx.quiet) return;
   const level = channelLevel(channelId);
   if (level === "none") return;
   const now = Date.now();

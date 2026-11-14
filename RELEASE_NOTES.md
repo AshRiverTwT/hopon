@@ -2,6 +2,38 @@
 
 **Download the latest:** [Windows: HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe) · [Linux: HopOn-x86_64.AppImage](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-x86_64.AppImage)
 
+## HopOn 0.7.0
+
+**Update the server too** (new protocol): 0.6 apps and servers don't talk to
+0.7 ones. The app offers the update as soon as it starts.
+
+### New
+
+- **Profiles.** Click anyone's name or picture (chat, people, voice room,
+  friends) for their card: picture, banner, status, what they're playing or
+  which room they're in, about me, member since and when they joined the
+  server. Message, add friend, their volume (in your voice room), and Remove
+  for server owners.
+- **Edit profile** (your name bottom-left, or Settings → Profile): picture,
+  banner, a colour for your name, display name and about me.
+- **Status.** Click your name bottom-left: Online, Do not disturb or
+  Invisible, and a custom status ("heads down 📚") that can clear itself after
+  1 hour, 4 hours or today.
+  - **Idle** turns on by itself after 10 minutes away (on Windows, any input
+    counts, so gaming isn't idle; on Linux, input in HopOn, voice or a game).
+  - **Do not disturb** silences notifications and sounds.
+  - **Invisible** shows you offline, games included.
+- **Call view beside other apps.** Esc (or the button) leaves fullscreen but
+  keeps the call view in the window, so you can snap HopOn next to another
+  app; the × closes it.
+
+### Changed
+
+- **Server settings**, reorganized: invite (and revoke), name, channels as a
+  compact list (click one to edit or delete it), people, delete.
+- The channel dial stays put when you switch channels.
+- No more red edge lines on mentions, polls, notifications and settings.
+
 ## HopOn 0.6.4
 
 App only: no server update needed.

@@ -16,3 +16,20 @@ pub fn working_set_mb() -> Option<f64> {
     #[cfg(not(windows))]
     None
 }
+
+/// Seconds since the last keyboard or mouse input on the whole system (so
+/// playing a game counts as active). Windows only; None elsewhere.
+pub fn idle_seconds() -> Option<u64> {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::SystemInformation::GetTickCount;
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+        let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+        if GetLastInputInfo(&mut info) != 0 {
+            return Some(GetTickCount().wrapping_sub(info.dwTime) as u64 / 1000);
+        }
+        None
+    }
+    #[cfg(not(windows))]
+    None
+}

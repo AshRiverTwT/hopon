@@ -42,7 +42,15 @@ export default function Dial(p: { onNewChannel: (voice: boolean) => void; onServ
   let nav!: HTMLElement;
   let mono!: HTMLButtonElement;
   onMount(() => {
-    const measure = () => setBox({ w: nav.clientWidth, mono: mono.offsetLeft + mono.offsetWidth });
+    // Centre on the window, not on this row: the header above changes height
+    // between views (voice label, fitted titles, topics), and the monogram and
+    // the selected pill must not move when you switch channels.
+    const centre = () => {
+      const frame = nav.parentElement?.getBoundingClientRect();
+      const r = nav.getBoundingClientRect();
+      if (frame) nav.style.setProperty("--dial-y", `${Math.round(frame.top + frame.height / 2 - r.top)}px`);
+    };
+    const measure = () => { setBox({ w: nav.clientWidth, mono: mono.offsetLeft + mono.offsetWidth }); centre(); };
     const ro = new ResizeObserver(measure);
     ro.observe(nav);
     ro.observe(mono);

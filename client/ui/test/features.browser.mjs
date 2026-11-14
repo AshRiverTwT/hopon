@@ -196,22 +196,57 @@ test("a stale channel response cannot populate a different empty server", async 
   assert.deepEqual(await p.evaluate(async () => { const { s } = await import("/src/store.ts"); return { channel: s.selChannel, count: s.msgs.length }; }), { channel: null, count: 0 });
 });
 
-test("display name editor validates and submits, mouse push-to-talk binds", async (t) => {
+test("profile editor saves name, colour and bio; mouse push-to-talk binds", async (t) => {
   const p = await fixture(t);
   await p.getByRole("button", { name: "Settings", exact: true }).click();
-  await p.locator(".cascade-opts li").filter({ hasText: "Display name" }).locator("button.v").click();
-  await p.getByLabel("Display name", { exact: true }).fill("x".repeat(33));
-  await p.getByRole("button", { name: "Save name" }).click();
-  assert.match(await p.getByRole("alert").innerText(), /32/);
-  await p.getByLabel("Display name", { exact: true }).fill("Test Player");
-  await p.getByRole("button", { name: "Save name" }).click();
-  await p.waitForFunction(() => window.testCalls.some((x) => x.cmd === "set_display_name"));
+  await p.locator(".cascade-opts li").filter({ hasText: "picture, banner, colour" }).locator("button.v").click();
+  await p.getByRole("dialog", { name: "Profile" }).waitFor();
+  await p.locator(".rows .row").filter({ hasText: "Display name" }).locator("input").fill("Test Player");
+  await p.getByRole("radio", { name: "Sky" }).click();
+  await p.locator(".pedit-bio").fill("late-night lobbies");
+  await p.getByRole("button", { name: "Save", exact: true }).click();
+  await p.waitForFunction(() => window.testCalls.some((x) => x.cmd === "set_profile"));
   assert.equal(await p.evaluate(() => window.testCalls.find((x) => x.cmd === "set_display_name").args.name), "Test Player");
+  assert.deepEqual(await p.evaluate(() => window.testCalls.find((x) => x.cmd === "set_profile").args), { bio: "late-night lobbies", accent: 6 });
+  await p.getByRole("button", { name: "Settings", exact: true }).click();
   await p.locator(".cascade-cats button").filter({ hasText: "Controls" }).click();
   await p.locator(".cascade-opts li").filter({ hasText: "Talk key" }).locator("button.v").click();
   await p.evaluate(() => window.dispatchEvent(new MouseEvent("mousedown", { button: 3, bubbles: true })));
   await p.getByRole("button", { name: "Mouse 4", exact: true }).waitFor();
   assert.equal(await p.evaluate(() => window.testCalls.findLast((x) => x.cmd === "voice_ptt")?.args.keyCode), 0x1004);
+});
+
+test("profile card, presence and your status", async (t) => {
+  const p = await fixture(t);
+  // Presence dots: idle and do not disturb from the session snapshot.
+  await p.locator(".rail li").filter({ hasText: "jun" }).locator(".rail-dot.idle").waitFor();
+  await p.locator(".rail li").filter({ hasText: "nell" }).locator(".rail-dot.dnd").waitFor();
+  // Card from the people list: profile fetched with this server, bio and dates shown.
+  await p.locator(".rail li").filter({ hasText: "mira" }).click();
+  const card = p.locator(".pcard");
+  await card.getByText("Diamond 2 on a good day", { exact: false }).waitFor();
+  assert.equal(await p.evaluate(() => window.testCalls.find((x) => x.cmd === "get_profile").args.serverId), "9001");
+  await card.getByText("Member since").waitFor();
+  await card.getByRole("button", { name: "Message" }).waitFor();
+  await p.keyboard.press("Escape");
+  assert.equal(await card.count(), 0);
+  // A live status from someone else shows under their name.
+  await p.evaluate(() => window.__push({ t: "status", userId: "1002", status: { mode: "online", emoji: "", text: "back at 9", until: 0 } }));
+  await p.locator(".rail li").filter({ hasText: "mira" }).getByText("Playing VALORANT").waitFor(); // a game wins the one sub-line
+  await p.evaluate(() => window.__push({ t: "activity", userId: "1002", game: "" }));
+  await p.locator(".rail li").filter({ hasText: "mira" }).getByText("back at 9").waitFor();
+  // Your status: custom text with an expiry, then do not disturb.
+  await p.locator("button.me").click();
+  await p.locator(".status-input input").fill("heads down");
+  await p.getByRole("radio", { name: "1 hour" }).click();
+  await p.getByRole("button", { name: "Set status" }).click();
+  const set = await p.evaluate(() => window.testCalls.findLast((x) => x.cmd === "set_status").args);
+  assert.equal(set.text, "heads down");
+  assert.ok(set.until > Date.now() + 55 * 60_000 && set.until < Date.now() + 65 * 60_000, "clears in an hour");
+  await p.locator("button.me").click();
+  await p.getByRole("radio", { name: "Do not disturb" }).click();
+  assert.equal(await p.evaluate(() => window.testCalls.findLast((x) => x.cmd === "set_status").args.mode), "dnd");
+  await p.locator("button.me .rail-dot.dnd").waitFor();
 });
 
 test("voice room: Camera and Stream (quality menu) only; Leave clears media presence", async (t) => {
@@ -336,7 +371,7 @@ test("camera and screen video publish, render, and stop through local LiveKit", 
   })), { connected: false, camera: false, tracks: ["ended", "ended"] });
 });
 
-test("call view: opens fullscreen from the voice room, switches everyone/focus, Esc leaves", async (t) => {
+test("call view: opens fullscreen, switches everyone/focus, stays open windowed, Esc leaves", async (t) => {
   const p = await fixture(t, "voice");
   await p.getByRole("option", { name: /^Lounge/ }).click();
   await p.getByRole("button", { name: "Open call view" }).click();
@@ -348,7 +383,18 @@ test("call view: opens fullscreen from the voice room, switches everyone/focus, 
   assert.equal(await p.locator(".call-strip .call-tile").count(), 2, "the others in the strip");
   await p.getByRole("radio", { name: "Everyone" }).click();
   await p.locator(".call-grid").waitFor();
+  // Esc first leaves window fullscreen and keeps the view (HopOn beside another app)...
+  await p.keyboard.press("Escape");
+  await p.getByRole("button", { name: "Fullscreen", exact: true }).waitFor();
+  assert.equal(await p.locator(".call").count(), 1, "call view stays when the window isn't fullscreen");
+  // ...back to fullscreen, then the close button ends the view and fullscreen.
+  await p.getByRole("button", { name: "Fullscreen", exact: true }).click();
+  await p.getByRole("button", { name: "Close call view" }).click();
+  await p.waitForFunction(() => !document.querySelector(".call"));
+  assert.equal(await p.evaluate(() => window.testCalls.filter((x) => x.cmd === "set_fullscreen").map((x) => x.args.on).join()), "true,false,true,false");
+  // Esc twice from fullscreen: windowed, then closed.
+  await p.getByRole("button", { name: "Open call view" }).click();
+  await p.keyboard.press("Escape");
   await p.keyboard.press("Escape");
   await p.waitForFunction(() => !document.querySelector(".call"));
-  assert.equal(await p.evaluate(() => window.testCalls.filter((x) => x.cmd === "set_fullscreen").map((x) => x.args.on).join()), "true,false");
 });
