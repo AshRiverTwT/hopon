@@ -99,9 +99,7 @@ export default function Dial(p: { onNewChannel: (voice: boolean) => void; onServ
               transform: `translate(${x}px, calc(${y}px - 50%)) rotate(${theta()}deg)`,
               opacity: String(Math.max(0, 1 - Math.abs(off()) * 0.17)),
               visibility: Math.abs(off()) > VISIBLE ? "hidden" : "visible",
-              // The selected pill runs to the column's right edge (name left, › at the end);
-              // the others hug their names so their marks stay next to them.
-              ...(off() === 0 ? { width: `${geo().maxW}px` } : { "max-width": `${geo().maxW}px` }),
+              "max-width": `${geo().maxW}px`,
             } as const;
           };
           const label = () => {

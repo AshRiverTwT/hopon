@@ -39,7 +39,7 @@
   --hot: #ff1b50;
   --gutter: 28px;
   --dial: 300px;
-  --rail: clamp(150px, 10vw, 240px);
+  --rail: clamp(200px, 15vw, 260px);
   --games: clamp(340px, 30vw, 440px);
   color-scheme: dark;
   font: 400 15px/1.5 "Twemoji", "Inter Tight", "Segoe UI", system-ui, sans-serif;
@@ -127,7 +127,7 @@ label.check input { accent-color: var(--hot); width: 15px; height: 15px; }
      toggles (left) and status (right). */
   /* Top row: Friends / Servers (left), then the open view's header with the
      few app buttons on its right. */
-  grid-template-areas: "nav head head" "dial main rail" "foot-l main foot-r";
+  grid-template-areas: "nav head side" "dial main side" "foot-l main foot-r";
   /* Games open: the chat slides left as the right column widens. */
   transition: grid-template-columns 0.3s cubic-bezier(.2,.7,.2,1);
 }
@@ -314,7 +314,7 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 
 /* ---------- narrow windows ---------- */
 @media (max-width: 1100px) {
-  :root { --dial: 230px; --rail: 150px; }
+  :root { --dial: 230px; --rail: 190px; }
   .viewhead .long { display: none; }
   .monogram { font-size: 36px; }
 }
@@ -374,14 +374,13 @@ button.index-row:hover .index-name, .index-row.current .index-name { color: var(
 .cascade-note { position: absolute; bottom: 24px; left: var(--gutter); }
 
 /* dial chevron for the item under the cursor */
-.dial-item.cursor::after { content: "›"; color: var(--hot); margin-left: 2px; }
-.dial-item .dial-name { flex: 1; min-width: 0; text-align: left; }
+.dial-item.cursor::after { content: "›"; color: var(--hot); margin-left: -2px; }
 @media (max-width: 900px) { .cascade { grid-template-columns: 1fr; gap: 24px; transform: none; } .cascade-cats { text-align: left; } .cascade-cats li { margin-right: 0 !important; } }
 
 /* ---------- games panel ---------- */
 .frame.with-games {
   grid-template-columns: var(--dial) minmax(0, 1fr) var(--games);
-  grid-template-areas: "nav head head" "dial main games" "foot-l main foot-r";
+  grid-template-areas: "nav head side" "dial main side" "foot-l main foot-r";
 }
 .frame.with-games .empty-state { grid-column: 1 / 3; }
 .pill.ghost.active { background: var(--cream-20); color: var(--cream); }
@@ -877,4 +876,31 @@ video.media { background: #000; }
 .top-icon.people { width: auto; padding: 0 8px; gap: 6px; display: inline-flex; align-items: center; }
 .top-count { font-size: 13px; font-variant-numeric: tabular-nums; }
 .call-watch { top: auto; bottom: 16%; transform: translateX(-50%); }
-.viewhead .title { font-size: clamp(34px, 4.8vw, 72px); }
+
+/* ---------- right column (0.6.3): a few icons, then people or games, full height ---------- */
+.side { grid-area: side; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding-top: 20px; }
+.side > .rail, .side > .games { grid-area: auto; flex: 1; min-height: 0; }
+.side-bar { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 0 var(--gutter) 10px 6px; }
+.side-bar .people { margin-right: auto; }
+.games-btn { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 16px; font-size: 14px; font-weight: 500;
+  color: var(--hot); box-shadow: inset 0 0 0 1px rgba(255, 27, 80, 0.45); }
+.games-btn:hover { background: rgba(255, 27, 80, 0.12); }
+.games-btn.on { background: var(--hot); color: #fff; box-shadow: none; }
+.games-btn .glyph { width: 17px; height: 17px; }
+.side .rail { padding-top: 6px; }
+.viewhead { padding-right: 20px; }
+@media (max-width: 900px) {
+  .side-bar { flex-wrap: wrap; justify-content: center; padding: 0 4px 8px; }
+  .games-btn span { display: none; }
+  .games-btn { padding: 0 8px; }
+}
+/* Display title sized to its column: (column - icons) / letters, 28–72 px. */
+.viewhead > .head { container-type: inline-size; }
+.viewhead .fit-title { font-size: clamp(28px, calc((100cqi - var(--reserve)) / (var(--n) * 0.95)), 72px); }
+.nav-update { margin-top: 10px; align-self: flex-start; }
+.handle-chip { flex: none; align-self: center; padding: 3px 9px; border-radius: 12px; font-size: 13px; color: var(--cream-55); background: var(--cream-05); }
+.handle-chip:hover { color: var(--cream); background: var(--cream-10); }
+.friends .friend-add { margin-top: 4px; }
+.admin section > .pill.solid { justify-self: start; align-self: flex-start; width: auto; }
+.friends { padding-top: 18px; gap: 26px; }
+.friends .friend-add { margin-top: 0; }

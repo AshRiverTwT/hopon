@@ -7,6 +7,7 @@ import { call } from "../ipc";
 import { closeFriends, currentDm, friendOf, isUnread, openDm, openFriends, s, toast, userName } from "../store";
 import type { Friend } from "../types";
 import { Avatar } from "./Avatar";
+import { FitTitle } from "./FitTitle";
 import { BookmarkIcon, SearchIcon } from "./icons";
 
 const err = (e: unknown) => toast(String(e).replace(/^Error: /, ""));
@@ -25,9 +26,9 @@ export function FriendsNav() {
   const incoming = () => s.friends.filter((f) => f.state === "incoming").length;
   return (
     <nav class="dm-nav" aria-label="Direct messages">
-      <div class="eyebrow dm-nav-head">Direct messages</div>
+      <Show when={dms().length}><div class="eyebrow dm-nav-head">Messages</div></Show>
       <ul>
-        <For each={dms()} fallback={<li class="dm-empty muted small">Message a friend and it shows up here.</li>}>
+        <For each={dms()}>
           {(d) => {
             const unread = () => d.sv.channels.some((c) => isUnread(c)) && currentDm()?.id !== d.sv.id;
             return (
@@ -71,28 +72,26 @@ export function FriendsHome() {
   };
   const respond = (f: Friend, accept: boolean) => call("friend_respond", { userId: f.user.id, accept }).catch(err);
   const remove = (f: Friend) => { setConfirm(null); call("friend_remove", { userId: f.user.id }).catch(err); };
-  const copy = () => navigator.clipboard?.writeText(s.username).then(() => toast("Username copied")).catch(() => {});
   return (
     <section class="friends">
       <div class="friend-add">
         <div class="field-row">
-          <input class="line big" placeholder="Add a friend by username" value={name()} spellcheck={false} autocomplete="off"
+          <input class="line big" placeholder="Add by username" value={name()} spellcheck={false} autocomplete="off"
             onInput={(e) => setName(e.currentTarget.value)} onKeyDown={(e) => e.key === "Enter" && void send()} />
-          <button class="pill solid" disabled={!name().trim() || busy()} onClick={() => void send()}>{busy() ? "Sending…" : "Send request"}</button>
+          <button class="pill solid" disabled={!name().trim() || busy()} onClick={() => void send()}>{busy() ? "Adding…" : "Add"}</button>
         </div>
-        <p class="muted small">Your username is <button class="link inline" title="Copy" onClick={copy}><strong>{s.username}</strong></button>. Share it so friends can add you.</p>
       </div>
 
       <Show when={requests().length}>
         <section>
-          <div class="eyebrow friends-head">Requests · {requests().length}</div>
+          <div class="eyebrow friends-head">Requests</div>
           <ol class="index people">
             <For each={requests()}>
               {(f) => (
                 <li class="index-row static">
-                  <span class="index-name"><Avatar id={f.user.id} size={40} />{f.user.name}<span class="handle">@{f.username}</span></span>
+                  <span class="index-name"><Avatar id={f.user.id} size={40} />{f.user.name}<Show when={f.username.toLowerCase() !== f.user.name.toLowerCase()}><span class="handle">@{f.username}</span></Show></span>
                   <span class="index-meta">
-                    <Show when={f.state === "incoming"} fallback={<><span>Waiting for them</span><button class="link" onClick={() => remove(f)}>Cancel</button></>}>
+                    <Show when={f.state === "incoming"} fallback={<><span>Pending</span><button class="link" onClick={() => remove(f)}>Cancel</button></>}>
                       <button class="pill solid" onClick={() => respond(f, true)}>Accept</button>
                       <button class="pill ghost" onClick={() => respond(f, false)}>Decline</button>
                     </Show>
@@ -107,13 +106,13 @@ export function FriendsHome() {
       <section>
         <div class="eyebrow friends-head">Friends · {friends().length}</div>
         <ol class="index people">
-          <For each={friends()} fallback={<li class="muted lede friends-empty">No friends yet. Add someone by their username above.</li>}>
+          <For each={friends()} fallback={<li class="muted friends-empty">No friends yet</li>}>
             {(f) => (
               <li class="index-row static" classList={{ off: !s.online[f.user.id] }}>
                 <span class="index-name">
                   <span class="rail-av"><Avatar id={f.user.id} size={40} /><Show when={s.online[f.user.id]}><i class="rail-dot" /></Show></span>
                   {f.user.name}
-                  <span class="handle">{gameOf(f.user.id) ? <span class="game">Playing {gameOf(f.user.id)}</span> : s.online[f.user.id] ? "Online" : "Offline"}</span>
+                  <Show when={gameOf(f.user.id)}><span class="handle"><span class="game">Playing {gameOf(f.user.id)}</span></span></Show>
                 </span>
                 <span class="index-meta">
                   <button class="pill" onClick={() => openDm(f.user.id)}>Message</button>
@@ -140,7 +139,7 @@ export function DmHeader(p: { search: () => void; saved: () => void }) {
       <div class="eyebrow">Direct message{f() ? ` · @${f()!.username}` : ""}</div>
       <div class="head-row">
         <Avatar id={other()} size={40} />
-        <h1 class="display title" title={userName(other())}>{userName(other())}</h1>
+        <FitTitle text={userName(other())} reserve={200} />
         <Show when={s.online[other()]}><span class="dm-online">Online</span></Show>
         <button class="icon-btn" title="Search this conversation" aria-label="Search this conversation" onClick={p.search}><SearchIcon /></button>
         <button class="icon-btn" title="Saved messages" aria-label="Saved messages" onClick={p.saved}><BookmarkIcon /></button>

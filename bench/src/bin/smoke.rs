@@ -606,6 +606,17 @@ async fn main() -> Result<()> {
         ensure!(a1.call(C2S::SavePrefs { json: format!("{{\"x\":\"{}\"}}", "a".repeat(MAX_PREFS_BYTES)) }).await.is_err(), "oversized accepted");
         Ok(())
     });
+    pass &= check!("edits: only within 10 minutes of sending", {
+        let (mut o, _m, _sid, text, _v, _mid) = admin_setup(&url).await?;
+        // An ID minted 11 minutes ago (IDs carry their time).
+        let old_ms = (now_us() / 1000 - 11 * 60 * 1000) as u64 - hopon_shared::ids::EPOCH_MS;
+        let old_id = (old_ms << 22) as i64;
+        let err = o.call(C2S::Edit { channel_id: text, message_id: old_id, content: "late".into() }).await.err().map(|e| e.to_string()).unwrap_or_default();
+        ensure!(err.contains("10 minutes"), "old edit not refused: {err}");
+        let S2C::Ack { id, .. } = o.call(C2S::Send { channel_id: text, content: "fresh".into(), nonce: 9101, retry: false, t_input: 0, t_client_send: 0, reply_to: None, files: vec![], gifs: vec![] }).await? else { bail!("no ack") };
+        ensure!(o.call(C2S::Edit { channel_id: text, message_id: id, content: "fresh, edited".into() }).await.is_ok(), "fresh edit refused");
+        Ok(())
+    });
     pass &= check!("friends + DMs: request by username, accept opens one DM for both, guards, unfriend closes it", {
         let mut a = Client::connect(&url).await?;
         let ua = a.signup("fra").await?;

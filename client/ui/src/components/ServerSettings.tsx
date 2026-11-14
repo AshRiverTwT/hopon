@@ -63,19 +63,38 @@ function ChannelRow(p: { c: Channel }) {
   );
 }
 
+/** Invite link (anyone in the server can make one). */
+function InviteSection(p: { serverId: string }) {
+  const [link, setLink] = createSignal("");
+  const make = async () => { try { setLink(await call<string>("create_invite", { serverId: p.serverId })); } catch (e) { toast(String(e)); } };
+  return (
+    <section>
+      <div class="eyebrow">Invite</div>
+      <Show when={link()} fallback={<button class="pill solid" onClick={() => void make()}>Create invite link</button>}>
+        <div class="field-row">
+          <input class="line big" readonly value={link()} onFocus={(e) => e.currentTarget.select()} />
+          <button class="pill solid" onClick={() => { void navigator.clipboard.writeText(link()); toast("Copied"); }}>Copy</button>
+        </div>
+        <p class="muted small">Works for 7 days.</p>
+      </Show>
+    </section>
+  );
+}
+
 export function ServerSettingsSheet(p: { close: () => void }) {
   const sv = currentServer;
   return (
-    <Overlay title={isOwner() ? "Server" : "Membership"} close={p.close}>
+    <Overlay title={currentServer()?.name ?? "Server"} close={p.close}>
       <Show when={sv()}>
         {(server) => (
           <Show when={isOwner()} fallback={
             <div class="admin">
-              <p class="lede">You're a member of {server().name}.</p>
+              <InviteSection serverId={server().id} />
               <Confirm name={server().name} action="Leave server" onConfirm={async () => { await call("leave_server", { serverId: server().id }); p.close(); }} />
             </div>
           }>
             <div class="admin">
+              <InviteSection serverId={server().id} />
               <section>
                 <div class="eyebrow">Name</div>
                 <Editable value={server().name} max={64} class="big" save={(name) => call("rename_server", { serverId: server().id, name })} />

@@ -20,6 +20,8 @@ pub fn versioned_url(url: &str) -> String {
 }
 
 pub const MAX_MESSAGE_CHARS: usize = 4000;
+/// Your own messages can be edited for this long after sending.
+pub const EDIT_WINDOW_MS: i64 = 10 * 60 * 1000;
 pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 pub const HISTORY_PAGE_MAX: u16 = 100;
 /// Avatars are small square images (the client uploads 128 px WebP).

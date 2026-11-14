@@ -27,7 +27,6 @@ export function PollSheet(p: { close: () => void; channel: string }) {
   const focusOption = (i: number) => queueMicrotask(() => (list.querySelectorAll("input")[i] as HTMLInputElement | undefined)?.focus());
   return (
     <Overlay title="New poll" close={p.close}>
-      <p class="lede poll-where">Posting in <strong>#{p.channel}</strong>. People vote with one click; votes update live.</p>
       <input class="line big" placeholder="Ask a question" maxLength={200} value={question()} autofocus
         onInput={(e) => setQuestion(e.currentTarget.value)} onKeyDown={(e) => e.key === "Enter" && focusOption(0)} />
       <ol class="poll-edit" ref={list}>
@@ -85,7 +84,7 @@ export function PollCard(p: { poll: Poll; m: Msg }) {
           )}
         </For>
       </div>
-      <div class="poll-foot">{voters() === 1 ? "1 person voted" : `${voters()} people voted`} · click to vote, again to take it back</div>
+      <div class="poll-foot">{voters() === 1 ? "1 vote" : `${voters()} votes`}</div>
     </div>
   );
 }

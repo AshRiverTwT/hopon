@@ -2,6 +2,24 @@
 
 **Download the latest:** [HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe)
 
+## HopOn 0.6.3
+
+Update the server too, for the 10-minute edit limit (the app works on a
+0.6.1 server; edits just aren't limited there).
+
+### Changed
+
+- **Right column, top to bottom:** People, **Games**, Server and Settings
+  sit above the people list (or the games panel), which starts at the top
+  again.
+- **Invite** moved into **Server** (everyone can make an invite link there).
+- Settings has a gear; Update sits under Friends / Servers.
+- Titles size themselves to fit, so they don't get cut off when Games is open.
+- **Messages can be edited for 10 minutes** after sending.
+- Fewer explanations: a cleaner Friends page (your @username sits by the
+  title), stream quality and polls.
+- The selected channel on the wheel is back to its old size.
+
 ## HopOn 0.6.1
 
 App only: no server update needed.

@@ -687,6 +687,9 @@ impl Session {
                 }
                 self.member_chan(channel_id, uid).await?;
                 let edited_at = now_us() / 1000;
+                if edited_at - hopon_shared::ids::time_ms(message_id) > hopon_shared::EDIT_WINDOW_MS {
+                    return Err((ErrorCode::Forbidden, "Messages can only be edited for 10 minutes".into()));
+                }
                 let (reply, rx) = oneshot::channel();
                 self.st
                     .persist

@@ -10,6 +10,11 @@ const NODE_BITS: u32 = 10;
 const SEQ_BITS: u32 = 12;
 const SEQ_MASK: u64 = (1 << SEQ_BITS) - 1;
 
+/// When an ID was made, in Unix ms (messages: when it was sent).
+pub fn time_ms(id: i64) -> i64 {
+    ((id as u64) >> (NODE_BITS + SEQ_BITS)) as i64 + EPOCH_MS as i64
+}
+
 pub struct IdGen {
     node: u64,
     /// Last issued `(ms << SEQ_BITS) | seq`.

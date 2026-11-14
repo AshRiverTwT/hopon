@@ -9,6 +9,7 @@ import { CameraIcon, FullIcon, GrowIcon, PipIcon, ScreenIcon, ShrinkIcon } from 
 import { call } from "../ipc";
 import { currentServer, s, toast, userName } from "../store";
 import { Avatar } from "./Avatar";
+import { FitTitle } from "./FitTitle";
 import { openAudio } from "../sounds";
 import { prefs, setPrefs } from "../prefs";
 
@@ -88,11 +89,9 @@ export function StreamButton(p: { disabled: boolean; round?: boolean }) {
             {(q) => (
               <button role="menuitem" class="quality-opt" classList={{ last: prefs.streamQuality === q }} onClick={() => { setPrefs({ streamQuality: q }); void start(q); }}>
                 <span class="quality-name">{QUALITIES[q].label}</span>
-                <span class="quality-note">{QUALITIES[q].note}</span>
               </button>
             )}
           </For>
-          <p class="quality-foot">Sound is shared too when you pick a whole screen.</p>
         </div>
         </Portal>
       </Show>
@@ -130,7 +129,7 @@ export function StageHeader() {
     <>
       <div class="eyebrow">Voice room</div>
       <div class="head-row">
-        <h1 class="display title" title={ch()?.name}>{ch()?.name}</h1>
+        <FitTitle text={ch()?.name ?? ""} reserve={50} />
         <Show when={connected()}>
           <button class="icon-btn" title="Fullscreen call view: everyone as tiles, or one picture big" aria-label="Open call view" onClick={() => setFullscreen(GRID)}><FullIcon /></button>
         </Show>

@@ -140,11 +140,11 @@ test("poll creation, live vote counts, removal and unrelated reactions", async (
   assert.equal(await chess.locator(".poll-count").innerText(), "1");
   await p.evaluate(() => window.__push({ t: "reaction", channelId: "7001", messageId: "999999999", emoji: "🔥", userId: "1002", add: true }));
   await p.waitForFunction(() => document.querySelector(".reactions")?.textContent.includes("🔥"));
-  assert.match(await p.locator(".poll-foot").innerText(), /^1 person voted/);
+  assert.equal(await p.locator(".poll-foot").innerText(), "1 vote");
   // Poll votes aren't repeated as reaction chips; other reactions are.
   assert.equal(await p.locator(".reactions .chip").count(), 1);
   await chess.click();
-  await p.waitForFunction(() => document.querySelector(".poll-foot")?.textContent.startsWith("0 people voted"));
+  await p.waitForFunction(() => document.querySelector(".poll-foot")?.textContent === "0 votes");
   assert.equal(await chess.locator(".poll-count").innerText(), "0");
 });
 

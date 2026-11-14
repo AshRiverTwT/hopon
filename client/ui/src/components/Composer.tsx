@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { currentServer, iAmTyping, rememberMentionCandidates, s, sendMessage, serverUsers, set, toast, typingIn, userName } from "../store";
+import { currentServer, iAmTyping, rememberMentionCandidates, s, sendMessage, serverUsers, set, toast, typingIn, userName, editable } from "../store";
 import { call } from "../ipc";
 import { fmtSize } from "../media";
 import type { Attachment, User } from "../types";
@@ -191,7 +191,7 @@ export default function Composer() {
       }
     } else if (e.key === "ArrowUp" && !text()) {
       const mine = [...s.msgs].reverse().find((m) => m.authorId === s.user?.id && !m.id.startsWith("p"));
-      if (mine) { e.preventDefault(); set("editing", mine.id); }
+      if (mine && editable(mine)) { e.preventDefault(); set("editing", mine.id); }
     }
   };
   return (

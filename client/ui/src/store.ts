@@ -672,3 +672,7 @@ export async function deleteMessage(id: string) {
   if (!s.selChannel) return;
   await call("delete_message", { channelId: s.selChannel, id }).catch((e) => toast(String(e)));
 }
+
+/** Your messages can be edited for 10 minutes after sending (the server enforces it too). */
+export const EDIT_WINDOW_MS = 10 * 60 * 1000;
+export const editable = (m: Msg) => Date.now() - m.ts < EDIT_WINDOW_MS;

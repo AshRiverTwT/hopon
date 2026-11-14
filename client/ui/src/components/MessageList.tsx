@@ -3,7 +3,7 @@
 // ResizeObserver on every mounted row (fonts, media, edits, reactions), so a
 // 5000-message channel renders ~30 rows and scrolls at full frame rate.
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
-import { deleteMessage, editMessage, isOwner, jumpTo, loadOlder, maybeMarkRead, retryOpenChannel, s, set, toggleReaction, userName } from "../store";
+import { deleteMessage, editMessage, isOwner, jumpTo, loadOlder, maybeMarkRead, retryOpenChannel, s, set, toggleReaction, userName, editable } from "../store";
 import { findId } from "../merge";
 import { decodeMentions, jumboEmoji, mentionsUser, preview } from "../rich";
 import Rich from "./Rich";
@@ -321,7 +321,7 @@ function Row(p: { m: Msg; header: boolean; day: string | null; newHere: boolean;
           <button class="link" onClick={() => set("replyTo", { ...p.m })}>Reply</button>
           <button class="link" onClick={() => setPicker((v) => !v)}>React</button>
           <button class="link" aria-pressed={isBookmarked(p.m.channelId, p.m.id)} onClick={() => toggleBookmark(p.m.channelId, p.m.id)}>{isBookmarked(p.m.channelId, p.m.id) ? "Saved" : "Save"}</button>
-          <Show when={mine()}><button class="link" onClick={() => set("editing", p.m.id)}>Edit</button></Show>
+          <Show when={mine() && editable(p.m)}><button class="link" onClick={() => set("editing", p.m.id)}>Edit</button></Show>
           <Show when={mine() || isOwner()}><button class="link" onClick={() => deleteMessage(p.m.id)}>Delete</button></Show>
           <Show when={picker()}>
             <EmojiPicker class="for-react" pick={(e) => { setPicker(false); setHover(node.matches(":hover")); toggleReaction(p.m, e); }} close={() => { setPicker(false); setHover(node.matches(":hover")); }} />
