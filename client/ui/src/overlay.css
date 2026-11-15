@@ -120,4 +120,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 
 :root { --mono: "Geist Mono", "Cascadia Mono", Consolas, ui-monospace, monospace; }
 .ov-author, .ov-time, .eyebrow { font-family: var(--mono); }
-.mark::after { background: #ff5b1f; }
+
+/* the HopOn mark (step H) replaces the old letter + bar */
+.mark::after { display: none; }
+.mark .logo-mark { width: 70%; height: 70%; display: block; color: var(--cream); }
+.mark { padding-top: 0; }

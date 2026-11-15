@@ -1285,5 +1285,8 @@ body { letter-spacing: -0.006em; }
 button.me { padding: 0 8px 0 0; height: 30px; }
 .toggles { align-items: flex-end; }
 .foot-r .status { line-height: 30px; height: 30px; align-items: center; }
-/* the logo's bar is the signal colour, like the app icon */
-.mark::after { background: var(--signal); }
+
+/* the HopOn mark (step H) replaces the old letter + bar */
+.mark::after { display: none; }
+.mark .logo-mark { width: 70%; height: 70%; display: block; color: var(--cream); }
+.mark { padding-top: 0; }

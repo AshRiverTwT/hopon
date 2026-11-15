@@ -4,8 +4,9 @@
 
 ## Unreleased (next update)
 
-- **Icon:** the bar on the HopOn icon (and the logo inside the app) is
-  signal orange, the app's one accent colour.
+- **New logo: the step H.** An H whose right leg has hopped up a step,
+  joined by a signal-orange bar. On the app icon, the tray, the installer and
+  the logo inside the app.
 
 ## HopOn 0.8.0
 

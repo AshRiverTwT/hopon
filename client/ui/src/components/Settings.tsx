@@ -1,5 +1,6 @@
 // Settings as a cascading drill-down menu: CATEGORY > option < VALUE >.
 // Keyboard: ↑/↓ move, → / Enter go deeper or cycle, ← go back / cycle back.
+import { LogoMark } from "./icons";
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { call } from "../ipc";
 import { s, toast } from "../store";
@@ -185,7 +186,7 @@ export default function Settings(p: { close: () => void }) {
   return (
     <div class="sheet menu-sheet" role="dialog" aria-label="Settings">
       <div class="sheet-bar">
-        <span class="wordmark"><span class="mark" aria-hidden="true">H</span>HopOn</span>
+        <span class="wordmark"><span class="mark" aria-hidden="true"><LogoMark /></span>HopOn</span>
         <button class="pill" onClick={p.close}>Close</button>
       </div>
       <div class="cascade">

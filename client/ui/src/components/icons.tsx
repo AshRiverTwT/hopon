@@ -56,3 +56,12 @@ export const GamesIcon = () => <I d="M4.5 4.5h7a3 3 0 013 3v1.5a2.5 2.5 0 01-4.3
 export const SlidersIcon = () => <I d="M2.5 4.5h7M12.5 4.5h1M2.5 11.5h1M6.5 11.5h7M11 3v3M5 10v3" />;
 export const GearIcon = () => <I d="M6.9 1.5h2.2l.4 1.8 1.4.6 1.6-1 1.6 1.6-1 1.6.6 1.4 1.8.4v2.2l-1.8.4-.6 1.4 1 1.6-1.6 1.6-1.6-1-1.4.6-.4 1.8H6.9l-.4-1.8-1.4-.6-1.6 1-1.6-1.6 1-1.6-.6-1.4-1.8-.4V6.9l1.8-.4.6-1.4-1-1.6 1.6-1.6 1.6 1 1.4-.6zM8 10.3a2.3 2.3 0 100-4.6 2.3 2.3 0 000 4.6z" />;
 export const SmileIcon = () => <I d="M8 14.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM5.3 9.5c.7 1 1.6 1.5 2.7 1.5s2-.5 2.7-1.5M6 6.3v.2M10 6.3v.2" />;
+
+/** The HopOn mark: an H whose right leg has hopped up a step, joined by the signal bar. */
+export const LogoMark = () => (
+  <svg class="logo-mark" viewBox="0 0 512 512" aria-hidden="true">
+    <rect x="100" y="160" width="96" height="256" fill="currentColor" />
+    <rect x="316" y="96" width="96" height="256" fill="currentColor" />
+    <rect x="196" y="228" width="120" height="64" fill="#ff5b1f" />
+  </svg>
+);

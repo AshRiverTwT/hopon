@@ -24,7 +24,7 @@ import Attachments from "./components/Attachments";
 import { prefs } from "./prefs";
 import { comboLabel } from "./hotkeys";
 import { SYSTEM_USER, type Msg, type Presence, type Server, type UiEvent, type User } from "./types";
-import { MicOffIcon, VoiceGlyph } from "./components/icons";
+import { LogoMark, MicOffIcon, VoiceGlyph } from "./components/icons";
 import "./overlay.css";
 
 const fmtTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -144,7 +144,7 @@ function Overlay() {
     <div class="ov">
       <section class="ov-chat">
         <header class="ov-head">
-          <span class="mark" aria-hidden="true">H</span>
+          <span class="mark" aria-hidden="true"><LogoMark /></span>
           <span class="ov-title">{channel() ? (channel()!.sv.dmWith ? userName(channel()!.sv.dmWith!) : channel()!.c.name) : "No channel open"}</span>
           <span class="ov-sub">{channel()?.sv.dmWith ? "Direct message" : channel()?.sv.name}</span>
           <span class="ov-hint">{typing() ? "Enter to send · Esc to cancel" : `${comboLabel(prefs.hotkeys.overlayType)} to type · ${comboLabel(prefs.hotkeys.overlay)} to hide`}</span>
