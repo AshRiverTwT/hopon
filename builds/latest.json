@@ -1,6 +1,6 @@
 {
-  "version": "0.7.3",
+  "version": "0.7.4",
   "url": "https://github.com/AshRiverTwT/hopon/raw/moon/builds/HopOn-Moon-setup.exe",
-  "sha256": "68648a7a33c7d615930b2c5f2aae1125c7157aab9557d2e35b1d224750a9c207",
-  "notes": "Moon 0.7.3: Geist and Geist Mono type. Your servers now sit on a rail through the dial: previous above, next below. Click one, or scroll inside the arc to turn it, with an animation as you switch."
+  "sha256": "565590bc162e288b5e3c53dce5b3c570f39c63bea0c9503f009b95ffe926ee80",
+  "notes": "Moon 0.7.4: signal orange marks what's happening (live, speaking, unread, mentions, lit LEDs, the dial pointer). Game results and profile colours are in colour again."
 }
