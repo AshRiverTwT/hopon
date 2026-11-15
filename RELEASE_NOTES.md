@@ -2,6 +2,40 @@
 
 **Download the latest:** [Windows: HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe) · [Linux: HopOn-x86_64.AppImage](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-x86_64.AppImage)
 
+## HopOn 0.8.0
+
+App only: no server update needed (works with the 0.7 server).
+
+A new look for HopOn, tested as the Moon experiment: a precision instrument
+in black and white.
+
+### New
+
+- **Servers on the dial.** Your servers sit on a straight list through the
+  server letters: previous above, next below. Scroll inside the dial's arc to
+  switch (outside it, the wheel moves through channels), or click one. The new
+  server slides in from the direction you scrolled.
+- **The channel wheel is a rotary dial.** A ring of ticks turns with your
+  channels, with a lit pointer on the selected one and a readout under the
+  server letters (`01/08 TXT`, `VOX` for voice).
+- **Hardware keys.** Sharp buttons with thin borders, uppercase labels and a
+  press. Friends | Servers is a two-position switch; People, Games, Server
+  and Settings are one strip of keys; Mic and Sound have a light.
+- **Black and white, with one signal colour.** Orange marks what's happening:
+  LIVE, speaking, unread, mentions, lit lights, the dial's pointer and
+  updates. Game results and profile colours stay in colour.
+- **New type:** Geist for text, Geist Mono for labels and numbers.
+- **Sharp everywhere:** no rounded corners; shadows give depth. Presence is
+  a solid square (online), half-filled (idle), a bar (do not disturb) or an
+  outline (invisible).
+- **New icon:** a square black icon with a white H.
+
+### Changed
+
+- The message bar, Mic/Sound and the status readout sit on one line at the
+  bottom; "is typing" shows above the message bar.
+- Viewfinder corners frame the app and the login screen.
+
 ## HopOn 0.7.0
 
 **Update the server too** (new protocol): 0.6 apps and servers don't talk to

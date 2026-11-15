@@ -195,6 +195,7 @@ export default function App() {
                   <Match when={!currentServer()}>{null}</Match>
                   <Match when={s.stage}><StageHeader /></Match>
                   <Match when={s.selChannel}>
+                    <div class="eyebrow">Text channel{currentServer() ? ` · ${currentServer()!.name}` : ""}</div>
                     <div class="head-row">
                       <FitTitle text={channel()?.name ?? ""} />
                       <button class="icon-btn fav" classList={{ on: isFavorite(s.selChannel!) }} aria-pressed={isFavorite(s.selChannel!)} title={isFavorite(s.selChannel!) ? "Favorite channel (click to remove)" : "Favorite channel"} aria-label="Favorite channel" onClick={() => toggleFavorite(s.selChannel!)}><StarIcon filled={isFavorite(s.selChannel!)} /></button>

@@ -6,7 +6,7 @@ import { currentServer, s, set, toast } from "./store";
 import type { Status, StatusMode } from "./types";
 import { setQuietCheck } from "./sounds";
 
-/** Profile colours, picked to sit on the dark theme (index 0 = none). */
+/** Profile colours: the app is black and white, so a name's colour is one of the few places colour shows (index 0 = none). */
 export const ACCENTS = ["", "#ff1b50", "#ff7a4d", "#f2b84b", "#b8d65a", "#4fd1a5", "#5ab4f0", "#a58cf5", "#f283c4"];
 export const ACCENT_NAMES = ["None", "Red", "Coral", "Amber", "Lime", "Mint", "Sky", "Violet", "Rose"];
 export const accentIndex = (id: string) => (s.user?.id === id ? s.user.accent : s.users[id]?.accent) ?? 0;

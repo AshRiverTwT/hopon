@@ -1,5 +1,5 @@
-// The small presence mark on an avatar: green online, amber moon idle, red
-// do not disturb. Offline shows nothing; you see a hollow ring while invisible.
+// The small presence mark on an avatar: solid = online, half = idle, a bar =
+// do not disturb. Offline shows nothing; you see an outline while invisible.
 import { Show } from "solid-js";
 import { presenceOf, SHOWN_LABEL } from "../profile";
 
