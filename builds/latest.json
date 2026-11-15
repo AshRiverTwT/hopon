@@ -1,6 +1,6 @@
 {
-  "version": "0.7.4",
-  "url": "https://github.com/AshRiverTwT/hopon/raw/moon/builds/HopOn-Moon-setup.exe",
-  "sha256": "565590bc162e288b5e3c53dce5b3c570f39c63bea0c9503f009b95ffe926ee80",
-  "notes": "Moon 0.7.4: signal orange marks what's happening (live, speaking, unread, mentions, lit LEDs, the dial pointer). Game results and profile colours are in colour again."
+  "version": "0.8.0",
+  "url": "https://github.com/AshRiverTwT/hopon/raw/moon/builds/HopOn-0.8.0-setup.exe",
+  "sha256": "98c27c0cd3c7d2058966d400dc3c902a12730ccce6351c8ad7616a91e97a6fff",
+  "notes": "Moon is now HopOn. This installs the regular HopOn 0.8.0 (with the Moon look) and opens it; from then on it updates with every release. Sign in once, then you can uninstall HopOn Moon."
 }
