@@ -2,6 +2,11 @@
 
 **Download the latest:** [Windows: HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe) · [Linux: HopOn-x86_64.AppImage](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-x86_64.AppImage)
 
+## Unreleased (next update)
+
+- **Icon:** the bar on the HopOn icon (and the logo inside the app) is
+  signal orange, the app's one accent colour.
+
 ## HopOn 0.8.0
 
 App only: no server update needed (works with the 0.7 server).

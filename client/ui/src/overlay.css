@@ -120,3 +120,4 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 
 :root { --mono: "Geist Mono", "Cascadia Mono", Consolas, ui-monospace, monospace; }
 .ov-author, .ov-time, .eyebrow { font-family: var(--mono); }
+.mark::after { background: #ff5b1f; }

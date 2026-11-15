@@ -1285,3 +1285,5 @@ body { letter-spacing: -0.006em; }
 button.me { padding: 0 8px 0 0; height: 30px; }
 .toggles { align-items: flex-end; }
 .foot-r .status { line-height: 30px; height: 30px; align-items: center; }
+/* the logo's bar is the signal colour, like the app icon */
+.mark::after { background: var(--signal); }
