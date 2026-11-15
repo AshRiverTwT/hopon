@@ -36,7 +36,9 @@ export interface MediaPresence { userId: string; channelId: string; source: Medi
 
 export type UiEvent =
   | { t: "conn"; state: "connecting" | "online" | "offline"; rttMs: number | null }
-  | { t: "session"; user: User | null; servers: Server[]; users: User[]; voice: Presence[]; media: MediaPresence[]; username: string; friends: Friend[]; status: Status }
+  | { t: "session"; user: User | null; servers: Server[]; users: User[]; voice: Presence[]; media: MediaPresence[]; username: string; friends: Friend[]; status: Status;
+      /** The core is still trying the saved sign-in: keep the splash up. */
+      authPending?: boolean }
   | { t: "friend"; friend: Friend }
   | { t: "friendRemoved"; userId: string }
   | { t: "server"; server: Server }

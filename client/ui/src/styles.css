@@ -1290,3 +1290,38 @@ button.me { padding: 0 8px 0 0; height: 30px; }
 .mark::after { display: none; }
 .mark .logo-mark { width: 70%; height: 70%; display: block; color: var(--cream); }
 .mark { padding-top: 0; }
+
+/* ---------- startup splash: the mark builds itself ---------- */
+.splash { display: grid; place-items: center; background: var(--ink); }
+.splash .logo-mark { width: 120px; height: 120px; color: var(--cream); }
+.logo-mark.build .leg-l, .logo-mark.build .leg-r { transform-box: fill-box; }
+.logo-mark.build .leg-l { animation: mark-rise .32s cubic-bezier(.2,.9,.2,1) both; }
+.logo-mark.build .leg-r { animation: mark-hop .44s .14s cubic-bezier(.3,1.5,.4,1) both; }
+.logo-mark.build .bar { transform-box: fill-box; transform-origin: 0 50%; animation: mark-bar .2s .46s cubic-bezier(.2,.9,.2,1) both; }
+@keyframes mark-rise { from { transform: translateY(70%); opacity: 0; } }
+@keyframes mark-hop { 0% { transform: translateY(80%); opacity: 0; } 40% { opacity: 1; } 65% { transform: translateY(-14%); } 100% { transform: none; } }
+@keyframes mark-bar { from { transform: scaleX(0); } }
+.frame, .login { animation: app-in .2s ease-out both; }
+@keyframes app-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .logo-mark.build * { animation: none; } }
+
+/* ---------- 0.8.1 ---------- */
+/* Only message text (and what you type) can be selected: selecting two
+   messages no longer picks up names, times or React / Reply / Save. */
+body { -webkit-user-select: none; user-select: none; }
+.msg .body, .msg .body *, input, textarea, [contenteditable="true"] { -webkit-user-select: text; user-select: text; }
+.msg .actions, .msg .actions *, .reactions, .reactions * { -webkit-user-select: none; user-select: none; }
+
+/* Voice room: the header's rule is enough; no second line above the people. */
+.stage > .index:first-child { border-top: 0; }
+
+/* Bottom-right status: one line at any window size; the light leads it. */
+.foot-r .status { flex-wrap: nowrap; white-space: nowrap; min-width: 0; max-width: 100%; overflow: hidden; }
+.foot-r .status > * { flex: none; }
+.foot-r .status .status-voice { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* When the column is narrow, the clock goes first (the OS shows the time),
+   then the latency, so the room you're live in always stays readable. */
+.foot-r { container-type: inline-size; container-name: foot; }
+.foot-r .status { gap: 12px; letter-spacing: 0.08em; }
+@container foot (max-width: 300px) { .status:has(.status-voice) .st-clock { display: none; } }
+@container foot (max-width: 230px) { .status:has(.status-voice) .st-lat { display: none; } }

@@ -260,6 +260,9 @@ function apply(e: UiEvent, painted: string[]) {
       set("conn", { state: e.state, rttMs: e.rttMs ?? s.conn.rttMs });
       break;
     case "session": {
+      // Still signing in with the saved login: stay on the splash instead of
+      // flashing the login screen (App gives up waiting after a few seconds).
+      if (e.authPending && !e.user) break;
       set("ready", true);
       loadMediaBase(); // the server address may have changed at sign-in
       const changedUser = s.user?.id !== e.user?.id;

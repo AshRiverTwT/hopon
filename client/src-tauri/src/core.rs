@@ -117,6 +117,9 @@ pub struct Store {
     pub friends: Vec<hopon_shared::Friend>,
     /// Your chosen presence and custom status.
     pub my_status: hopon_shared::UserStatus,
+    /// Still trying the saved sign-in at startup: the UI shows its splash,
+    /// not the login screen, until this clears.
+    pub auth_pending: bool,
 }
 
 impl Store {
@@ -172,6 +175,7 @@ impl Store {
             username: self.username.clone(),
             friends: self.friends.iter().map(Into::into).collect(),
             status: (&self.my_status).into(),
+            auth_pending: self.auth_pending,
         }
     }
 
@@ -262,7 +266,7 @@ impl Core {
         Arc::new(Self {
             perf: Perf::new(),
             cache,
-            store: Mutex::new(Store::default()),
+            store: Mutex::new(Store { auth_pending: true, ..Store::default() }),
             clock: Mutex::new(ClockSync::default()),
             url: Mutex::new(url),
             ui: Mutex::new((Vec::new(), Vec::new())),
@@ -691,6 +695,13 @@ impl Core {
             tracing::info!("connected {:.1} ms after start", t as f64 / 1000.0);
         }
         self.clone().authenticate().await;
+        // Whatever happened (signed in, no saved login, offline), the UI may
+        // leave its splash now.
+        let pending = std::mem::take(&mut self.store.lock().auth_pending);
+        if pending {
+            let ev = self.session_snapshot();
+            self.emit(ev);
+        }
 
         let keepalive = {
             let me = self.clone();
@@ -1041,6 +1052,7 @@ impl Core {
                     s.username = username.clone();
                     s.friends = friends.clone();
                     s.my_status = status.clone();
+                    s.auth_pending = false;
                     for f in friends.iter() {
                         s.users_by_id.insert(f.user.id, f.user.clone());
                     }

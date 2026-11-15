@@ -58,10 +58,10 @@ export const GearIcon = () => <I d="M6.9 1.5h2.2l.4 1.8 1.4.6 1.6-1 1.6 1.6-1 1.
 export const SmileIcon = () => <I d="M8 14.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM5.3 9.5c.7 1 1.6 1.5 2.7 1.5s2-.5 2.7-1.5M6 6.3v.2M10 6.3v.2" />;
 
 /** The HopOn mark: an H whose right leg has hopped up a step, joined by the signal bar. */
-export const LogoMark = () => (
-  <svg class="logo-mark" viewBox="0 0 512 512" aria-hidden="true">
-    <rect x="100" y="160" width="96" height="256" fill="currentColor" />
-    <rect x="316" y="96" width="96" height="256" fill="currentColor" />
-    <rect x="196" y="228" width="120" height="64" fill="#ff5b1f" />
+export const LogoMark = (p: { animate?: boolean }) => (
+  <svg class="logo-mark" classList={{ build: !!p.animate }} viewBox="0 0 512 512" aria-hidden="true">
+    <rect class="leg-l" x="100" y="160" width="96" height="256" fill="currentColor" />
+    <rect class="leg-r" x="316" y="96" width="96" height="256" fill="currentColor" />
+    <rect class="bar" x="196" y="228" width="120" height="64" fill="#ff5b1f" />
   </svg>
 );

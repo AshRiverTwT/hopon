@@ -2,11 +2,29 @@
 
 **Download the latest:** [Windows: HopOn-setup.exe](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-setup.exe) · [Linux: HopOn-x86_64.AppImage](https://github.com/AshRiverTwT/hopon/raw/downloads/HopOn-x86_64.AppImage)
 
-## Unreleased (next update)
+## HopOn 0.8.1
+
+App only: no server update needed.
+
+### New
 
 - **New logo: the step H.** An H whose right leg has hopped up a step,
   joined by a signal-orange bar. On the app icon, the tray, the installer and
   the logo inside the app.
+- **Startup splash.** The logo builds itself while HopOn signs you in,
+  instead of flashing the login screen for a moment.
+
+### Fixed
+
+- **Selecting text** picks up messages only: names, times, buttons and
+  React / Reply / Save stay out of what you copy.
+- **Games** closes itself when you switch channel, voice room, server or
+  view, so it never covers a call, a stream or a camera.
+- **Voice rooms** have one line under the title, not two.
+- **Status (bottom right)** stays on one line at any window size: the light
+  leads it, and the clock, then the latency, step aside when space is tight.
+- **In-game overlay** sits tight in the bottom-right corner, its chat panel is
+  30 % see-through, and the people in voice have no box behind them.
 
 ## HopOn 0.8.0
 

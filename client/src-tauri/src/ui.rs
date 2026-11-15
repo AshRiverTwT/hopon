@@ -287,6 +287,8 @@ pub enum UiEvent {
         friends: Vec<UiFriend>,
         /// Your chosen presence and custom status.
         status: UiStatus,
+        /// Still trying the saved sign-in (show the splash, not the login screen).
+        auth_pending: bool,
     },
     /// A friendship or request was added or changed.
     Friend { friend: UiFriend },

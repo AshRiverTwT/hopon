@@ -24,7 +24,8 @@ const LABEL: &str = "overlay";
 /// Logical size of the overlay window.
 const W: f64 = 760.0;
 const H: f64 = 380.0;
-const MARGIN: f64 = 28.0;
+/// Gap from the screen corner (bottom-right), in logical px.
+const MARGIN: f64 = 12.0;
 
 /// The window that had focus before the overlay opened (HWND as isize).
 static PREV_FOREGROUND: parking_lot::Mutex<isize> = parking_lot::Mutex::new(0);
@@ -58,7 +59,7 @@ fn show(app: &tauri::AppHandle) -> Res<()> {
     let k = mon.scale_factor();
     let (w, h) = ((W * k) as u32, (H * k) as u32);
     let x = mon.position().x + mon.size().width as i32 - w as i32 - (MARGIN * k) as i32;
-    let y = mon.position().y + mon.size().height as i32 - h as i32 - (MARGIN * 1.6 * k) as i32;
+    let y = mon.position().y + mon.size().height as i32 - h as i32 - (MARGIN * k) as i32;
     let win = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("overlay.html".into()))
         .title("HopOn overlay")
         .transparent(true)

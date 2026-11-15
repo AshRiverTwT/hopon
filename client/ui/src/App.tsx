@@ -1,8 +1,8 @@
-import { Match, Show, Switch, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { Match, Show, Switch, createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { call } from "./ipc";
-import { closeFriends, currentDm, currentServer, cycleChannel, cycleServer, friendOf, friendsAttention, isOwner, maybeMarkRead, openFriends, s, toast } from "./store";
+import { set, closeFriends, currentDm, currentServer, cycleChannel, cycleServer, friendOf, friendsAttention, isOwner, maybeMarkRead, openFriends, s, toast } from "./store";
 import { DmClosed, DmHeader, FriendsHome, FriendsNav, FriendsRail } from "./components/Friends";
-import { BookmarkIcon, GamesIcon, GearIcon, PeopleIcon, SearchIcon, SlidersIcon, StarIcon } from "./components/icons";
+import { LogoMark, BookmarkIcon, GamesIcon, GearIcon, PeopleIcon, SearchIcon, SlidersIcon, StarIcon } from "./components/icons";
 import { comboOf, type Action } from "./hotkeys";
 import { applyScale, prefs, SCALES, setPrefs } from "./prefs";
 import { addFilesToComposer } from "./components/Composer";
@@ -38,6 +38,12 @@ const incoming = () => s.friends.filter((f) => f.state === "incoming").length;
 
 type Sheet = null | { k: "servers" } | { k: "server" } | { k: "members" } | { k: "settings" } | { k: "invite"; link: string } | { k: "new"; voice: boolean } | { k: "bookmarks" } | { k: "search" };
 
+// The splash shows at least long enough for the mark to build; if the core
+// can't finish the saved sign-in (server unreachable), give up after a while.
+const [splashMin, setSplashMin] = createSignal(false);
+setTimeout(() => setSplashMin(true), 700);
+setTimeout(() => { if (!s.ready) set("ready", true); }, 5000);
+
 export default function App() {
   const [perf, setPerf] = createSignal(false);
   const [sheet, setSheet] = createSignal<Sheet>(null);
@@ -56,6 +62,10 @@ export default function App() {
     document.addEventListener("visibilitychange", syncVisibility);
     onCleanup(() => document.removeEventListener("visibilitychange", syncVisibility));
   });
+  // The games panel is a native view drawn over the page: close it when you
+  // move to another channel, voice room, server or view, so it never covers
+  // a call, a stream or a camera.
+  createEffect(on(() => [s.selServer, s.selChannel, s.stage, s.friendsOpen], () => setGamesRaw(false), { defer: true }));
   const setGames = (v: boolean | ((x: boolean) => boolean)) => {
     const next = typeof v === "function" ? v(games()) : v;
     if (next && window.innerWidth < GAMES_MIN_WIDTH) {
@@ -160,7 +170,7 @@ export default function App() {
   const close = () => setSheet(null);
   return (
     <>
-      <Show when={s.ready} fallback={<div class="splash" />}>
+      <Show when={s.ready && splashMin()} fallback={<div class="splash" role="status" aria-label="Starting HopOn"><LogoMark animate /></div>}>
         <Show when={s.user} fallback={<Login />}>
           <div class="frame" classList={{ "with-games": games() && !!currentServer() && !s.friendsOpen }}>
             {/* Top-left: where you are (Friends or your servers). */}
