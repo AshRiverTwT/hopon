@@ -1275,3 +1275,13 @@ body { letter-spacing: -0.006em; }
 .cell { background: #3a3a3c; }
 .cell.g { background: #538d4e; } .cell.y { background: #b59f3b; } .cell.b { background: #4a7bd0; }
 .cell.o { background: #d9822b; } .cell.r { background: #c0392b; } .cell.p { background: #8e5cc4; } .cell.n { background: #7a5236; }
+
+/* ---------- bottom row: message bar, keys and status share one baseline ---------- */
+:root { --foot-base: 19px; }
+.main { padding-bottom: var(--foot-base); }
+.composer { display: flex; flex-direction: column; padding-top: 0; }
+.composer > .typing { order: -1; height: 20px; padding: 0 12px 0; display: flex; align-items: center; }
+.foot-l, .foot-r { padding-bottom: var(--foot-base); }
+button.me { padding: 0 8px 0 0; height: 30px; }
+.toggles { align-items: flex-end; }
+.foot-r .status { line-height: 30px; height: 30px; align-items: center; }
