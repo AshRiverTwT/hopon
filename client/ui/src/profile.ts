@@ -6,9 +6,9 @@ import { currentServer, s, set, toast } from "./store";
 import type { Status, StatusMode } from "./types";
 import { setQuietCheck } from "./sounds";
 
-/** Profile tones: the app is monochrome, so a name is shaded, never coloured (index 0 = none). */
-export const ACCENTS = ["", "#ffffff", "#e2e2e4", "#c9c9cc", "#b1b1b5", "#9a9a9f", "#85858a", "#727277", "#626267"];
-export const ACCENT_NAMES = ["None", "Snow", "Pearl", "Silver", "Mist", "Ash", "Steel", "Slate", "Graphite"];
+/** Profile colours: the app is black and white, so a name's colour is one of the few places colour shows (index 0 = none). */
+export const ACCENTS = ["", "#ff1b50", "#ff7a4d", "#f2b84b", "#b8d65a", "#4fd1a5", "#5ab4f0", "#a58cf5", "#f283c4"];
+export const ACCENT_NAMES = ["None", "Red", "Coral", "Amber", "Lime", "Mint", "Sky", "Violet", "Rose"];
 export const accentIndex = (id: string) => (s.user?.id === id ? s.user.accent : s.users[id]?.accent) ?? 0;
 /** The person's colour, or "" for none. */
 export const accentOf = (id: string) => ACCENTS[accentIndex(id)] ?? "";

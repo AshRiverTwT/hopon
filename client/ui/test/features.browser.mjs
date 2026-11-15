@@ -196,13 +196,13 @@ test("a stale channel response cannot populate a different empty server", async 
   assert.deepEqual(await p.evaluate(async () => { const { s } = await import("/src/store.ts"); return { channel: s.selChannel, count: s.msgs.length }; }), { channel: null, count: 0 });
 });
 
-test("profile editor saves name, tone and bio; mouse push-to-talk binds", async (t) => {
+test("profile editor saves name, colour and bio; mouse push-to-talk binds", async (t) => {
   const p = await fixture(t);
   await p.getByRole("button", { name: "Settings", exact: true }).click();
   await p.locator(".cascade-opts li").filter({ hasText: "picture, banner, colour" }).locator("button.v").click();
   await p.getByRole("dialog", { name: "Profile" }).waitFor();
   await p.locator(".rows .row").filter({ hasText: "Display name" }).locator("input").fill("Test Player");
-  await p.getByRole("radio", { name: "Steel" }).click();
+  await p.getByRole("radio", { name: "Sky" }).click();
   await p.locator(".pedit-bio").fill("late-night lobbies");
   await p.getByRole("button", { name: "Save", exact: true }).click();
   await p.waitForFunction(() => window.testCalls.some((x) => x.cmd === "set_profile"));

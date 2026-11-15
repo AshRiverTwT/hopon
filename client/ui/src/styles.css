@@ -1246,3 +1246,32 @@ body { letter-spacing: -0.006em; }
 .server-rails { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
 .server-rails .server-rail { pointer-events: auto; }
 .server-rails .server-rail.hidden { pointer-events: none; }
+
+/* ---------- moon 0.7.4: signal orange ----------
+   One accent, only for "something is happening": live, speaking, unread,
+   mentions, lit LEDs, the encoder's pointer, the update. Never surfaces. */
+:root { --signal: #ff5b1f; --signal-glow: rgba(255, 91, 31, 0.55); --on-signal: #0b0b0c; }
+.tick.on { stroke: var(--signal); filter: drop-shadow(0 0 5px var(--signal-glow)); }
+.rail-unread { background: var(--signal); box-shadow: 0 0 10px var(--signal-glow); }
+.live-dot { background: var(--signal); }
+.live-dot.idle { background: var(--cream-35); }
+.live-badge { background: var(--signal); color: var(--on-signal); }
+.count-badge, .mention-badge { background: var(--signal); color: var(--on-signal); }
+.topnav .nav-item.on .count-badge { background: var(--signal); color: var(--on-signal); }
+.dm-unread, .pill-dot, .topnav .nav-item.on .dm-unread { background: var(--signal); }
+.new-sep { color: var(--signal); }
+.new-sep::after { background: rgba(255, 91, 31, 0.35); }
+.mention.me { background: var(--signal); color: var(--on-signal); }
+.msg.mention-me { background: rgba(255, 91, 31, 0.07); }
+.avatar.speaking, .rail li.speaking .avatar { outline-color: var(--signal); }
+.call-tile.speaking { box-shadow: inset 0 0 0 2px var(--signal), 0 0 26px rgba(255, 91, 31, 0.18), var(--shadow-lg); }
+.tog::before { background: var(--signal); box-shadow: 0 0 8px var(--signal-glow); }
+.tog.off::before { background: transparent; box-shadow: inset 0 0 0 1px var(--cream-35); }
+.update-pill, .topnav .nav-update { background: var(--signal); color: var(--on-signal); border-color: var(--signal); }
+.update-pill:hover:not(:disabled) { background: #ff7440; border-color: #ff7440; }
+.status .live-dot:not(.idle):not(.warn) { box-shadow: 0 0 8px var(--signal-glow); }
+
+/* colour is allowed where it carries meaning: game results and profile colours */
+.cell { background: #3a3a3c; }
+.cell.g { background: #538d4e; } .cell.y { background: #b59f3b; } .cell.b { background: #4a7bd0; }
+.cell.o { background: #d9822b; } .cell.r { background: #c0392b; } .cell.p { background: #8e5cc4; } .cell.n { background: #7a5236; }
