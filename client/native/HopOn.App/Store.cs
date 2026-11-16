@@ -34,6 +34,11 @@ public sealed partial class Store
     public string ConnState { get; private set; } = "connecting";
     public ServerVm? OpenServer { get; private set; }
     public ChannelVm? OpenChannel { get; private set; }
+    /// <summary>The user is at the newest message (set by the window from the scroll position).</summary>
+    public bool AtBottom { get; set; } = true;
+    /// <summary>Older history exists above the first loaded message.</summary>
+    public bool HasOlder { get; private set; }
+    bool loadingOlder;
 
     /// <summary>The view, server list, channel list or header changed.</summary>
     public event Action? Changed;
@@ -140,7 +145,12 @@ public sealed partial class Store
             {
                 var before = Messages.Count > 0 ? Messages[^1] : null;
                 painted.AddRange(MessageMerge.Merge(Messages, m.Msgs, Row));
-                MessageMerge.TrimTop(Messages, OpenCap);
+                // Bounded while following the conversation; scrolled-up history stays.
+                if (AtBottom && Messages.Count > OpenCap)
+                {
+                    MessageMerge.TrimTop(Messages, OpenCap);
+                    HasOlder = true;
+                }
                 RefreshHeaders();
                 appended |= Messages.Count > 0 && Messages[^1] != before;
                 break;
@@ -289,6 +299,8 @@ public sealed partial class Store
         OpenChannel = row;
         row.Unread = false;
         Messages.Clear();
+        AtBottom = true;
+        HasOlder = true;
         Changed?.Invoke();
         try
         {
@@ -296,6 +308,9 @@ public sealed partial class Store
             if (OpenChannel != row) return; // switched away meanwhile
             var painted = MessageMerge.Merge(Messages, msgs, Row);
             MessageMerge.TrimTop(Messages, OpenCap);
+            // The core keeps up to 300 recent messages per channel; fewer means
+            // a short channel or a partial cache: load_older finds out.
+            HasOlder = msgs.Count > 0;
             RefreshHeaders();
             Appended?.Invoke();
             Painted?.Invoke(painted);
@@ -305,6 +320,32 @@ public sealed partial class Store
         catch (HopOnException e)
         {
             Toast?.Invoke(e.Message);
+        }
+    }
+
+    /// <summary>Scrolled near the top: fetch the page before the first message.</summary>
+    public async Task LoadOlder()
+    {
+        var row = OpenChannel;
+        if (row is null || loadingOlder || !HasOlder) return;
+        var first = Messages.FirstOrDefault(m => !MessageMerge.IsPending(m.Id));
+        if (first is null) return;
+        loadingOlder = true;
+        try
+        {
+            var page = await core.CallAsync("load_older", HopOnJson.Default.Page, new JsonObject { ["channelId"] = row.Id, ["before"] = first.Id });
+            if (OpenChannel != row) return;
+            MessageMerge.Merge(Messages, page.Msgs, Row);
+            HasOlder = page.More;
+            RefreshHeaders();
+        }
+        catch (HopOnException e)
+        {
+            Toast?.Invoke(e.Message);
+        }
+        finally
+        {
+            loadingOlder = false;
         }
     }
 
@@ -322,6 +363,7 @@ public sealed partial class Store
         };
         var painted = MessageMerge.Merge(Messages, [pending], Row);
         RefreshHeaders();
+        AtBottom = true; // your own message: jump to it
         Appended?.Invoke();
         Painted?.Invoke(painted);
         core.CallAsync("send_message", new JsonObject

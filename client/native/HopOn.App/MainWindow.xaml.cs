@@ -115,9 +115,36 @@ public sealed partial class MainWindow : Window
         if (Store.View == View.Login && UserBox.FocusState == FocusState.Unfocused) UserBox.Focus(FocusState.Programmatic);
     }
 
+    ScrollViewer? messageScroll;
+
+    void OnMessageListLoaded(object sender, RoutedEventArgs e)
+    {
+        messageScroll = FindChild<ScrollViewer>(MessageList);
+        if (messageScroll is not null) messageScroll.ViewChanged += OnMessagesScrolled;
+    }
+
+    void OnMessagesScrolled(object? sender, ScrollViewerViewChangedEventArgs e)
+    {
+        if (messageScroll is null) return;
+        Store.AtBottom = messageScroll.VerticalOffset >= messageScroll.ScrollableHeight - 48;
+        if (messageScroll.VerticalOffset < 400 && messageScroll.ScrollableHeight > 0) _ = Store.LoadOlder();
+    }
+
+    static T? FindChild<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var c = VisualTreeHelper.GetChild(root, i);
+            if (c is T t) return t;
+            if (FindChild<T>(c) is T deeper) return deeper;
+        }
+        return null;
+    }
+
     void ScrollToEnd()
     {
-        if (Store.Messages.Count > 0) MessageList.ScrollIntoView(Store.Messages[^1]);
+        // Follow new messages only if the user is at the bottom (or just opened the channel).
+        if (Store.Messages.Count > 0 && Store.AtBottom) MessageList.ScrollIntoView(Store.Messages[^1]);
     }
 
     void ShowToast(string message)

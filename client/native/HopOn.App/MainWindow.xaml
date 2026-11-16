@@ -92,12 +92,13 @@
                     <TextBlock x:Name="ChannelTopic" Opacity="0.65" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
 
-                <!-- Virtualized; KeepLastItemInView holds the bottom while messages arrive. -->
+                <!-- Virtualized. KeepItemsInView: older pages load above without moving
+                     what you're reading; the window follows new messages only at the bottom. -->
                 <ListView x:Name="MessageList" Grid.Row="1" ItemsSource="{x:Bind Store.Messages}"
-                          SelectionMode="None" IsItemClickEnabled="False">
+                          SelectionMode="None" IsItemClickEnabled="False" Loaded="OnMessageListLoaded">
                     <ListView.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <ItemsStackPanel ItemsUpdatingScrollMode="KeepLastItemInView" VerticalAlignment="Bottom" />
+                            <ItemsStackPanel ItemsUpdatingScrollMode="KeepItemsInView" VerticalAlignment="Bottom" />
                         </ItemsPanelTemplate>
                     </ListView.ItemsPanel>
                     <ListView.ItemContainerStyle>
