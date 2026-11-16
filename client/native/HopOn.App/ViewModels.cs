@@ -28,6 +28,8 @@ public sealed partial class ServerVm : Observable
     public string Initials => string.Concat(Name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0])));
     public List<Channel> Channels { get; set; } = [];
     public HashSet<string> MemberIds { get; } = [];
+    /// <summary>channel id → last read message id.</summary>
+    public Dictionary<string, string> Reads { get; set; } = [];
 }
 
 /// <summary>A row of the people column.</summary>
@@ -259,6 +261,14 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public double Opacity => State == 0 ? 0.55 : 1.0;
     public string StateText => State == 3 ? "Not sent" : "";
     public Visibility HeaderVisibility => Header ? Visibility.Visible : Visibility.Collapsed;
+    string dayText = "";
+    bool newHere;
+    /// <summary>Day separator above this message ("" = none).</summary>
+    public string DayText { get => dayText; set { Set(ref dayText, value); Raise(nameof(DayVisibility)); } }
+    public Visibility DayVisibility => DayText.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    /// <summary>The "new messages" divider sits above this message.</summary>
+    public bool NewHere { get => newHere; set { Set(ref newHere, value); Raise(nameof(NewVisibility)); } }
+    public Visibility NewVisibility => NewHere ? Visibility.Visible : Visibility.Collapsed;
     public Thickness RowPadding => Header ? new Thickness(0, 10, 0, 0) : new Thickness(0);
 
     public void Update(Msg m, byte newState)

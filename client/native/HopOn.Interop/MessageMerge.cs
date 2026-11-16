@@ -162,6 +162,28 @@ public static class MessageMerge
         while (list.Count > cap) list.RemoveAt(0);
     }
 
+    /// <summary>Local calendar day of a Unix-ms timestamp.</summary>
+    public static DateOnly Day(ulong ts, TimeZoneInfo? tz = null) =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UnixEpoch.AddMilliseconds(ts), tz ?? TimeZoneInfo.Local));
+
+    /// <summary>Day separator text: "Today", "Yesterday", else e.g. "Monday, 3 March" (year if not this year).</summary>
+    public static string DayLabel(DateOnly day, DateOnly today, System.Globalization.CultureInfo? culture = null)
+    {
+        culture ??= System.Globalization.CultureInfo.CurrentCulture;
+        if (day == today) return "Today";
+        if (day == today.AddDays(-1)) return "Yesterday";
+        return day.ToString(day.Year == today.Year ? "dddd, d MMMM" : "dddd, d MMMM yyyy", culture);
+    }
+
+    /// <summary>The first message after <paramref name="lastRead"/> from someone else (the "new messages" divider), or null.</summary>
+    public static string? FirstNew<T>(IList<T> list, string? lastRead, string? me, Func<T, string> author) where T : IMessageItem
+    {
+        if (string.IsNullOrEmpty(lastRead)) return null;
+        foreach (var m in list)
+            if (!IsPending(m.Id) && CmpId(m.Id, lastRead) > 0 && author(m) != me) return m.Id;
+        return null;
+    }
+
     /// <summary>Group header shown when the author changes or 7 minutes pass.</summary>
     public static bool ShowsHeader(string? prevAuthor, ulong prevTs, string author, ulong ts) =>
         prevAuthor is null || prevAuthor != author || ts - prevTs > 7 * 60_000;

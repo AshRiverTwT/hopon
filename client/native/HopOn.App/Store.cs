@@ -207,6 +207,10 @@ public sealed partial class Store
                 else statuses[st.UserId] = st.Status;
                 membersDirty = true;
                 break;
+            case ReadUpdatedEvent ru:
+                foreach (var srv in Servers)
+                    if (srv.Channels.Any(c => c.Id == ru.ChannelId)) srv.Reads[ru.ChannelId] = ru.LastRead;
+                break;
             case ChannelActivityEvent a:
                 if (a.ChannelId != OpenChannel?.Id)
                 {
@@ -348,6 +352,7 @@ public sealed partial class Store
         }
         vm.Name = s.Name;
         vm.Channels = s.Channels;
+        vm.Reads = new Dictionary<string, string>(s.Reads);
         foreach (var id in s.MemberIds) vm.MemberIds.Add(id);
         online.UnionWith(s.Online);
         foreach (var (k, v) in s.Activities) activities[k] = v;
@@ -381,8 +386,21 @@ public sealed partial class Store
         return text.Length > 90 ? text[..89] + "…" : text;
     }
 
+    /// <summary>Last read message when the channel was opened (the divider goes after it).</summary>
+    string? dividerAfter;
+
     void RefreshHeaders()
     {
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var firstNew = MessageMerge.FirstNew(Messages, dividerAfter, Me?.Id, m => m.AuthorId);
+        DateOnly? prevDay = null;
+        foreach (var m in Messages)
+        {
+            var day = MessageMerge.Day(m.Ts);
+            m.DayText = prevDay != day ? MessageMerge.DayLabel(day, today) : "";
+            prevDay = day;
+            m.NewHere = m.Id == firstNew;
+        }
         foreach (var m in Messages)
         {
             if (m.ReplyTo is null) { m.ReplyPreview = ""; continue; }
@@ -393,7 +411,7 @@ public sealed partial class Store
         {
             var prev = i > 0 ? Messages[i - 1] : null;
             var m = Messages[i];
-            m.Header = MessageMerge.ShowsHeader(prev?.AuthorId, prev?.Ts ?? 0, m.AuthorId, m.Ts);
+            m.Header = MessageMerge.ShowsHeader(prev?.AuthorId, prev?.Ts ?? 0, m.AuthorId, m.Ts) || m.DayText.Length > 0;
         }
     }
 
@@ -536,6 +554,7 @@ public sealed partial class Store
     {
         if (row.Voice) return; // voice rooms: a later phase
         OpenChannel = row;
+        dividerAfter = OpenServer?.Reads.GetValueOrDefault(row.Id);
         row.Unread = false;
         typers.Clear();
         TypingChanged?.Invoke("");

@@ -85,6 +85,19 @@ static class MergeTests
         check(MessageMerge.ShowsHeader("a", 0, "a", 10 * 60_000), "header: 7 minutes later");
         check(MessageMerge.ShowsHeader("a", 0, "b", 1000), "header: other author");
 
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var today = new DateOnly(2026, 11, 16);
+        check(MessageMerge.DayLabel(today, today) == "Today" && MessageMerge.DayLabel(today.AddDays(-1), today) == "Yesterday", "day labels: today, yesterday");
+        check(MessageMerge.DayLabel(new DateOnly(2026, 3, 2), today, inv) == "Monday, 2 March", "day label this year");
+        check(MessageMerge.DayLabel(new DateOnly(2025, 3, 2), today, inv) == "Sunday, 2 March 2025", "day label other year");
+        check(MessageMerge.Day(1763251200000, TimeZoneInfo.Utc) == new DateOnly(2025, 11, 16), "Unix ms → local day");
+        var fl = new ObservableCollection<Item>();
+        MessageMerge.Merge(fl, [M("5", author: "a"), M("6", author: "me"), M("7", author: "b"), M("p9", nonce: "9", state: 0)], m => new Item(m));
+        var authors = new Dictionary<string, string> { ["5"] = "a", ["6"] = "me", ["7"] = "b", ["p9"] = "me" };
+        check(MessageMerge.FirstNew(fl, "5", "me", x => authors[x.Id]) == "7", "first new skips your own messages");
+        check(MessageMerge.FirstNew(fl, "7", "me", x => authors[x.Id]) is null, "nothing new after the last message");
+        check(MessageMerge.FirstNew(fl, null, "me", x => authors[x.Id]) is null, "no read marker: no divider");
+
         var big = new ObservableCollection<Item>();
         MessageMerge.Merge(big, Enumerable.Range(1, 5000).Select(i => M((i * 2).ToString())).ToList(), m => new Item(m));
         var sw = Stopwatch.StartNew();

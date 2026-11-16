@@ -142,6 +142,24 @@
                                         <MenuFlyoutItem Text="Delete" Click="{x:Bind Delete}" Visibility="{x:Bind MineVisibility}" />
                                     </MenuFlyout>
                                 </StackPanel.ContextFlyout>
+                                <Grid Visibility="{x:Bind DayVisibility, Mode=OneWay}" Margin="0,12,0,4" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="{x:Bind DayText, Mode=OneWay}" FontSize="12" Opacity="0.6" />
+                                    <Rectangle Grid.Column="2" Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" VerticalAlignment="Center" />
+                                </Grid>
+                                <Grid Visibility="{x:Bind NewVisibility, Mode=OneWay}" Margin="0,8,0,2" ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Rectangle Height="1" Fill="{ThemeResource SystemFillColorCriticalBrush}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="New messages" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                                </Grid>
                                 <TextBlock Text="{x:Bind ReplyPreview, Mode=OneWay}" Visibility="{x:Bind ReplyVisibility, Mode=OneWay}"
                                            FontSize="12" Opacity="0.6" TextTrimming="CharacterEllipsis" Margin="0,0,0,2" />
                                 <StackPanel Orientation="Horizontal" Spacing="8" Visibility="{x:Bind HeaderVisibility, Mode=OneWay}">
