@@ -63,6 +63,7 @@ public sealed partial class MainWindow : Window
         App.Core.Subscribe("main", (UiEvent e) => Store.Enqueue(e));
 
         GifButton.Flyout = GifFlyout.Create(Store, NowMs);
+        MessageVm.ShowProfileAction = (userId, anchor) => _ = ShowProfileCard(userId, anchor);
         CompositionTarget.Rendering += OnFirstFrame;
         _ = LoadConfig();
     }
@@ -317,6 +318,23 @@ public sealed partial class MainWindow : Window
 
     void OnSignIn(object sender, RoutedEventArgs e) => _ = Auth("login");
     void OnSignUp(object sender, RoutedEventArgs e) => _ = Auth("signup");
+
+    async Task ShowProfileCard(string userId, FrameworkElement anchor)
+    {
+        var (p, avatar) = await Store.LoadProfile(userId);
+        if (p is null) return;
+        static string Date(long ms) => ms <= 0 ? "" : DateTimeOffset.FromUnixTimeMilliseconds(ms).ToLocalTime().ToString("d MMM yyyy");
+        var card = new StackPanel { Spacing = 6, Width = 280 };
+        card.Children.Add(new PersonPicture { Width = 72, Height = 72, ProfilePicture = avatar, DisplayName = p.User.Name, HorizontalAlignment = HorizontalAlignment.Left });
+        card.Children.Add(new TextBlock { Text = p.User.Name, FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        card.Children.Add(new TextBlock { Text = "@" + p.Username, Opacity = 0.7 });
+        if (p.Bio.Length > 0) card.Children.Add(new TextBlock { Text = p.Bio, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) });
+        var dates = new List<string>();
+        if (Date(p.CreatedAt) is { Length: > 0 } c) dates.Add($"HopOn member since {c}");
+        if (Date(p.JoinedAt) is { Length: > 0 } j) dates.Add($"Joined this server {j}");
+        if (dates.Count > 0) card.Children.Add(new TextBlock { Text = string.Join("\n", dates), FontSize = 12, Opacity = 0.6, Margin = new Thickness(0, 6, 0, 0) });
+        new Flyout { Content = card }.ShowAt(anchor);
+    }
 
     async void OnBell(object sender, RoutedEventArgs e)
     {

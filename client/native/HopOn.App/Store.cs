@@ -723,6 +723,21 @@ public sealed partial class Store
         }
     }
 
+    /// <summary>Someone's profile card (with when they joined the open server).</summary>
+    public async Task<(Profile? Profile, Microsoft.UI.Xaml.Media.ImageSource? Avatar)> LoadProfile(string userId)
+    {
+        try
+        {
+            var p = await core.CallAsync("get_profile", HopOnJson.Default.Profile, new JsonObject { ["userId"] = userId, ["serverId"] = OpenServer?.Id });
+            return (p, avatars.Get(userId, p.User.AvatarV));
+        }
+        catch (HopOnException e)
+        {
+            Toast?.Invoke(e.Message);
+            return (null, null);
+        }
+    }
+
     /// <summary>Stored text → editable text ("&lt;@id&gt;" → "@name").</summary>
     public string Editable(string content) => Rich.DecodeMentions(content, NameOf);
 

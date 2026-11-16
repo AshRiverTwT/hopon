@@ -35,6 +35,10 @@ public sealed partial class ServerVm : Observable
 /// <summary>A row of the people column.</summary>
 public sealed partial class MemberVm : Observable
 {
+    public void ShowProfile(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe) MessageVm.ShowProfileAction?.Invoke(Id, fe);
+    }
     Microsoft.UI.Xaml.Media.ImageSource? avatar;
     public Microsoft.UI.Xaml.Media.ImageSource? Avatar { get => avatar; set => Set(ref avatar, value); }
     string name = "";
@@ -148,6 +152,13 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public bool IsMine => MeId is not null && AuthorId == MeId;
     public Visibility MineVisibility => IsMine ? Visibility.Visible : Visibility.Collapsed;
     public void Reply() => Act?.Invoke(this, "reply");
+
+    /// <summary>(user id, anchor element): set by the window.</summary>
+    public static Action<string, FrameworkElement>? ShowProfileAction { get; set; }
+    public void ShowProfile(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe) ShowProfileAction?.Invoke(AuthorId, fe);
+    }
 
     /// <summary>The React submenu's emoji (fixed set: menu items bind to methods, AOT-safe).</summary>
     public static readonly string[] Quick = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "👀"];
