@@ -48,6 +48,7 @@ public sealed partial class Store
     {
         this.ui = ui;
         this.core = core;
+        RichView.NameOf = NameOf;
     }
 
     /// <summary>From any thread.</summary>

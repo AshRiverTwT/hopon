@@ -49,6 +49,7 @@ try { JsonDocument.Parse("{\"t\":\"fromTheFuture\"}").RootElement.Deserialize(Ho
 catch (JsonException) { Check(true, "unknown kind rejected with JsonException"); }
 
 MergeTests.Run(Check);
+RichTests.Run(Check);
 
 Console.WriteLine(failures == 0 ? "all model checks passed" : $"{failures} check(s) failed");
 return failures == 0 ? 0 : 1;
