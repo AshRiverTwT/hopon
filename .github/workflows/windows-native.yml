@@ -49,7 +49,11 @@ jobs:
           cache-on-failure: true
 
       - name: Build hopon_ffi.dll (voice), hopon-server, e2e_feed
-        run: cargo build -p hopon-ffi -p hopon-server -p hopon-bench --bin e2e_feed
+        # Two commands: `--bin` applies to every package in a command, so one
+        # combined build would skip the hopon-server binary.
+        run: |
+          cargo build -p hopon-ffi -p hopon-server
+          cargo build -p hopon-bench --bin e2e_feed
 
       - name: C# bindings are current
         shell: bash

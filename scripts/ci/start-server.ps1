@@ -2,6 +2,8 @@
 # 127.0.0.1:18080. Logs go to $env:RUNNER_TEMP\logs.
 param([Parameter(Mandatory = $true)][string]$ServerExe)
 $ErrorActionPreference = "Stop"
+if (-not (Test-Path $ServerExe)) { throw "server binary not found: $ServerExe" }
+$ServerExe = (Resolve-Path $ServerExe).Path
 $svc = Get-Service -Name "postgresql*" | Select-Object -First 1
 Set-Service $svc.Name -StartupType Manual
 Start-Service $svc.Name
