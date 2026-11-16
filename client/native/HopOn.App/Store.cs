@@ -446,6 +446,7 @@ public sealed partial class Store
         }
         vm.Name = s.Name;
         vm.Channels = s.Channels;
+        ownerOf[s.Id] = s.OwnerId;
         vm.Reads = new Dictionary<string, string>(s.Reads);
         foreach (var id in s.MemberIds) vm.MemberIds.Add(id);
         online.UnionWith(s.Online);
@@ -721,6 +722,43 @@ public sealed partial class Store
         {
             loadingOlder = false;
         }
+    }
+
+    // ---------- servers ----------
+
+    public bool IsOwner => OpenServer is not null && Me is not null && ownerOf.GetValueOrDefault(OpenServer.Id) == Me.Id;
+    readonly Dictionary<string, string> ownerOf = [];
+
+    async Task<string?> Run(string command, JsonObject args)
+    {
+        try { return (await core.CallAsync(command, args)).GetString(); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); return null; }
+    }
+
+    async Task SelectWhenKnown(string? serverId)
+    {
+        if (serverId is null) return;
+        // The server event usually arrives before the reply; wait briefly if not.
+        for (var i = 0; i < 20 && !serverById.ContainsKey(serverId); i++) await Task.Delay(50);
+        if (serverById.TryGetValue(serverId, out var vm)) await SelectServer(vm);
+    }
+
+    public async Task CreateServer(string name) => await SelectWhenKnown(await Run("create_server", new JsonObject { ["name"] = name }));
+    public async Task JoinInvite(string code) => await SelectWhenKnown(await Run("join_invite", new JsonObject { ["code"] = code }));
+    public Task<string?> CreateInvite() => OpenServer is null ? Task.FromResult<string?>(null) : Run("create_invite", new JsonObject { ["serverId"] = OpenServer.Id });
+
+    public async Task CreateChannel(string name, bool voice)
+    {
+        if (OpenServer is null) return;
+        try { await core.CallAsync("create_channel", new JsonObject { ["serverId"] = OpenServer.Id, ["name"] = name, ["voice"] = voice }); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
+    }
+
+    public async Task LeaveServer()
+    {
+        if (OpenServer is null) return;
+        try { await core.CallAsync("leave_server", new JsonObject { ["serverId"] = OpenServer.Id }); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
     }
 
     /// <summary>Someone's profile card (with when they joined the open server).</summary>

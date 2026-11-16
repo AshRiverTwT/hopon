@@ -178,6 +178,9 @@ public sealed partial class MainWindow : Window
             _ => "Offline, reconnecting…",
         };
         ServerTitle.Text = Store.OpenServer?.Name ?? "";
+        ServerMenuButton.Visibility = Store.OpenServer is null ? Visibility.Collapsed : Visibility.Visible;
+        CreateChannelItem.Visibility = Store.IsOwner ? Visibility.Visible : Visibility.Collapsed;
+        LeaveServerItem.Visibility = Store.IsOwner ? Visibility.Collapsed : Visibility.Visible;
         ChannelTitle.Text = Store.OpenChannel is null ? "" : "# " + Store.OpenChannel.Name;
         ChannelTopic.Text = Store.OpenChannel?.Topic ?? "";
         Composer.PlaceholderText = Store.OpenChannel is null ? "" : $"Message #{Store.OpenChannel.Name}";
@@ -334,6 +337,55 @@ public sealed partial class MainWindow : Window
         if (Date(p.JoinedAt) is { Length: > 0 } j) dates.Add($"Joined this server {j}");
         if (dates.Count > 0) card.Children.Add(new TextBlock { Text = string.Join("\n", dates), FontSize = 12, Opacity = 0.6, Margin = new Thickness(0, 6, 0, 0) });
         new Flyout { Content = card }.ShowAt(anchor);
+    }
+
+    async Task<string?> Ask(string title, string header, string placeholder, string ok, Control? extra = null)
+    {
+        var box = new TextBox { Header = header, PlaceholderText = placeholder, MinWidth = 320 };
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(box);
+        if (extra is not null) panel.Children.Add(extra);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot, Title = title, Content = panel,
+            PrimaryButtonText = ok, CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary,
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary && box.Text.Trim().Length > 0 ? box.Text.Trim() : null;
+    }
+
+    async void OnCreateServer(object sender, RoutedEventArgs e)
+    {
+        if (await Ask("Create a server", "Name", "My server", "Create") is { } name) await Store.CreateServer(name);
+    }
+
+    async void OnJoinServer(object sender, RoutedEventArgs e)
+    {
+        if (await Ask("Join a server", "Invite", "hopon://invite/… or code", "Join") is { } code) await Store.JoinInvite(code);
+    }
+
+    async void OnInvite(object sender, RoutedEventArgs e)
+    {
+        if (await Store.CreateInvite() is not { } link) return;
+        var data = new Windows.ApplicationModel.DataTransfer.DataPackage();
+        data.SetText(link);
+        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data);
+        ShowToast($"Invite link copied: {link}");
+    }
+
+    async void OnCreateChannel(object sender, RoutedEventArgs e)
+    {
+        var voice = new CheckBox { Content = "Voice room" };
+        if (await Ask("Create a channel", "Name", "new-channel", "Create", voice) is { } name) await Store.CreateChannel(name, voice.IsChecked == true);
+    }
+
+    async void OnLeaveServer(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot, Title = $"Leave {Store.OpenServer?.Name}?",
+            Content = "You can come back with an invite.", PrimaryButtonText = "Leave", CloseButtonText = "Cancel",
+        };
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary) await Store.LeaveServer();
     }
 
     async void OnBell(object sender, RoutedEventArgs e)
