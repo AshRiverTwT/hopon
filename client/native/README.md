@@ -110,27 +110,27 @@ PC = needs a person on a real PC to check (audio, devices, look and feel).
 | sign in / sign up, saved sign-in, server URL | built, CI | shares the Tauri build's data folder |
 | servers, text channels, topics | built, CI | |
 | messages: send, optimistic copy, delivery state | built, CI | e2e_feed measures paint latency |
-| edit / delete own, replies with quote | built | context menu; jump-to-message not yet |
-| reactions (toggle, quick React menu) | built | full emoji picker not yet |
+| edit / delete own, replies with quote | built, CI | context menu; jump-to-message not yet |
+| reactions (toggle, quick React menu) | built, CI | full emoji picker not yet |
 | @mentions: autocomplete, encode, highlight | built | |
 | typing indicator | built | |
 | formatting (bold, italic, strike, code, links) | built, tested | Rich.cs ≡ rich.ts on 4552 inputs |
-| attachments: images inline, files, + to upload | built | paste and drag-and-drop not yet; videos as links |
-| GIFs (KLIPY search) | not yet | |
+| attachments: images inline, files, + to upload, paste, drag-and-drop | built | videos as links |
+| GIFs (KLIPY search) | built | |
 | polls (show, vote) | built, tested | creating polls not yet |
 | unread markers, "new messages" divider, day separators | built, tested | |
 | load older history on scroll | built | |
-| presence, people column, "Playing …", status | built, CI | setting your own status not yet |
-| notifications: banners, Windows notifications, per-channel levels | built, tested | per-channel bell UI not yet (levels from synced prefs) |
-| voice: join/leave, mute/deafen, who's speaking | built | PC: audio path untested (no SFU in CI) |
+| presence, people column, "Playing …", status | built, CI | set your status: right-click your name |
+| notifications: banners, Windows notifications, per-channel bell | built, tested | |
+| voice: join/leave, mute/deafen, who's speaking | built, CI (compiles) | PC: audio path untested (no SFU in CI) |
 | audio devices, echo/noise/gain | built | PC |
-| push-to-talk, hotkeys | not yet | core supports PTT (voice_ptt) |
+| push-to-talk | built | PC; other hotkeys not yet |
 | per-person voice volume | not yet | core: voice_volume |
 | screen share / camera | not yet | decision pending: native vs WebView2 |
 | in-game overlay | not yet | |
 | games panel | not yet | plan: WebView2 (it shows the games' websites) |
-| close to tray, tray menu | built | |
-| profile pictures, profile cards/editor | not yet | avatars render as names only |
+| close to tray, tray menu | built, CI (compiles) | |
+| profile pictures | built | profile cards and editor not yet |
 | server settings (owner) | not yet | |
 | friends, DMs | not yet | DM servers are hidden for now |
 | updates (latest.json) | not yet | core: update_check / update_install |
