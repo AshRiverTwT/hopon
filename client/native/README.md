@@ -99,3 +99,40 @@ on the same machine. Not a user's PC: a check of the targets, not final numbers.
 Where the size goes (uncompressed, 92.7 MB): the core DLL (libwebrtc) 27.2 MB,
 WinUI/Windows App SDK runtime ~50 MB (`Microsoft.ui.xaml.dll` 14.5 MB, Controls
 7.1 MB, composition DLLs ~9 MB), `HopOn.exe` (Native AOT) 7.4 MB.
+
+## Parity with the Tauri app (README feature list)
+
+Built = in the WinUI app; CI = compiled and run on Windows by the workflow;
+PC = needs a person on a real PC to check (audio, devices, look and feel).
+
+| feature | native | notes |
+|---|---|---|
+| sign in / sign up, saved sign-in, server URL | built, CI | shares the Tauri build's data folder |
+| servers, text channels, topics | built, CI | |
+| messages: send, optimistic copy, delivery state | built, CI | e2e_feed measures paint latency |
+| edit / delete own, replies with quote | built | context menu; jump-to-message not yet |
+| reactions (toggle, quick React menu) | built | full emoji picker not yet |
+| @mentions: autocomplete, encode, highlight | built | |
+| typing indicator | built | |
+| formatting (bold, italic, strike, code, links) | built, tested | Rich.cs ≡ rich.ts on 4552 inputs |
+| attachments: images inline, files, + to upload | built | paste and drag-and-drop not yet; videos as links |
+| GIFs (KLIPY search) | not yet | |
+| polls (show, vote) | built, tested | creating polls not yet |
+| unread markers, "new messages" divider, day separators | built, tested | |
+| load older history on scroll | built | |
+| presence, people column, "Playing …", status | built, CI | setting your own status not yet |
+| notifications: banners, Windows notifications, per-channel levels | built, tested | per-channel bell UI not yet (levels from synced prefs) |
+| voice: join/leave, mute/deafen, who's speaking | built | PC: audio path untested (no SFU in CI) |
+| audio devices, echo/noise/gain | built | PC |
+| push-to-talk, hotkeys | not yet | core supports PTT (voice_ptt) |
+| per-person voice volume | not yet | core: voice_volume |
+| screen share / camera | not yet | decision pending: native vs WebView2 |
+| in-game overlay | not yet | |
+| games panel | not yet | plan: WebView2 (it shows the games' websites) |
+| close to tray, tray menu | built | |
+| profile pictures, profile cards/editor | not yet | avatars render as names only |
+| server settings (owner) | not yet | |
+| friends, DMs | not yet | DM servers are hidden for now |
+| updates (latest.json) | not yet | core: update_check / update_install |
+| zoom / scale | not yet | |
+| installer | not yet | CI estimates 21.8 MB (LZMA2) |
