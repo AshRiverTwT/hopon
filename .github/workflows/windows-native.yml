@@ -1,0 +1,105 @@
+# Native WinUI port: build and check on real Windows.
+# - bridge: hopon_ffi.dll (with voice) + hopon-server, Postgres on the runner,
+#   then the C# end-to-end check through the DLL (client/native/HopOn.BridgeCheck).
+name: windows-native
+
+on:
+  push:
+    branches: ["claude/**"]
+    paths:
+      - "client/core/**"
+      - "client/ffi/**"
+      - "client/native/**"
+      - "shared/**"
+      - "server/**"
+      - "vendor/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/windows-native.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-native-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+
+jobs:
+  bridge:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-native
+
+      - name: Build hopon_ffi.dll (voice) and hopon-server
+        run: cargo build -p hopon-ffi -p hopon-server
+
+      - name: C# bindings are current
+        shell: bash
+        run: git diff --exit-code client/ffi/bindings/
+
+      - name: Start Postgres
+        shell: pwsh
+        run: |
+          $svc = Get-Service -Name "postgresql*" | Select-Object -First 1
+          Set-Service $svc.Name -StartupType Manual
+          Start-Service $svc.Name
+          $env:PGPASSWORD = "root"
+          & "$env:PGBIN\psql.exe" -h 127.0.0.1 -U postgres -c "CREATE DATABASE hopon"
+
+      - name: Start hopon-server
+        shell: pwsh
+        run: |
+          $env:DATABASE_URL = "postgres://postgres:root@127.0.0.1:5432/hopon"
+          $env:HOPON_JWT_SECRET = "ci-secret"
+          $env:LIVEKIT_URL = "ws://127.0.0.1:7880"
+          $env:LIVEKIT_API_KEY = "devkey"
+          $env:LIVEKIT_API_SECRET = "secret-secret-secret-secret-secret"
+          $env:HOPON_SEND_RATE = "100000"
+          $env:HOPON_BIND = "127.0.0.1:18080"
+          $env:RUST_LOG = "warn"
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\logs" | Out-Null
+          Start-Process target\debug\hopon-server.exe -NoNewWindow `
+            -RedirectStandardError "$env:RUNNER_TEMP\logs\server.err.log" -RedirectStandardOutput "$env:RUNNER_TEMP\logs\server.out.log"
+          for ($i = 0; $i -lt 100; $i++) {
+            try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18080/health | Out-Null; Write-Host "server up"; exit 0 } catch { Start-Sleep -Milliseconds 300 }
+          }
+          Get-Content "$env:RUNNER_TEMP\logs\server.err.log"
+          throw "server did not start"
+
+      - name: Bridge check (C# -> hopon_ffi.dll -> server)
+        shell: pwsh
+        working-directory: client/native/HopOn.BridgeCheck
+        run: |
+          dotnet build -c Debug -warnaserror
+          Copy-Item ..\..\..\target\debug\hopon_ffi.dll bin\Debug\net10.0\
+          $env:HOPON_URL = "ws://127.0.0.1:18080/ws"
+          dotnet bin\Debug\net10.0\HopOn.BridgeCheck.dll owner "$env:RUNNER_TEMP\bridge"
+          if ($LASTEXITCODE -ne 0) { throw "bridge check failed ($LASTEXITCODE)" }
+
+      - name: Native AOT bridge check
+        shell: pwsh
+        working-directory: client/native/HopOn.BridgeCheck
+        run: |
+          dotnet publish -c Release -r win-x64 -p:PublishAot=true -o "$env:RUNNER_TEMP\aot"
+          Copy-Item ..\..\..\target\debug\hopon_ffi.dll "$env:RUNNER_TEMP\aot\"
+          $env:HOPON_URL = "ws://127.0.0.1:18080/ws"
+          & "$env:RUNNER_TEMP\aot\HopOn.BridgeCheck.exe" owner "$env:RUNNER_TEMP\bridge-aot"
+          if ($LASTEXITCODE -ne 0) { throw "AOT bridge check failed ($LASTEXITCODE)" }
+          Get-ChildItem "$env:RUNNER_TEMP\aot" | Format-Table Name, Length
+
+      - name: Server log
+        if: always()
+        shell: pwsh
+        run: Get-Content "$env:RUNNER_TEMP\logs\server.err.log" -ErrorAction SilentlyContinue | Select-Object -Last 50
