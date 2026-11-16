@@ -1,6 +1,7 @@
 # Native WinUI port: build and check on real Windows.
-# - bridge: hopon_ffi.dll (with voice), hopon-server and e2e_feed; Postgres on
-#   the runner; the C# end-to-end check through the DLL (JIT and Native AOT).
+# - build: hopon_ffi.dll (with voice), hopon-server and e2e_feed; model tests.
+# - bridge: Postgres + server on the runner; the C# end-to-end check through
+#   the DLL (JIT and Native AOT).
 # - app: the WinUI app, built, published with Native AOT, run against the
 #   server and measured (startup, paint latency, idle CPU/RAM, size, screenshot).
 name: windows-native
@@ -33,7 +34,9 @@ env:
   DOTNET_NOLOGO: "1"
 
 jobs:
-  bridge:
+  # Note: on Windows runners a process started in one step is killed when that
+  # step ends, so each step that needs the server starts it itself.
+  build:
     runs-on: windows-latest
     timeout-minutes: 120
     steps:
@@ -69,7 +72,7 @@ jobs:
             target/debug/e2e_feed.exe
           retention-days: 7
 
-      - name: Model tests (C# models vs Rust fixtures, merge rules)
+      - name: Model tests (C# models vs Rust fixtures, merge, formatting, polls)
         shell: pwsh
         working-directory: client/native/HopOn.Interop.Tests
         run: |
@@ -77,30 +80,35 @@ jobs:
           dotnet bin\Debug\net10.0\HopOn.Interop.Tests.dll
           if ($LASTEXITCODE -ne 0) { throw "model tests failed" }
 
-      - name: Start Postgres and hopon-server
-        shell: pwsh
-        run: scripts\ci\start-server.ps1 -ServerExe target\debug\hopon-server.exe
+  bridge:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Bridge check (C# -> hopon_ffi.dll -> server)
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-bin
+          path: ${{ runner.temp }}\rust-bin
+
+      - name: Bridge check (C# -> hopon_ffi.dll -> server), JIT and Native AOT
         shell: pwsh
         working-directory: client/native/HopOn.BridgeCheck
         run: |
-          dotnet build -c Debug -warnaserror
-          Copy-Item ..\..\..\target\debug\hopon_ffi.dll bin\Debug\net10.0\
-          Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18080/health | Select-Object StatusCode, Content
-          Get-Process hopon-server -ErrorAction SilentlyContinue | Format-Table Id, StartTime
+          & "$env:GITHUB_WORKSPACE\scripts\ci\start-server.ps1" -ServerExe "$env:RUNNER_TEMP\rust-bin\hopon-server.exe"
           $env:HOPON_URL = "ws://127.0.0.1:18080/ws"
           $env:RUST_LOG = "info,livekit=warn,libwebrtc=warn"
+          dotnet build -c Debug -warnaserror
+          Copy-Item "$env:RUNNER_TEMP\rust-bin\hopon_ffi.dll" bin\Debug\net10.0\
           dotnet bin\Debug\net10.0\HopOn.BridgeCheck.dll owner "$env:RUNNER_TEMP\bridge"
           if ($LASTEXITCODE -ne 0) { throw "bridge check failed ($LASTEXITCODE)" }
-
-      - name: Native AOT bridge check
-        shell: pwsh
-        working-directory: client/native/HopOn.BridgeCheck
-        run: |
           dotnet publish -c Release -r win-x64 -p:PublishAot=true -o "$env:RUNNER_TEMP\aot"
-          Copy-Item ..\..\..\target\debug\hopon_ffi.dll "$env:RUNNER_TEMP\aot\"
-          $env:HOPON_URL = "ws://127.0.0.1:18080/ws"
+          Copy-Item "$env:RUNNER_TEMP\rust-bin\hopon_ffi.dll" "$env:RUNNER_TEMP\aot\"
           & "$env:RUNNER_TEMP\aot\HopOn.BridgeCheck.exe" owner "$env:RUNNER_TEMP\bridge-aot"
           if ($LASTEXITCODE -ne 0) { throw "AOT bridge check failed ($LASTEXITCODE)" }
 
@@ -110,7 +118,7 @@ jobs:
         run: Get-Content "$env:RUNNER_TEMP\logs\server.err.log" -ErrorAction SilentlyContinue | Select-Object -Last 50
 
   app:
-    needs: bridge
+    needs: build
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -137,13 +145,11 @@ jobs:
           dotnet publish -c Release -p:HoponFfiDll="$env:RUNNER_TEMP\rust-bin\hopon_ffi.dll" -o "$env:RUNNER_TEMP\HopOn"
           Get-ChildItem "$env:RUNNER_TEMP\HopOn" | Sort-Object Length -Descending | Select-Object -First 15 | Format-Table Name, Length
 
-      - name: Start Postgres and hopon-server
+      - name: Run and measure the app (against a server on the runner)
         shell: pwsh
-        run: scripts\ci\start-server.ps1 -ServerExe "$env:RUNNER_TEMP\rust-bin\hopon-server.exe"
-
-      - name: Run and measure the app
-        shell: pwsh
-        run: scripts\ci\measure-app.ps1 -AppDir "$env:RUNNER_TEMP\HopOn" -E2eFeed "$env:RUNNER_TEMP\rust-bin\e2e_feed.exe" -Out "$env:RUNNER_TEMP\results"
+        run: |
+          scripts\ci\start-server.ps1 -ServerExe "$env:RUNNER_TEMP\rust-bin\hopon-server.exe"
+          scripts\ci\measure-app.ps1 -AppDir "$env:RUNNER_TEMP\HopOn" -E2eFeed "$env:RUNNER_TEMP\rust-bin\e2e_feed.exe" -Out "$env:RUNNER_TEMP\results"
 
       - name: Upload results
         if: always()

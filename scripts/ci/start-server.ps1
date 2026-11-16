@@ -22,7 +22,7 @@ New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\logs" | Out-Null
 Start-Process $ServerExe -NoNewWindow `
   -RedirectStandardError "$env:RUNNER_TEMP\logs\server.err.log" -RedirectStandardOutput "$env:RUNNER_TEMP\logs\server.out.log"
 for ($i = 0; $i -lt 100; $i++) {
-  try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18080/health | Out-Null; Write-Host "server up"; exit 0 } catch { Start-Sleep -Milliseconds 300 }
+  try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18080/health | Out-Null; Write-Host "server up"; return } catch { Start-Sleep -Milliseconds 300 }
 }
 Get-Content "$env:RUNNER_TEMP\logs\server.err.log"
 throw "server did not start"
