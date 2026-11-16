@@ -74,10 +74,17 @@
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
-                <StackPanel Grid.Row="2" Margin="16,10" Spacing="2">
-                    <TextBlock x:Name="MeText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                    <TextBlock x:Name="ConnText" FontSize="12" Opacity="0.65" />
-                </StackPanel>
+                <Grid Grid.Row="2" Margin="16,10" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="2">
+                        <TextBlock x:Name="MeText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="ConnText" FontSize="12" Opacity="0.65" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="Sign out" Click="OnSignOut" VerticalAlignment="Center" FontSize="12" Padding="8,3" />
+                </Grid>
             </Grid>
 
             <!-- Chat -->

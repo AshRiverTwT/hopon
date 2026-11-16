@@ -201,6 +201,13 @@ public sealed partial class MainWindow : Window
     void OnSignIn(object sender, RoutedEventArgs e) => _ = Auth("login");
     void OnSignUp(object sender, RoutedEventArgs e) => _ = Auth("signup");
 
+    async void OnSignOut(object sender, RoutedEventArgs e)
+    {
+        try { await App.Core.CallAsync("logout"); }
+        catch (HopOnException x) { ShowToast(x.Message); }
+        PassBox.Password = "";
+    }
+
     void OnPasswordKeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key == VirtualKey.Enter) _ = Auth("login");
