@@ -24,7 +24,8 @@ on:
 
 concurrency:
   group: windows-native-${{ github.ref }}
-  cancel-in-progress: true
+  # Queue, don't cancel: a cancelled run loses its Rust build cache.
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: never
