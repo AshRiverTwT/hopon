@@ -82,19 +82,20 @@ WinUI reference assemblies: `scripts/native-check-linux.sh`.
   run's summary and the `native-app-results` artifact; the app itself is the
   `HopOn-native-preview` artifact.
 
-## First measurements (windows-latest CI runner, 2026-11-16)
+## Measurements (windows-latest CI runner, 2026-11-16)
 
 From `scripts/ci/measure-app.ps1`: a GitHub-hosted Windows VM (no GPU, WARP
-rendering), app published with Native AOT, **debug** core DLL, server on the
-same machine. Not a user's PC: treat as a smoke test of the targets, not the
-final numbers.
+rendering), app published with Native AOT and the **release** core DLL, server
+on the same machine. Not a user's PC: a check of the targets, not final numbers.
 
-| item | native WinUI | target (README) |
-|---|---|---|
-| process start → first frame, 5 runs | median 177 ms, worst 342 ms | < 1 s (Tauri: 657 ms) |
-| remote message → painted, 200 msgs at 20/s | p50 21.6 ms, p95 22.6 ms, p99 36 ms | < 100 ms LAN p95 |
-| idle CPU, 30 s | 0.12 % of all cores | < 1 % |
-| idle RAM | 68 MB private, 129 MB working set | < 200 MB (Tauri: 190 MB) |
+| item | native WinUI (two runs) | target | Tauri build (README) |
+|---|---|---|---|
+| process start → first frame, 5 runs | median 144–177 ms, worst 264–342 ms | < 1 s | 657 ms |
+| remote message → painted, 200 msgs at 20/s | p50 20–22 ms, p95 23–35 ms | < 100 ms LAN p95 | 28.7 ms (Linux, software GL) |
+| idle CPU, 30 s | 0.03–0.12 % of all cores | < 1 % | 0.13 % |
+| idle RAM | 68–71 MB private, 129 MB working set | < 200 MB | 190 MB private |
+| installer estimate (LZMA2 of everything shipped) | 21.8 MB | < 30 MB | 10.5 MB |
 
-Size is being re-measured with the release core and without symbols (the
-first run's folder included a 30 MB `HopOn.pdb`).
+Where the size goes (uncompressed, 92.7 MB): the core DLL (libwebrtc) 27.2 MB,
+WinUI/Windows App SDK runtime ~50 MB (`Microsoft.ui.xaml.dll` 14.5 MB, Controls
+7.1 MB, composition DLLs ~9 MB), `HopOn.exe` (Native AOT) 7.4 MB.
