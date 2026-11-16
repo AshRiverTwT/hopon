@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["shared", "server", "bench", "client/src-tauri"]
+members = ["shared", "server", "bench", "client/core", "client/src-tauri"]
 
 [workspace.package]
 version = "0.8.1"

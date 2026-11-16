@@ -79,7 +79,7 @@ impl Activity {
         if core.activity.started.swap(true, Ordering::Relaxed) {
             return;
         }
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             loop {
                 let game = if core.activity.enabled.load(Ordering::Relaxed) && core.store.lock().me.is_some() {
                     tokio::task::spawn_blocking(detect).await.ok().flatten().unwrap_or_default()
@@ -105,7 +105,7 @@ impl Activity {
     pub fn resend(core: Arc<Core>) {
         let game = core.activity.current.lock().clone();
         if !game.is_empty() {
-            tauri::async_runtime::spawn(async move {
+            crate::rt::spawn(async move {
                 let _ = core.request(C2S::SetActivity { game }).await;
             });
         }
@@ -115,7 +115,7 @@ impl Activity {
     pub fn set_enabled(core: Arc<Core>, on: bool) {
         core.activity.enabled.store(on, Ordering::Relaxed);
         if !on {
-            tauri::async_runtime::spawn(async move { core.activity.report(&core, String::new()).await });
+            crate::rt::spawn(async move { core.activity.report(&core, String::new()).await });
         }
     }
 }

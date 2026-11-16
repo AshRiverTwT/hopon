@@ -16,28 +16,16 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# Connection, state, cache and voice: everything that isn't the webview shell.
+hopon-core = { path = "../core", default-features = false }
 hopon-shared.workspace = true
 serde.workspace = true
 serde_json = "1"
 tokio.workspace = true
-tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
-futures-util.workspace = true
-anyhow.workspace = true
 parking_lot.workspace = true
-base64 = "0.22"
-sha2 = "0.10"
-# File uploads (already in the graph through the LiveKit SDK).
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json"] }
-# TLS for wss:// (chat). Must name a crypto provider explicitly: the copy
-# of rustls with `ring` in the graph is a build-script dependency only.
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tauri = { version = "2", default-features = false, features = ["wry", "common-controls-v6", "compression", "unstable", "tray-icon"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
-# Voice: LiveKit SDK with libwebrtc's platform ADM (WASAPI on Windows).
-# TLS for wss:// SFU signaling (off by default in the SDK).
-livekit = { version = "0.10", optional = true, features = ["rustls-tls-native-roots"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Desktop notifications over D-Bus (pure Rust).
@@ -50,21 +38,16 @@ webkit2gtk = { version = "=2.0.2", features = ["v2_40"] }
 tauri-winrt-notification = "0.7"
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
-  "Win32_Security_Cryptography",
   "Win32_System_Threading",
-  "Win32_System_Memory",
-  "Win32_System_ProcessStatus",
-  "Win32_System_Diagnostics_ToolHelp",
   "Win32_UI_WindowsAndMessaging",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_System_LibraryLoader",
-  "Win32_System_SystemInformation",
   "Win32_Media",
 ] }
 
 [features]
 default = ["voice"]
 # Off only for headless text-path testing on hosts without a libwebrtc toolchain.
-voice = ["dep:livekit"]
+voice = ["hopon-core/voice"]
 # Passed by `tauri build`; keeps devtools/dev server out of release.
 custom-protocol = ["tauri/custom-protocol"]

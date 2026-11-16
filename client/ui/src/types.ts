@@ -1,4 +1,4 @@
-// Mirrors client/src-tauri/src/ui.rs. IDs are decimal strings (63-bit).
+// Mirrors client/core/src/ui.rs. IDs are decimal strings (63-bit).
 export interface User { id: string; name: string; avatarV: number;
   /** Profile colour: index into ACCENTS (0 = none). */
   accent: number }

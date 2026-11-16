@@ -28,7 +28,7 @@ fn shared() -> &'static Shared {
 }
 
 pub struct Ptt {
-    task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     hook_started: AtomicBool,
 }
 
@@ -53,7 +53,7 @@ impl Ptt {
 
     /// While in a voice channel, react to key transitions.
     pub fn attach(&self, core: Arc<Core>) {
-        let t = tauri::async_runtime::spawn(async move {
+        let t = crate::rt::spawn(async move {
             loop {
                 shared().changed.notified().await;
                 if !shared().down.load(Ordering::Relaxed) {

@@ -20,8 +20,7 @@ use std::hash::Hash;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::ipc::Channel;
-use tauri::Manager;
+use crate::host::{Host, UiSink};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, Notify};
 use tokio_tungstenite::tungstenite::Message as WsMsg;
@@ -239,7 +238,7 @@ pub struct Core {
     pub url: Mutex<String>,
     /// Subscribed windows (label → channel), plus events buffered while the
     /// main window isn't attached yet.
-    ui: Mutex<(Vec<(String, Channel<UiEvent>)>, Vec<UiEvent>)>,
+    ui: Mutex<(Vec<(String, Box<dyn UiSink>)>, Vec<UiEvent>)>,
     pending_ui: Mutex<HashMap<UiCoalesceKey, UiEvent>>,
     pending_ui_scheduled: AtomicBool,
     ui_suspended: AtomicBool,
@@ -255,8 +254,8 @@ pub struct Core {
     pub voice: crate::voice::Voice,
     pub games: crate::games::Games,
     pub activity: crate::activity::Activity,
-    /// Set once in `setup`.
-    pub app: std::sync::OnceLock<tauri::AppHandle>,
+    /// The UI shell's window services; set once at startup.
+    pub host: std::sync::OnceLock<Box<dyn Host>>,
 }
 
 pub type Res<T> = Result<T, String>;
@@ -286,7 +285,7 @@ impl Core {
             voice: crate::voice::Voice::new(),
             games: crate::games::Games::new(),
             activity: crate::activity::Activity::new(),
-            app: std::sync::OnceLock::new(),
+            host: std::sync::OnceLock::new(),
         })
     }
 
@@ -304,7 +303,7 @@ impl Core {
             };
             if schedule {
                 let core = self.clone();
-                tauri::async_runtime::spawn(async move {
+                crate::rt::spawn(async move {
                     loop {
                         tokio::time::sleep(Duration::from_millis(UI_COALESCE_MS)).await;
                         let batch = {
@@ -327,14 +326,7 @@ impl Core {
     }
 
     fn emit_now(&self, ev: UiEvent) {
-        let native_hidden = self
-            .app
-            .get()
-            .and_then(|app| app.get_webview_window("main"))
-            .map(|window| {
-                window.is_minimized().unwrap_or(false) || !window.is_visible().unwrap_or(true)
-            })
-            .unwrap_or(false);
+        let native_hidden = self.host.get().is_some_and(|h| h.main_hidden());
         if native_hidden {
             self.ui_suspended.store(true, Ordering::Release);
         }
@@ -372,7 +364,7 @@ impl Core {
             if overlay_only && label != "overlay" {
                 return true;
             }
-            let ok = ch.send(ev.clone()).is_ok();
+            let ok = ch.send(ev.clone());
             main_ok |= ok && label == "main";
             ok
         });
@@ -399,7 +391,7 @@ impl Core {
 
     /// A window subscribes (again, after a reload). The main window also gets
     /// whatever was buffered while it wasn't listening.
-    pub fn attach_ui(&self, label: &str, ch: Channel<UiEvent>) {
+    pub fn attach_ui(&self, label: &str, ch: Box<dyn UiSink>) {
         let mut ui = self.ui.lock();
         let (prefs, snap) = {
             let s = self.store.lock();
@@ -527,7 +519,7 @@ impl Core {
         };
         if should_lookup {
             let core = self.clone();
-            tauri::async_runtime::spawn(async move {
+            crate::rt::spawn(async move {
                 let _ = core.request(C2S::UserLookup { server_id, user_id }).await;
                 core.store.lock().user_lookups.remove(&user_id);
             });
@@ -884,7 +876,7 @@ impl Core {
 
     /// Fetch the latest page from the server and merge into the UI.
     pub fn refresh_latest(self: Arc<Self>, ch: Id) {
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             let previous = self.cursor_from_cache(ch).await;
             if let Ok(S2C::History { messages, latest_cursor, .. }) = self
                 .request(C2S::History {
@@ -943,7 +935,7 @@ impl Core {
 
     fn replay_from(self: &Arc<Self>, channel_id: Id, cursor: Id) {
         let core = self.clone();
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             let mut after = cursor;
             loop {
                 let response = core.request(C2S::Replay { channel_id, after_cursor: after, limit: 100 }).await;
@@ -991,7 +983,7 @@ impl Core {
                         } else {
                             self.store.lock().pending.remove(&nonce);
                             let cache = self.cache.clone();
-                            tauri::async_runtime::spawn(async move {
+                            crate::rt::spawn(async move {
                                 cache.outbox_remove(nonce).await;
                             });
                             self.emit(UiEvent::MsgState {
@@ -1241,7 +1233,7 @@ impl Core {
                 }
                 let cache = self.cache.clone();
                 let nonce = *nonce;
-                tauri::async_runtime::spawn(async move {
+                crate::rt::spawn(async move {
                     cache.outbox_remove(nonce).await;
                 });
                 self.emit(UiEvent::MsgState {
@@ -1293,7 +1285,7 @@ impl Core {
                 self.emit(UiEvent::Server { server: sv.into() });
                 let core = self.clone();
                 let server_id = sv.id;
-                tauri::async_runtime::spawn(async move {
+                crate::rt::spawn(async move {
                     let _ = core
                         .request(C2S::Members {
                             server_id,
@@ -1748,15 +1740,10 @@ impl Core {
         self.emit(UiEvent::ChannelActivity { channel_id: sid(channel_id), last_id: sid(message_id) });
     }
 
-    /// Flash the taskbar if the window isn't focused (no plugin needed).
+    /// Flash the taskbar if the window isn't focused.
     pub fn attention(&self) {
-        use tauri::Manager;
-        if let Some(app) = self.app.get() {
-            if let Some(w) = app.get_webview_window("main") {
-                if !w.is_focused().unwrap_or(true) {
-                    let _ = w.request_user_attention(Some(tauri::UserAttentionType::Informational));
-                }
-            }
+        if let Some(host) = self.host.get() {
+            host.request_attention();
         }
     }
 
@@ -1774,7 +1761,7 @@ impl Core {
         };
         if newer {
             let me = self.clone();
-            tauri::async_runtime::spawn(async move {
+            crate::rt::spawn(async move {
                 let _ = me
                     .request(C2S::MarkRead {
                         channel_id: channel,

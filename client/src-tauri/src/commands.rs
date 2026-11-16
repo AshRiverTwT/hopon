@@ -18,7 +18,7 @@ fn ms_to_us(ms: f64) -> i64 {
 
 #[tauri::command]
 pub fn ui_subscribe(window: tauri::Window, core: C<'_>, events: Channel<UiEvent>) {
-    core.attach_ui(window.label(), events);
+    core.attach_ui(window.label(), Box::new(crate::host::ChannelSink(events)));
 }
 
 #[tauri::command]

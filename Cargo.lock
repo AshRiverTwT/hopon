@@ -1843,12 +1843,31 @@ dependencies = [
 name = "hopon-client"
 version = "0.8.1"
 dependencies = [
+ "hopon-core",
+ "hopon-shared",
+ "notify-rust",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-winrt-notification 0.7.3",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "webkit2gtk",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "hopon-core"
+version = "0.8.1"
+dependencies = [
  "anyhow",
  "base64 0.22.1",
  "futures-util",
  "hopon-shared",
  "livekit",
- "notify-rust",
  "parking_lot",
  "reqwest 0.12.28",
  "rusqlite",
@@ -1856,14 +1875,9 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "tauri",
- "tauri-build",
- "tauri-winrt-notification 0.7.3",
  "tokio",
  "tokio-tungstenite 0.26.2",
  "tracing",
- "tracing-subscriber",
- "webkit2gtk",
  "windows-sys 0.59.0",
 ]
 

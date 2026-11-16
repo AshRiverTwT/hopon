@@ -1,4 +1,4 @@
-// Game result detection for chat rendering (mirrors client/src-tauri/src/games.rs).
+// Game result detection for chat rendering (mirrors client/core/src/games.rs).
 
 export const GAMES = [
   { id: "wordle", name: "Wordle" },

@@ -1,31 +1,21 @@
+//! The Tauri shell: windows, webviews, tray, notifications and the command
+//! bridge. Everything else lives in `hopon-core`.
 #![cfg_attr(not(feature = "voice"), allow(dead_code))]
-mod activity;
-mod cache;
 mod commands;
-mod core;
 mod games;
-mod guard;
+mod host;
 mod notify;
 mod overlay;
-mod perf;
-mod secure;
-mod sys;
 mod tray;
-mod ui;
 mod update;
-#[cfg(feature = "voice")]
-mod voice;
-#[cfg(not(feature = "voice"))]
-#[path = "voice_stub.rs"]
-mod voice;
 
-use std::sync::Arc;
+// The core's modules, under the paths the shell has always used.
+use hopon_core::{activity, core, guard, perf, sys, ui, voice};
+
 use tauri::Manager;
 
 pub fn run() {
     guard::install_crash_reporter();
-    // wss:// needs a process-wide rustls crypto provider (see Cargo.toml).
-    let _ = rustls::crypto::ring::default_provider().install_default();
     // --perf-exit runs are scripted measurements; allow them alongside.
     if !std::env::args().any(|a| a == "--perf-exit") && !guard::single_instance() {
         return;
@@ -37,53 +27,18 @@ pub fn run() {
                 .unwrap_or_else(|_| "info,livekit=warn,libwebrtc=warn".into()),
         )
         .init();
+    // One runtime for the core and Tauri's own async commands.
+    tauri::async_runtime::set(hopon_core::rt::handle());
 
     tauri::Builder::default()
         .on_window_event(tray::on_window_event)
         .setup(|app| {
             tray::install(app)?;
             let dir = app.path().app_local_data_dir()?;
-            std::fs::create_dir_all(&dir)?;
-            linux::private_dir(&dir);
+            let core = hopon_core::start(&dir)?;
+            let _ = core.host.set(Box::new(host::TauriHost(app.handle().clone())));
+            app.manage(core);
             linux::webview_media(app);
-            // The cache is disposable: never let it stop the app from starting.
-            let cache = match cache::Cache::open(&dir.join("cache.db")) {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::error!("cache unavailable ({e:#}); using a temporary in-memory cache");
-                    cache::Cache::open_in_memory()?
-                }
-            };
-            // Public server by default; HOPON_DEFAULT_URL at build time overrides it,
-            // HOPON_URL at run time overrides both. A URL picked at sign-in is kept.
-            let default_url = std::env::var("HOPON_URL")
-                .unwrap_or_else(|_| option_env!("HOPON_DEFAULT_URL").unwrap_or("wss://hopon-chat.duckdns.org/ws").into());
-            let core = core::Core::new(cache, default_url);
-            let _ = core.app.set(app.handle().clone());
-            app.manage(core.clone());
-            let start = core.clone();
-            // Pre-connect: the socket is up (and usually authenticated) before
-            // the user can click anything.
-            tauri::async_runtime::spawn(async move {
-                if let Some(u) = start.cache.kv_get("url").await.and_then(|b| String::from_utf8(b).ok()) {
-                    if std::env::var("HOPON_URL").is_err() {
-                        *start.url.lock() = u;
-                    }
-                }
-                load_voice_prefs(&start).await;
-                start.run().await;
-            });
-            // Benchmark automation only: dump instrumentation every 2 s.
-            if let Ok(path) = std::env::var("HOPON_PERF_DUMP") {
-                let c = core.clone();
-                tauri::async_runtime::spawn(async move {
-                    loop {
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        let v = serde_json::json!({ "rows": c.perf.rows(), "startup": *c.perf.startup.lock() });
-                        let _ = std::fs::write(&path, v.to_string());
-                    }
-                });
-            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -173,29 +128,6 @@ pub fn run() {
         .expect("error while running HopOn");
 }
 
-async fn load_voice_prefs(core: &Arc<core::Core>) {
-    let s = |b: Option<Vec<u8>>| b.and_then(|b| String::from_utf8(b).ok());
-    if let Some(i) = s(core.cache.kv_get("dev_in").await) {
-        let _ = core.voice.set_device(true, Some(i));
-    }
-    if let Some(o) = s(core.cache.kv_get("dev_out").await) {
-        let _ = core.voice.set_device(false, Some(o));
-    }
-    if let Some(a) = s(core.cache.kv_get("apm").await) {
-        let b: Vec<bool> = a.chars().map(|c| c == '1').collect();
-        if b.len() == 3 {
-            core.voice.set_processing(b[0], b[1], b[2]);
-        }
-    }
-    if let Some(p) = s(core.cache.kv_get("ptt").await) {
-        if let Some((en, vk)) = p.split_once(':') {
-            core.voice
-                .set_ptt(core, en == "1", vk.parse().unwrap_or(0))
-                .await;
-        }
-    }
-}
-
 /// Linux specifics (AppImage on Arch and friends); nothing on other systems.
 mod linux {
     /// Before the webview starts: WebKitGTK's DMA-BUF renderer shows a blank
@@ -205,15 +137,6 @@ mod linux {
         #[cfg(target_os = "linux")]
         if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        }
-    }
-
-    /// The data folder holds your sign-in: only you can read it.
-    pub fn private_dir(_dir: &std::path::Path) {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(_dir, std::fs::Permissions::from_mode(0o700));
         }
     }
 

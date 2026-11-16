@@ -28,7 +28,7 @@ struct Active {
     room: Arc<Room>,
     channel_id: Id,
     track: LocalAudioTrack,
-    events: tauri::async_runtime::JoinHandle<()>,
+    events: tokio::task::JoinHandle<()>,
 }
 
 #[derive(Clone, Default)]
@@ -265,7 +265,7 @@ impl Voice {
 
         let events = {
             let core = core.clone();
-            tauri::async_runtime::spawn(async move {
+            crate::rt::spawn(async move {
                 let mut first_track = true;
                 while let Some(ev) = events.recv().await {
                     match ev {
@@ -296,7 +296,7 @@ impl Voice {
                         RoomEvent::Disconnected { reason } => {
                             tracing::info!("voice disconnected: {reason:?}");
                             let c = core.clone();
-                            tauri::async_runtime::spawn(async move { c.voice.leave(&c, true).await });
+                            crate::rt::spawn(async move { c.voice.leave(&c, true).await });
                             break;
                         }
                         _ => {}
@@ -318,7 +318,7 @@ impl Voice {
     /// we were removed from its server; the server already cleared presence).
     pub fn leave_if_in(&self, core: Arc<Core>, channels: &[Id]) {
         let channels = channels.to_vec();
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             let current = core.voice.active.lock().await.as_ref().map(|a| a.channel_id);
             if current.map_or(false, |c| channels.contains(&c)) {
                 core.voice.leave(&core, false).await;
@@ -428,7 +428,7 @@ impl Voice {
 
     pub fn on_reconnect(&self, core: Arc<Core>) {
         // The server forgets presence when the chat socket drops; restate it.
-        tauri::async_runtime::spawn(async move {
+        crate::rt::spawn(async move {
             let ch = core.voice.active.lock().await.as_ref().map(|a| a.channel_id);
             if let Some(ch) = ch {
                 let p = core.voice.prefs.lock().clone();
