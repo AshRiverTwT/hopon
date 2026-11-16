@@ -16,7 +16,6 @@
 //!   games (and games running as administrator) can't be drawn over this way.
 
 use crate::core::{Core, Res};
-use crate::ui::UiMsg;
 use std::sync::Arc;
 use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
 
@@ -136,21 +135,9 @@ pub async fn overlay_hide(app: tauri::AppHandle, refocus: bool) -> Res<()> {
     Ok(())
 }
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OverlayContext {
-    /// The text channel open in the main window.
-    channel_id: Option<String>,
-    msgs: Vec<UiMsg>,
-}
-
-/// What to show: the main window's open channel and its latest messages.
 #[tauri::command]
-pub fn overlay_context(core: tauri::State<'_, Arc<Core>>) -> OverlayContext {
-    let s = core.store.lock();
-    let Some(ch) = s.open_channel else { return OverlayContext { channel_id: None, msgs: vec![] } };
-    let msgs = s.recent.get(&ch).map(|q| q.iter().rev().take(30).rev().map(|m| UiMsg::from_msg(m, 2)).collect()).unwrap_or_default();
-    OverlayContext { channel_id: Some(ch.to_string()), msgs }
+pub fn overlay_context(core: tauri::State<'_, Arc<Core>>) -> Res<hopon_core::api::OverlayContext> {
+    hopon_core::api::overlay_context(core.inner())
 }
 
 /// "Alt+Backquote" → (MOD_* flags, virtual-key code).

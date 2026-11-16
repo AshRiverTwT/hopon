@@ -6,6 +6,7 @@
 #![cfg_attr(not(feature = "voice"), allow(dead_code))]
 
 pub mod activity;
+pub mod api;
 pub mod cache;
 pub mod core;
 pub mod games;

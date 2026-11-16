@@ -10,7 +10,7 @@ mod tray;
 mod update;
 
 // The core's modules, under the paths the shell has always used.
-use hopon_core::{activity, core, guard, perf, sys, ui, voice};
+use hopon_core::{core, guard, ui, voice};
 
 use tauri::Manager;
 
