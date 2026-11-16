@@ -2,8 +2,10 @@
 //
 // Threading: event handlers and the host callbacks run on the core's worker
 // threads. A UI must hop to its own thread (WinUI: DispatcherQueue.TryEnqueue)
-// and must not block in them. Command results complete their Task on a worker
-// thread too (await resumes on the caller's context as usual).
+// and must not block in them, or call back into HopOnCore from them. One
+// exception: the first events of a subscription are delivered synchronously
+// inside Subscribe, on the calling thread. Command results complete their Task
+// on a worker thread (await resumes on the caller's context as usual).
 
 using System;
 using System.Collections.Concurrent;
@@ -20,7 +22,11 @@ namespace HopOn.Native;
 /// <summary>Window services the core asks the shell for.</summary>
 public interface IHopOnHost
 {
-    /// <summary>The main window is minimized or hidden to the tray.</summary>
+    /// <summary>
+    /// The main window is minimized or hidden to the tray. Read for every event,
+    /// from worker threads: return a field the UI thread keeps current (e.g. from
+    /// AppWindow.Changed), never query the window here.
+    /// </summary>
     bool MainHidden { get; }
     /// <summary>Flash the taskbar button if the main window isn't focused.</summary>
     void RequestAttention();
@@ -40,6 +46,7 @@ public sealed unsafe class HopOnCore
 
     readonly ConcurrentDictionary<ulong, TaskCompletionSource<JsonElement>> pending = new();
     readonly ConcurrentDictionary<uint, Action<JsonElement>> sinks = new();
+    readonly ConcurrentDictionary<string, uint> sinkOfLabel = new();
     long nextRequest;
     int nextSink;
 
@@ -109,7 +116,14 @@ public sealed unsafe class HopOnCore
         var bytes = Encoding.UTF8.GetBytes(label);
         int rc;
         fixed (byte* p = bytes) rc = NativeMethods.hopon_subscribe(sink, p, (nuint)bytes.Length);
-        Check(rc, "subscribe");
+        if (rc != Ok)
+        {
+            sinks.TryRemove(sink, out _);
+            Check(rc, "subscribe");
+        }
+        // The core replaced the label's old subscription: drop its handler.
+        if (sinkOfLabel.TryGetValue(label, out var old) && old != sink) sinks.TryRemove(old, out _);
+        sinkOfLabel[label] = sink;
     }
 
     /// <summary>Stop events for a window (it closed).</summary>
@@ -117,6 +131,7 @@ public sealed unsafe class HopOnCore
     {
         var bytes = Encoding.UTF8.GetBytes(label);
         fixed (byte* p = bytes) Check(NativeMethods.hopon_unsubscribe(p, (nuint)bytes.Length), "unsubscribe");
+        if (sinkOfLabel.TryRemove(label, out var sink)) sinks.TryRemove(sink, out _);
     }
 
     /// <summary>

@@ -25,8 +25,9 @@ namespace HopOn.Native
         internal static extern byte* hopon_version();
 
         /// <summary>
-        ///  Logs to stderr (and the debugger output on Windows debug builds);
-        ///  `RUST_LOG` filters. Optional; call at most once, before `hopon_start`.
+        ///  Logs to stderr; `RUST_LOG` filters. A Windows GUI app has no stderr unless
+        ///  started from a console, so this is for development. Optional; call at most
+        ///  once, before `hopon_start`.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "hopon_init_logging", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void hopon_init_logging();
@@ -59,8 +60,9 @@ namespace HopOn.Native
         ///  Subscribe a window to events. `label`: "main" (gets everything, plus what
         ///  was buffered before it subscribed) or "overlay" (what the overlay shows).
         ///  Events arrive at `on_event` tagged with `sink`. Subscribing a label again
-        ///  replaces its previous subscription; the first events are the current
-        ///  prefs and session snapshot.
+        ///  replaces its previous subscription. The first events (current prefs, the
+        ///  session snapshot, and for "main" anything buffered) are delivered before
+        ///  this returns, on the calling thread.
         ///
         ///  # Safety
         ///  `label` must point to `label_len` readable bytes.

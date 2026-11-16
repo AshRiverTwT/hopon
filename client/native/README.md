@@ -25,6 +25,10 @@ client/native/
   for `upload_file` (`{name, w, h}`), `set_avatar`, `set_banner`.
 - Handlers and host callbacks run on core worker threads: marshal to the UI
   thread, don't block, and don't call back into the bridge from inside them.
+  Exception: a subscription's first events (prefs, session snapshot, anything
+  buffered) arrive synchronously inside `Subscribe`, on the calling thread.
+- `IHopOnHost.MainHidden` is read for every event, off the UI thread: return a
+  cached flag the UI thread keeps current.
 
 Window-level features stay in each shell: zoom, fullscreen, tray,
 notifications, the overlay window, the games webview.

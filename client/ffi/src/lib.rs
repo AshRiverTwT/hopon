@@ -12,8 +12,12 @@
 //!   `ok = 0` and an error message (plain UTF-8, shown to the user as is).
 //!
 //! # Callback rules (read before implementing them)
-//! - They run on the core's worker threads, never the UI thread: marshal to it
-//!   yourself (WinUI: `DispatcherQueue.TryEnqueue`).
+//! - They run on the core's worker threads: marshal to the UI thread yourself
+//!   (WinUI: `DispatcherQueue.TryEnqueue`). One exception: the first events of
+//!   a subscription (prefs, session snapshot, anything buffered) are delivered
+//!   synchronously inside `hopon_subscribe`, on the thread that called it.
+//! - `main_hidden` is called for every event: return a flag the UI thread keeps
+//!   up to date; don't query window state from it.
 //! - Data pointers are valid only during the call: copy what you keep.
 //! - Return quickly and do not call back into this library from inside a
 //!   callback (events are delivered under the core's subscriber lock, so
@@ -106,8 +110,9 @@ pub extern "C" fn hopon_version() -> *const u8 {
     concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr()
 }
 
-/// Logs to stderr (and the debugger output on Windows debug builds);
-/// `RUST_LOG` filters. Optional; call at most once, before `hopon_start`.
+/// Logs to stderr; `RUST_LOG` filters. A Windows GUI app has no stderr unless
+/// started from a console, so this is for development. Optional; call at most
+/// once, before `hopon_start`.
 #[no_mangle]
 pub extern "C" fn hopon_init_logging() {
     let _ = tracing_subscriber::fmt()
@@ -161,8 +166,9 @@ pub unsafe extern "C" fn hopon_start(data_dir: *const u8, data_dir_len: usize, c
 /// Subscribe a window to events. `label`: "main" (gets everything, plus what
 /// was buffered before it subscribed) or "overlay" (what the overlay shows).
 /// Events arrive at `on_event` tagged with `sink`. Subscribing a label again
-/// replaces its previous subscription; the first events are the current
-/// prefs and session snapshot.
+/// replaces its previous subscription. The first events (current prefs, the
+/// session snapshot, and for "main" anything buffered) are delivered before
+/// this returns, on the calling thread.
 ///
 /// # Safety
 /// `label` must point to `label_len` readable bytes.
