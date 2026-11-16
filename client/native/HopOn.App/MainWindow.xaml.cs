@@ -304,6 +304,8 @@ public sealed partial class MainWindow : Window
     void OnSignIn(object sender, RoutedEventArgs e) => _ = Auth("login");
     void OnSignUp(object sender, RoutedEventArgs e) => _ = Auth("signup");
 
+    void OnSettings(object sender, RoutedEventArgs e) => _ = SettingsDialog.Show(Content.XamlRoot, Store);
+
     async void OnSignOut(object sender, RoutedEventArgs e)
     {
         try { await App.Core.CallAsync("logout"); }

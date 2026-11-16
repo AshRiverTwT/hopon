@@ -99,7 +99,10 @@
                         <TextBlock x:Name="MeText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                         <TextBlock x:Name="ConnText" FontSize="12" Opacity="0.65" />
                     </StackPanel>
-                    <Button Grid.Column="1" Content="Sign out" Click="OnSignOut" VerticalAlignment="Center" FontSize="12" Padding="8,3" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <Button Content="⚙" Click="OnSettings" FontSize="12" Padding="8,3" ToolTipService.ToolTip="Settings" />
+                        <Button Content="Sign out" Click="OnSignOut" FontSize="12" Padding="8,3" />
+                    </StackPanel>
                 </Grid>
             </Grid>
 

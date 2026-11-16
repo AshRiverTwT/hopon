@@ -77,6 +77,27 @@ public sealed partial class Store
     public bool Looking { get; set; } = true;
     public Status? MyStatus { get; private set; }
 
+    string prefsJson = "{}";
+
+    /// <summary>
+    /// Change one synced pref. The webview owns most keys: read-modify-write the
+    /// whole document so keys this app doesn't know are kept.
+    /// </summary>
+    public async Task SavePref(string key, JsonNode? value)
+    {
+        JsonObject doc;
+        try { doc = JsonNode.Parse(prefsJson) as JsonObject ?? []; }
+        catch (JsonException) { doc = []; }
+        doc[key] = value;
+        prefsJson = doc.ToJsonString();
+        if (key == "closeToTray") CloseToTray = value?.GetValue<bool>() ?? true;
+        notifyPrefs = NotifyPrefs.FromJson(prefsJson);
+        try { await core.CallAsync("save_prefs", new JsonObject { ["json"] = prefsJson }); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
+    }
+
+    public bool PrefBool(string key, bool fallback) => ReadBool(prefsJson, key, fallback);
+
     /// <summary>The close button hides to the tray (synced pref, default on).</summary>
     public bool CloseToTray { get; private set; } = true;
 
@@ -232,6 +253,7 @@ public sealed partial class Store
                 }
                 break;
             case PrefsEvent pe:
+                prefsJson = pe.Json;
                 notifyPrefs = NotifyPrefs.FromJson(pe.Json);
                 CloseToTray = ReadBool(pe.Json, "closeToTray", true);
                 break;
