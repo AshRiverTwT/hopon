@@ -35,6 +35,7 @@ public sealed partial class MainWindow : Window
         Store.Toast += ShowToast;
         Store.Appended += ScrollToEnd;
         Store.Painted += MarkPainted;
+        Store.TypingChanged += line => TypingText.Text = line;
         toastTimer = dispatcher.CreateTimer();
         toastTimer.Interval = TimeSpan.FromSeconds(4);
         toastTimer.Tick += (_, _) => { Toast.IsOpen = false; toastTimer.Stop(); };

@@ -46,6 +46,8 @@ public sealed partial class Store
     public event Action<string>? Toast;
     /// <summary>Messages were added at the end (scroll to it if the user is at the bottom).</summary>
     public event Action? Appended;
+    /// <summary>The "… is typing" line changed.</summary>
+    public event Action<string>? TypingChanged;
     /// <summary>Keys of messages changed in this batch (for perf_painted).</summary>
     public event Action<List<string>>? Painted;
 
@@ -142,8 +144,13 @@ public sealed partial class Store
                     if (row is not null) row.Unread = true;
                 }
                 break;
+            case TypingEvent t when t.ChannelId == OpenChannel?.Id && t.UserId != Me?.Id:
+                NoteTyping(t.UserId, true);
+                break;
             case MessagesEvent m when m.ChannelId == OpenChannel?.Id:
             {
+                // A message from someone ends their "typing".
+                foreach (var msg in m.Msgs) NoteTyping(msg.AuthorId, false);
                 var before = Messages.Count > 0 ? Messages[^1] : null;
                 painted.AddRange(MessageMerge.Merge(Messages, m.Msgs, Row));
                 // Bounded while following the conversation; scrolled-up history stays.
@@ -306,6 +313,8 @@ public sealed partial class Store
         if (row.Voice) return; // voice rooms: a later phase
         OpenChannel = row;
         row.Unread = false;
+        typers.Clear();
+        TypingChanged?.Invoke("");
         Messages.Clear();
         AtBottom = true;
         HasOlder = true;
@@ -416,6 +425,52 @@ public sealed partial class Store
         _ = Try(core.CallAsync("typing", new JsonObject { ["channelId"] = OpenChannel.Id }));
     }
     long lastTyping = -10_000;
+
+    // ---------- typing (same rules as the webview: 6 s, timer only while someone types) ----------
+
+    const int TypingMs = 6000;
+    readonly Dictionary<string, long> typers = []; // user → expires (TickCount64)
+    DispatcherQueueTimer? typingTimer;
+
+    void NoteTyping(string userId, bool on)
+    {
+        if (on) typers[userId] = Environment.TickCount64 + TypingMs;
+        else if (!typers.Remove(userId)) return;
+        TypingChanged?.Invoke(TypingLine());
+        if (typers.Count > 0 && typingTimer is null)
+        {
+            typingTimer = ui.CreateTimer();
+            typingTimer.Interval = TimeSpan.FromMilliseconds(500);
+            typingTimer.Tick += (_, _) => SweepTyping();
+            typingTimer.Start();
+        }
+    }
+
+    void SweepTyping()
+    {
+        var now = Environment.TickCount64;
+        var removed = typers.Where(kv => kv.Value <= now).Select(kv => kv.Key).ToList();
+        foreach (var u in removed) typers.Remove(u);
+        if (removed.Count > 0) TypingChanged?.Invoke(TypingLine());
+        if (typers.Count == 0 && typingTimer is not null)
+        {
+            typingTimer.Stop();
+            typingTimer = null;
+        }
+    }
+
+    string TypingLine()
+    {
+        var names = typers.Keys.Select(NameOf).OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase).ToList();
+        return names.Count switch
+        {
+            0 => "",
+            1 => $"{names[0]} is typing…",
+            2 => $"{names[0]} and {names[1]} are typing…",
+            3 => $"{names[0]}, {names[1]} and {names[2]} are typing…",
+            _ => "Several people are typing…",
+        };
+    }
 
     static string RandomNonce()
     {
