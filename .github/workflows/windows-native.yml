@@ -46,7 +46,21 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      # The Rust binaries only change when a Rust input does: most pushes are
+      # C#-only, so reuse the last build of the same inputs (saves ~20 min).
+      - name: Reuse built binaries
+        id: bins
+        uses: actions/cache@v4
+        with:
+          path: |
+            target/debug/hopon_ffi.dll
+            target/debug/hopon-server.exe
+            target/debug/e2e_feed.exe
+            target/ship/hopon_ffi.dll
+          key: rust-bins-${{ hashFiles('Cargo.toml', 'Cargo.lock', '.cargo/**', 'client/core/**', 'client/ffi/src/**', 'client/ffi/build.rs', 'client/ffi/Cargo.toml', 'shared/**', 'server/**', 'bench/**', 'vendor/**') }}
+
       - uses: Swatinem/rust-cache@v2
+        if: steps.bins.outputs.cache-hit != 'true'
         with:
           shared-key: windows-native
           cache-on-failure: true
@@ -55,6 +69,7 @@ jobs:
           cache-workspace-crates: true
 
       - name: Build hopon_ffi.dll (voice), hopon-server, e2e_feed
+        if: steps.bins.outputs.cache-hit != 'true'
         # Two commands: `--bin` applies to every package in a command, so one
         # combined build would skip the hopon-server binary.
         run: |
@@ -62,12 +77,14 @@ jobs:
           cargo build -p hopon-bench --bin e2e_feed
 
       - name: Build the release hopon_ffi.dll (what ships with the app)
+        if: steps.bins.outputs.cache-hit != 'true'
         run: |
           cargo build --release -p hopon-ffi
           New-Item -ItemType Directory -Force target\ship | Out-Null
           Copy-Item target\release\hopon_ffi.dll target\ship\
 
       - name: C# bindings are current
+        if: steps.bins.outputs.cache-hit != 'true'
         shell: bash
         run: git diff --exit-code client/ffi/bindings/
 
