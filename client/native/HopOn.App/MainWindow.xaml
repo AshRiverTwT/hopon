@@ -174,6 +174,8 @@
                                 <MenuFlyoutSeparator />
                                 <MenuFlyoutItem Text="Set a custom status…" Click="OnCustomStatus" />
                                 <MenuFlyoutItem Text="Clear custom status" Click="OnClearStatus" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Text="Edit profile…" Click="OnEditProfile" />
                             </MenuFlyout>
                         </StackPanel.ContextFlyout>
                         <TextBlock x:Name="MeText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="Right-click to set your status" />

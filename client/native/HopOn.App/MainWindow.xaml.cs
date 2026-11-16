@@ -430,6 +430,9 @@ public sealed partial class MainWindow : Window
         return await dialog.ShowAsync() == ContentDialogResult.Primary && box.Text.Trim().Length > 0 ? box.Text.Trim() : null;
     }
 
+    void OnEditProfile(object sender, RoutedEventArgs e) =>
+        _ = ProfileDialog.Show(Content.XamlRoot, WinRT.Interop.WindowNative.GetWindowHandle(this), Store);
+
     void OnHome(object sender, RoutedEventArgs e)
     {
         syncing = true;

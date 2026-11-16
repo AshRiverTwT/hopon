@@ -136,9 +136,9 @@ PC = needs a person on a real PC to check (audio, devices, look and feel).
 | in-game overlay | not yet | |
 | games panel | not yet | plan: WebView2 (it shows the games' websites) |
 | close to tray, tray menu | built, CI (compiles) | |
-| profile pictures, profile cards | built | profile editor not yet |
-| server settings (owner) | not yet | |
-| friends, DMs | not yet | DM servers are hidden for now |
-| updates (latest.json) | not yet | core: update_check / update_install |
+| profile pictures, profile cards, profile editor (name, bio, picture) | built | |
+| server settings (owner) | built | rename, revoke invites, delete (type the name), channel rename/topic/delete, remove members, delete any message |
+| friends, DMs | built | Friends view (👥): requests, accept/decline, DMs |
+| updates (latest.json) | not yet, on purpose | the core's updater installs what latest.json points to, which is the Tauri installer; the native app needs its own manifest + installer first |
 | zoom / scale | not yet | |
 | installer | not yet | CI estimates 21.8 MB (LZMA2) |
