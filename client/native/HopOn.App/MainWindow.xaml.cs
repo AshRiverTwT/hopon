@@ -62,6 +62,7 @@ public sealed partial class MainWindow : Window
         // the store only queues them.
         App.Core.Subscribe("main", (UiEvent e) => Store.Enqueue(e));
 
+        GifButton.Flyout = GifFlyout.Create(Store, NowMs);
         CompositionTarget.Rendering += OnFirstFrame;
         _ = LoadConfig();
     }
@@ -169,6 +170,7 @@ public sealed partial class MainWindow : Window
         Composer.PlaceholderText = Store.OpenChannel is null ? "" : $"Message #{Store.OpenChannel.Name}";
         Composer.IsEnabled = Store.OpenChannel is not null;
         AttachButton.IsEnabled = Store.OpenChannel is not null;
+        GifButton.IsEnabled = Store.OpenChannel is not null;
 
         var v = Store.MyVoice;
         var inVoice = v is not null && v.State != "idle";

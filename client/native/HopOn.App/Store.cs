@@ -750,13 +750,16 @@ public sealed partial class Store
         }
     }
 
-    public void Send(string text, double tInputMs)
+    /// <summary>Send a GIF on its own (the webview's picker does the same).</summary>
+    public void SendGif(Gif g, double tInputMs) => Send("", tInputMs, g);
+
+    public void Send(string text, double tInputMs, Gif? gif = null)
     {
         text = text.Trim();
         if (PendingFiles.Any(f => f.Att is null && f.Error is null)) { Toast?.Invoke("Still uploading…"); return; }
-        var files = PendingFiles.Where(f => f.Att is not null).Select(f => f.Att!).ToList();
-        if ((text.Length == 0 && files.Count == 0) || OpenChannel is null || Me is null) return;
-        if (Editing is { } editing && text.Length > 0)
+        var files = gif is null ? PendingFiles.Where(f => f.Att is not null).Select(f => f.Att!).ToList() : [];
+        if ((text.Length == 0 && files.Count == 0 && gif is null) || OpenChannel is null || Me is null) return;
+        if (Editing is { } editing && text.Length > 0 && gif is null)
         {
             Editing = null;
             ComposerModeChanged?.Invoke();
@@ -773,9 +776,15 @@ public sealed partial class Store
         {
             Id = "p" + nonce, ChannelId = channelId, AuthorId = Me.Id, Content = text, EditedAt = null,
             Ts = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Nonce = nonce, State = 0,
-            ReplyTo = replyTo, Reactions = [], Attachments = files,
+            ReplyTo = replyTo, Reactions = [],
+            // GIFs show their preview until the server's copy lands.
+            Attachments = gif is null ? files : [new Attachment
+            {
+                Id = gif.Id, Name = gif.Title, Mime = "image/webp", Size = 0, Width = gif.Width, Height = gif.Height,
+                Url = gif.Preview, Preview = gif.Preview,
+            }],
         };
-        PendingFiles.Clear();
+        if (gif is null) PendingFiles.Clear();
         var painted = MessageMerge.Merge(Messages, [pending], Row);
         RefreshHeaders();
         AtBottom = true; // your own message: jump to it
@@ -784,7 +793,7 @@ public sealed partial class Store
         core.CallAsync("send_message", new JsonObject
         {
             ["channelId"] = channelId, ["content"] = text, ["nonce"] = nonce, ["tInputMs"] = tInputMs,
-            ["replyTo"] = replyTo, ["files"] = new JsonArray(files.Select(f => (JsonNode)f.Id).ToArray()), ["gifs"] = new JsonArray(),
+            ["replyTo"] = replyTo, ["files"] = new JsonArray(files.Select(f => (JsonNode)f.Id).ToArray()), ["gifs"] = gif is null ? new JsonArray() : new JsonArray(gif.Id),
         }).ContinueWith(t =>
         {
             if (!t.IsFaulted) return;

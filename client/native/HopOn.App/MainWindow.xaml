@@ -271,11 +271,14 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                 <Button x:Name="AttachButton" Content="+" Click="OnAttach" FontSize="16" Padding="10,2" VerticalAlignment="Stretch"
                         ToolTipService.ToolTip="Attach files" />
                 <TextBox x:Name="Composer" Grid.Column="1" PlaceholderText="Message" Paste="OnComposerPaste"
                          PreviewKeyDown="OnComposerKeyDown" TextChanged="OnComposerChanged" />
+                <Button x:Name="GifButton" Grid.Column="2" Content="GIF" FontSize="12" Padding="10,2" VerticalAlignment="Stretch"
+                        ToolTipService.ToolTip="Search GIFs" />
                 </Grid>
                 </StackPanel>
                 <TextBlock x:Name="TypingText" Grid.Row="3" Margin="22,4,20,8" FontSize="12" Opacity="0.7" MinHeight="16" />
