@@ -150,6 +150,20 @@
                                 </StackPanel>
                                 <RichTextBlock local:RichView.Text="{x:Bind Body, Mode=OneWay}" TextWrapping="Wrap" IsTextSelectionEnabled="True"
                                                Visibility="{x:Bind BodyVisibility, Mode=OneWay}" />
+                                <!-- Attachments: images inline (decoded at display size), files as links -->
+                                <ItemsControl ItemsSource="{x:Bind Media}" Visibility="{x:Bind MediaVisibility, Mode=OneWay}" Margin="0,4,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="local:AttachmentVm">
+                                            <StackPanel Margin="0,2">
+                                                <Border Visibility="{x:Bind ImageVisibility}" Width="{x:Bind BoxWidth}" Height="{x:Bind BoxHeight}"
+                                                        HorizontalAlignment="Left" CornerRadius="6" Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                                                    <Image Source="{x:Bind Image}" Stretch="UniformToFill" />
+                                                </Border>
+                                                <HyperlinkButton Visibility="{x:Bind FileVisibility}" Content="{x:Bind FileLabel}" NavigateUri="{x:Bind Uri}" Padding="0" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                                 <!-- Poll: options with vote bars; votes are 1️⃣–5️⃣ reactions. -->
                                 <StackPanel Visibility="{x:Bind PollVisibility, Mode=OneWay}" Spacing="6" MaxWidth="440" HorizontalAlignment="Left"
                                             Padding="12" CornerRadius="8" Margin="0,4,0,0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
@@ -204,8 +218,29 @@
                     <TextBlock x:Name="ComposerBannerText" FontSize="12" Opacity="0.75" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                     <Button Grid.Column="1" Content="Cancel" Click="OnCancelComposerMode" FontSize="12" Padding="8,2" />
                 </Grid>
-                <TextBox x:Name="Composer" PlaceholderText="Message"
+                <ItemsControl ItemsSource="{x:Bind Store.PendingFiles}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="6" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="local:PendingFileVm">
+                            <Button Click="{x:Bind Remove}" Content="{x:Bind Label, Mode=OneWay}" FontSize="12" Padding="8,2"
+                                    ToolTipService.ToolTip="Remove" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                <Button x:Name="AttachButton" Content="+" Click="OnAttach" FontSize="16" Padding="10,2" VerticalAlignment="Stretch"
+                        ToolTipService.ToolTip="Attach files" />
+                <TextBox x:Name="Composer" Grid.Column="1" PlaceholderText="Message"
                          PreviewKeyDown="OnComposerKeyDown" TextChanged="OnComposerChanged" />
+                </Grid>
                 </StackPanel>
                 <TextBlock x:Name="TypingText" Grid.Row="3" Margin="22,4,20,8" FontSize="12" Opacity="0.7" MinHeight="16" />
             </Grid>

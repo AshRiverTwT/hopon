@@ -65,6 +65,43 @@ public sealed partial class ChannelVm : Observable
     public double LabelOpacity => Unread ? 1.0 : 0.72;
 }
 
+/// <summary>An attachment under a message: images inline, other files as links.</summary>
+public sealed partial class AttachmentVm : Observable
+{
+    /// <summary>"http(s)://host" of the chat server (set by the store).</summary>
+    public static string HttpBase { get; set; } = "";
+    public required Attachment A { get; init; }
+    public bool IsImage => Media.IsImage(A);
+    public Uri? Uri => Uri.TryCreate(Media.Url(HttpBase, A), UriKind.Absolute, out var u) ? u : null;
+    public double BoxWidth => Media.FitBox(A.Width, A.Height).W;
+    public double BoxHeight => Media.FitBox(A.Width, A.Height).H;
+    public Visibility ImageVisibility => IsImage ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility FileVisibility => IsImage ? Visibility.Collapsed : Visibility.Visible;
+    public string FileLabel => $"📎 {A.Name} ({Media.FormatSize(A.Size)})";
+    /// <summary>Decoded at display size: a 4000 px photo doesn't cost 64 MB of RAM.</summary>
+    public Microsoft.UI.Xaml.Media.Imaging.BitmapImage? Image
+    {
+        get
+        {
+            if (!IsImage || Uri is null) return null;
+            return new Microsoft.UI.Xaml.Media.Imaging.BitmapImage { UriSource = Uri, DecodePixelWidth = (int)BoxWidth * 2, DecodePixelType = Microsoft.UI.Xaml.Media.Imaging.DecodePixelType.Logical };
+        }
+    }
+}
+
+/// <summary>A file chosen for the next message (uploading → ready or failed).</summary>
+public sealed partial class PendingFileVm : Observable
+{
+    Attachment? att;
+    string? error;
+    public required string Name { get; init; }
+    public Attachment? Att { get => att; set { Set(ref att, value); Raise(nameof(Label)); } }
+    public string? Error { get => error; set { Set(ref error, value); Raise(nameof(Label)); } }
+    public string Label => Error is not null ? $"⚠ {Name}: {Error}" : Att is null ? $"⏳ {Name}" : $"📎 {Name}";
+    public static Action<PendingFileVm>? RemoveAction { get; set; }
+    public void Remove() => RemoveAction?.Invoke(this);
+}
+
 /// <summary>One reaction under a message: "👍 2"; click toggles yours.</summary>
 public sealed partial class ReactionVm : Observable
 {
@@ -122,7 +159,7 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public Poll? Poll { get; private set; }
     public ObservableCollection<PollOptionVm> PollOptions { get; } = [];
     public Visibility PollVisibility => Poll is null ? Visibility.Collapsed : Visibility.Visible;
-    public Visibility BodyVisibility => Poll is null ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility BodyVisibility => Poll is null && Content.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     public Visibility ChipsVisibility => Chips.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
 
     /// <summary>Raw reaction lists (mutable: reaction events apply here, then Rebuild).</summary>
@@ -193,6 +230,7 @@ public sealed partial class MessageVm : Observable, IMessageItem
         Attachments = m.Attachments;
         replyTo = m.ReplyTo;
         SetContentDerived(m.Content, m.Reactions);
+        SyncMedia();
     }
 
     public string Id { get => id; private set => Set(ref id, value); }
@@ -200,14 +238,22 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public string AuthorId { get; }
     public ulong Ts { get; }
     public List<Attachment> Attachments { get; private set; }
-    public string Content { get => content; private set { Set(ref content, value); Raise(nameof(Body)); } }
+    public ObservableCollection<AttachmentVm> Media { get; } = [];
+    public Visibility MediaVisibility => Media.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    void SyncMedia()
+    {
+        if (Media.Select(a => a.A.Id).SequenceEqual(Attachments.Select(a => a.Id))) return;
+        Media.Clear();
+        foreach (var a in Attachments) Media.Add(new AttachmentVm { A = a });
+        Raise(nameof(MediaVisibility));
+    }
+    public string Content { get => content; private set { Set(ref content, value); Raise(nameof(Body)); Raise(nameof(BodyVisibility)); } }
     public string Author { get => author; set => Set(ref author, value); }
     public byte State { get => state; private set { Set(ref state, value); Raise(nameof(Opacity)); Raise(nameof(StateText)); } }
     public bool Header { get => header; set { Set(ref header, value); Raise(nameof(HeaderVisibility)); Raise(nameof(RowPadding)); } }
 
-    /// <summary>Content plus attachment names (rich rendering comes later).</summary>
-    public string Body => Attachments.Count == 0 ? Content
-        : string.Join("\n", new[] { Content }.Concat(Attachments.Select(a => $"📎 {a.Name}")).Where(s => s.Length > 0));
+    /// <summary>The text (attachments render below it).</summary>
+    public string Body => Content;
     public string Time => DateTimeOffset.FromUnixTimeMilliseconds((long)Ts).ToLocalTime().ToString("t");
     public string Edited => editedAt is null ? "" : "(edited)";
     public double Opacity => State == 0 ? 0.55 : 1.0;
@@ -224,6 +270,7 @@ public sealed partial class MessageVm : Observable, IMessageItem
         Raise(nameof(Edited));
         Raise(nameof(Body));
         SetContentDerived(m.Content, m.Reactions);
+        SyncMedia();
         State = newState;
     }
 

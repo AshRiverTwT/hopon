@@ -109,6 +109,7 @@ public sealed partial class MainWindow : Window
         ChannelTopic.Text = Store.OpenChannel?.Topic ?? "";
         Composer.PlaceholderText = Store.OpenChannel is null ? "" : $"Message #{Store.OpenChannel.Name}";
         Composer.IsEnabled = Store.OpenChannel is not null;
+        AttachButton.IsEnabled = Store.OpenChannel is not null;
 
         var v = Store.MyVoice;
         var inVoice = v is not null && v.State != "idle";
@@ -193,6 +194,7 @@ public sealed partial class MainWindow : Window
         {
             var cfg = await App.Core.CallAsync("get_config", HopOnJson.Default.Config);
             UrlBox.Text = cfg.Url;
+            AttachmentVm.HttpBase = Media.HttpBase(cfg.Url);
         }
         catch (HopOnException) { }
     }
@@ -204,6 +206,7 @@ public sealed partial class MainWindow : Window
         try
         {
             await App.Core.CallAsync("set_server_url", new JsonObject { ["url"] = UrlBox.Text });
+            AttachmentVm.HttpBase = Media.HttpBase(UrlBox.Text.Trim());
             await App.Core.CallAsync(command, new JsonObject { ["username"] = UserBox.Text.Trim(), ["password"] = PassBox.Password });
         }
         catch (HopOnException e)
@@ -257,6 +260,42 @@ public sealed partial class MainWindow : Window
     void OnMute(object sender, RoutedEventArgs e) => _ = Store.SetMuted(MuteButton.IsChecked == true);
     void OnDeafen(object sender, RoutedEventArgs e) => _ = Store.SetDeafened(DeafenButton.IsChecked == true);
     void OnLeaveVoice(object sender, RoutedEventArgs e) => _ = Store.LeaveVoice();
+
+    async void OnAttach(object sender, RoutedEventArgs e)
+    {
+        var picker = new Windows.Storage.Pickers.FileOpenPicker();
+        picker.FileTypeFilter.Add("*");
+        // Unpackaged apps must give pickers their window.
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        var files = await picker.PickMultipleFilesAsync();
+        foreach (var f in files) _ = AddStorageFile(f);
+    }
+
+    async Task AddStorageFile(Windows.Storage.StorageFile f)
+    {
+        try
+        {
+            var buffer = await Windows.Storage.FileIO.ReadBufferAsync(f);
+            var bytes = new byte[buffer.Length];
+            using (var reader = Windows.Storage.Streams.DataReader.FromBuffer(buffer)) reader.ReadBytes(bytes);
+            uint w = 0, h = 0;
+            if (f.ContentType.StartsWith("image/", StringComparison.Ordinal))
+            {
+                try
+                {
+                    using var stream = await f.OpenReadAsync();
+                    var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(stream);
+                    (w, h) = (decoder.PixelWidth, decoder.PixelHeight);
+                }
+                catch (Exception) { /* not decodable here: sent without a size */ }
+            }
+            await Store.AddFile(f.Name, bytes, w, h);
+        }
+        catch (Exception x)
+        {
+            ShowToast($"Couldn't read {f.Name}: {x.Message}");
+        }
+    }
 
     void OnComposerModeChanged()
     {

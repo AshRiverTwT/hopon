@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using HopOn.Native;
 using Microsoft.UI.Dispatching;
@@ -29,6 +30,9 @@ public sealed partial class Store
     public ObservableCollection<ChannelVm> Channels { get; } = [];
     public ObservableCollection<MessageVm> Messages { get; } = [];
     public ObservableCollection<MemberVm> Members { get; } = [];
+    /// <summary>Files chosen for the next message (uploaded as soon as they're picked).</summary>
+    public ObservableCollection<PendingFileVm> PendingFiles { get; } = [];
+    const int MaxFiles = 10;
 
     // Presence of people we can see (the core reports it for the open server's visible members).
     readonly HashSet<string> online = [];
@@ -75,6 +79,7 @@ public sealed partial class Store
         this.ui = ui;
         this.core = core;
         RichView.NameOf = NameOf;
+        PendingFileVm.RemoveAction = f => PendingFiles.Remove(f);
         MessageVm.ToggleReaction = (m, emoji, add) => _ = React(m, emoji, add);
         MessageVm.Act = (m, what) =>
         {
@@ -591,11 +596,30 @@ public sealed partial class Store
         catch (HopOnException e) { Toast?.Invoke(e.Message); }
     }
 
+    /// <summary>Upload a picked file right away; it's sent with the next message.</summary>
+    public async Task AddFile(string name, byte[] data, uint w, uint h)
+    {
+        if (PendingFiles.Count >= MaxFiles) { Toast?.Invoke($"Up to {MaxFiles} files per message"); return; }
+        var f = new PendingFileVm { Name = name };
+        PendingFiles.Add(f);
+        try
+        {
+            var att = await core.CallAsync("upload_file", new JsonObject { ["name"] = name, ["w"] = w, ["h"] = h }, data);
+            f.Att = att.Deserialize(HopOnJson.Default.Attachment);
+        }
+        catch (HopOnException e)
+        {
+            f.Error = e.Message;
+        }
+    }
+
     public void Send(string text, double tInputMs)
     {
         text = text.Trim();
-        if (text.Length == 0 || OpenChannel is null || Me is null) return;
-        if (Editing is { } editing)
+        if (PendingFiles.Any(f => f.Att is null && f.Error is null)) { Toast?.Invoke("Still uploading…"); return; }
+        var files = PendingFiles.Where(f => f.Att is not null).Select(f => f.Att!).ToList();
+        if ((text.Length == 0 && files.Count == 0) || OpenChannel is null || Me is null) return;
+        if (Editing is { } editing && text.Length > 0)
         {
             Editing = null;
             ComposerModeChanged?.Invoke();
@@ -610,8 +634,9 @@ public sealed partial class Store
         {
             Id = "p" + nonce, ChannelId = channelId, AuthorId = Me.Id, Content = text, EditedAt = null,
             Ts = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Nonce = nonce, State = 0,
-            ReplyTo = replyTo, Reactions = [], Attachments = [],
+            ReplyTo = replyTo, Reactions = [], Attachments = files,
         };
+        PendingFiles.Clear();
         var painted = MessageMerge.Merge(Messages, [pending], Row);
         RefreshHeaders();
         AtBottom = true; // your own message: jump to it
@@ -620,7 +645,7 @@ public sealed partial class Store
         core.CallAsync("send_message", new JsonObject
         {
             ["channelId"] = channelId, ["content"] = text, ["nonce"] = nonce, ["tInputMs"] = tInputMs,
-            ["replyTo"] = replyTo, ["files"] = new JsonArray(), ["gifs"] = new JsonArray(),
+            ["replyTo"] = replyTo, ["files"] = new JsonArray(files.Select(f => (JsonNode)f.Id).ToArray()), ["gifs"] = new JsonArray(),
         }).ContinueWith(t =>
         {
             if (!t.IsFaulted) return;
