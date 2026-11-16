@@ -196,25 +196,9 @@
                     </ListView.ItemContainerStyle>
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:MessageVm">
-                            <StackPanel Padding="{x:Bind RowPadding, Mode=OneWay}" Opacity="{x:Bind Opacity, Mode=OneWay}" Background="Transparent">
-                                <StackPanel.ContextFlyout>
-                                    <MenuFlyout>
-                                        <MenuFlyoutItem Text="Reply" Click="{x:Bind Reply}" />
-                                        <MenuFlyoutSubItem Text="React">
-                                            <MenuFlyoutItem Text="👍" Click="{x:Bind React0}" />
-                                            <MenuFlyoutItem Text="❤️" Click="{x:Bind React1}" />
-                                            <MenuFlyoutItem Text="😂" Click="{x:Bind React2}" />
-                                            <MenuFlyoutItem Text="😮" Click="{x:Bind React3}" />
-                                            <MenuFlyoutItem Text="😢" Click="{x:Bind React4}" />
-                                            <MenuFlyoutItem Text="🔥" Click="{x:Bind React5}" />
-                                            <MenuFlyoutItem Text="🎉" Click="{x:Bind React6}" />
-                                            <MenuFlyoutItem Text="👀" Click="{x:Bind React7}" />
-                                        </MenuFlyoutSubItem>
-                                        <MenuFlyoutItem Text="Edit" Click="{x:Bind BeginEdit}" Visibility="{x:Bind MineVisibility}" />
-                                        <MenuFlyoutItem Text="Delete" Click="{x:Bind Delete}" Visibility="{x:Bind DeleteVisibility}" />
-                                    </MenuFlyout>
-                                </StackPanel.ContextFlyout>
-                                <Grid Visibility="{x:Bind DayVisibility, Mode=OneWay}" Margin="0,12,0,4" ColumnSpacing="10">
+                            <StackPanel Padding="{x:Bind RowPadding, Mode=OneWay}" Opacity="{x:Bind Opacity, Mode=OneWay}" Background="Transparent"
+                                        ContextRequested="{x:Bind OnContextRequested}">
+                                <Grid x:Name="DayRow" x:Load="{x:Bind HasDay, Mode=OneWay}" Margin="0,12,0,4" ColumnSpacing="10">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
@@ -224,7 +208,7 @@
                                     <TextBlock Grid.Column="1" Text="{x:Bind DayText, Mode=OneWay}" FontSize="12" Opacity="0.6" />
                                     <Rectangle Grid.Column="2" Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" VerticalAlignment="Center" />
                                 </Grid>
-                                <Grid Visibility="{x:Bind NewVisibility, Mode=OneWay}" Margin="0,8,0,2" ColumnSpacing="8">
+                                <Grid x:Name="NewRow" x:Load="{x:Bind NewHere, Mode=OneWay}" Margin="0,8,0,2" ColumnSpacing="8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
@@ -232,7 +216,7 @@
                                     <Rectangle Height="1" Fill="{ThemeResource SystemFillColorCriticalBrush}" VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="1" Text="New messages" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
                                 </Grid>
-                                <TextBlock Text="{x:Bind ReplyPreview, Mode=OneWay}" Visibility="{x:Bind ReplyVisibility, Mode=OneWay}"
+                                <TextBlock x:Name="ReplyRow" x:Load="{x:Bind HasReply, Mode=OneWay}" Text="{x:Bind ReplyPreview, Mode=OneWay}"
                                            FontSize="12" Opacity="0.6" TextTrimming="CharacterEllipsis" Margin="0,0,0,2" />
                                 <StackPanel Orientation="Horizontal" Spacing="8" Margin="-36,0,0,0" Visibility="{x:Bind HeaderVisibility, Mode=OneWay}"
                                             Tapped="{x:Bind ShowProfile}" Background="Transparent">
@@ -243,7 +227,7 @@
                                 <RichTextBlock local:RichView.Text="{x:Bind Body, Mode=OneWay}" TextWrapping="Wrap" IsTextSelectionEnabled="True"
                                                Visibility="{x:Bind BodyVisibility, Mode=OneWay}" />
                                 <!-- Attachments: images inline (decoded at display size), files as links -->
-                                <ItemsControl ItemsSource="{x:Bind Media}" Visibility="{x:Bind MediaVisibility, Mode=OneWay}" Margin="0,4,0,0">
+                                <ItemsControl x:Name="MediaRow" x:Load="{x:Bind HasMedia, Mode=OneWay}" ItemsSource="{x:Bind Media}" Margin="0,4,0,0">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="local:AttachmentVm">
                                             <StackPanel Margin="0,2">
@@ -257,7 +241,7 @@
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
                                 <!-- Poll: options with vote bars; votes are 1️⃣–5️⃣ reactions. -->
-                                <StackPanel Visibility="{x:Bind PollVisibility, Mode=OneWay}" Spacing="6" MaxWidth="440" HorizontalAlignment="Left"
+                                <StackPanel x:Name="PollRow" x:Load="{x:Bind IsPoll, Mode=OneWay}" Spacing="6" MaxWidth="440" HorizontalAlignment="Left"
                                             Padding="12" CornerRadius="8" Margin="0,4,0,0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                                     <TextBlock Text="{x:Bind Poll.Question, Mode=OneWay, FallbackValue=''}" FontWeight="SemiBold" TextWrapping="Wrap" />
                                     <ItemsControl ItemsSource="{x:Bind PollOptions}">
@@ -279,7 +263,7 @@
                                     </ItemsControl>
                                 </StackPanel>
                                 <!-- Reactions -->
-                                <ItemsControl ItemsSource="{x:Bind Chips}" Visibility="{x:Bind ChipsVisibility, Mode=OneWay}" Margin="0,4,0,0">
+                                <ItemsControl x:Name="ChipsRow" x:Load="{x:Bind HasChips, Mode=OneWay}" ItemsSource="{x:Bind Chips}" Margin="0,4,0,0">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
                                             <StackPanel Orientation="Horizontal" Spacing="6" />

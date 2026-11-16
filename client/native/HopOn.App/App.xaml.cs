@@ -54,8 +54,10 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        if (!PerfExit) RegisterNotifications();
         window = new MainWindow();
         window.Activate();
+        // Off the startup path: register for notification clicks once the window is up.
+        if (!PerfExit) Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RegisterNotifications);
     }
 }

@@ -32,9 +32,13 @@ public sealed partial class MainWindow : Window
         if (File.Exists(iconPath)) AppWindow.SetIcon(iconPath);
         if (!App.PerfExit && File.Exists(iconPath))
         {
-            tray = new TrayIcon(iconPath, "HopOn");
-            tray.Open += ShowFromTray;
-            tray.Quit += () => _ = QuitApp();
+            // After the first frame: not on the startup path.
+            dispatcher.TryEnqueue(DispatcherQueuePriority.Low, () =>
+            {
+                tray = new TrayIcon(iconPath, "HopOn");
+                tray.Open += ShowFromTray;
+                tray.Quit += () => _ = QuitApp();
+            });
         }
         AppWindow.Closing += OnClosing;
         App.Host.SetWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
@@ -62,7 +66,12 @@ public sealed partial class MainWindow : Window
         // the store only queues them.
         App.Core.Subscribe("main", (UiEvent e) => Store.Enqueue(e));
 
-        GifButton.Flyout = GifFlyout.Create(Store, NowMs);
+        // Built on first use: keeps it out of startup.
+        GifButton.Click += (_, _) =>
+        {
+            if (GifButton.Flyout is null) { GifButton.Flyout = GifFlyout.Create(Store, NowMs); GifButton.Flyout.ShowAt(GifButton); }
+        };
+        MessageVm.ContextMenuAction = ShowMessageMenu;
         AddShortcuts();
         MessageVm.ShowProfileAction = (userId, anchor) => _ = ShowProfileCard(userId, anchor);
         ChannelVm.Act = (c, what) => _ = ChannelAction(c, what);
@@ -352,6 +361,41 @@ public sealed partial class MainWindow : Window
 
     void OnSignIn(object sender, RoutedEventArgs e) => _ = Auth("login");
     void OnSignUp(object sender, RoutedEventArgs e) => _ = Auth("signup");
+
+    // ---------- the message context menu (one, shared by every row) ----------
+
+    MenuFlyout? messageMenu;
+    MessageVm? menuTarget;
+    MenuFlyoutItem? editItem, deleteItem;
+
+    void ShowMessageMenu(MessageVm m, UIElement row, Microsoft.UI.Xaml.Input.ContextRequestedEventArgs e)
+    {
+        e.Handled = true;
+        if (messageMenu is null)
+        {
+            messageMenu = new MenuFlyout();
+            MenuFlyoutItem Item(string text, Action<MessageVm> act)
+            {
+                var i = new MenuFlyoutItem { Text = text };
+                i.Click += (_, _) => { if (menuTarget is { } t) act(t); };
+                return i;
+            }
+            messageMenu.Items.Add(Item("Reply", t => t.Reply()));
+            var react = new MenuFlyoutSubItem { Text = "React" };
+            foreach (var (emoji, i) in MessageVm.Quick.Select((x, i) => (x, i)))
+                react.Items.Add(Item(emoji, t => t.QuickReactAt(i)));
+            messageMenu.Items.Add(react);
+            editItem = Item("Edit", t => t.BeginEdit());
+            deleteItem = Item("Delete", t => t.Delete());
+            messageMenu.Items.Add(editItem);
+            messageMenu.Items.Add(deleteItem);
+        }
+        menuTarget = m;
+        editItem!.Visibility = m.MineVisibility;
+        deleteItem!.Visibility = m.DeleteVisibility;
+        if (e.TryGetPosition(row, out var point)) messageMenu.ShowAt(row, point);
+        else messageMenu.ShowAt((FrameworkElement)row);
+    }
 
     async Task ShowProfileCard(string userId, FrameworkElement anchor)
     {

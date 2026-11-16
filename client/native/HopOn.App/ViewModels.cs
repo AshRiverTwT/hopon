@@ -167,6 +167,10 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public Visibility DeleteVisibility => CanDelete ? Visibility.Visible : Visibility.Collapsed;
     public void Reply() => Act?.Invoke(this, "reply");
 
+    /// <summary>(message, row, args): one shared context menu, set by the window.</summary>
+    public static Action<MessageVm, UIElement, Microsoft.UI.Xaml.Input.ContextRequestedEventArgs>? ContextMenuAction { get; set; }
+    public void OnContextRequested(UIElement sender, Microsoft.UI.Xaml.Input.ContextRequestedEventArgs e) => ContextMenuAction?.Invoke(this, sender, e);
+
     /// <summary>(user id, anchor element): set by the window.</summary>
     public static Action<string, FrameworkElement>? ShowProfileAction { get; set; }
     public void ShowProfile(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
@@ -178,6 +182,7 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public static readonly string[] Quick = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "👀"];
     bool Has(string e) => MeId is not null && reactions.Any(r => r.Emoji == e && r.Users.Contains(MeId));
     void QuickReact(int i) => ToggleReaction?.Invoke(this, Quick[i], !Has(Quick[i]));
+    public void QuickReactAt(int i) => QuickReact(i);
     public void React0() => QuickReact(0);
     public void React1() => QuickReact(1);
     public void React2() => QuickReact(2);
@@ -193,7 +198,8 @@ public sealed partial class MessageVm : Observable, IMessageItem
     string replyPreview = "";
     public string? ReplyTo => replyTo;
     /// <summary>"↪ name: first line" of the message this replies to (set by the store).</summary>
-    public string ReplyPreview { get => replyPreview; set { Set(ref replyPreview, value); Raise(nameof(ReplyVisibility)); } }
+    public string ReplyPreview { get => replyPreview; set { Set(ref replyPreview, value); Raise(nameof(ReplyVisibility)); Raise(nameof(HasReply)); } }
+    public bool HasReply => ReplyPreview.Length > 0;
     public Visibility ReplyVisibility => ReplyPreview.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
 
     List<Reaction> reactions = [];
@@ -203,6 +209,8 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public Visibility PollVisibility => Poll is null ? Visibility.Collapsed : Visibility.Visible;
     public Visibility BodyVisibility => Poll is null && Content.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     public Visibility ChipsVisibility => Chips.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    public bool HasChips => Chips.Count > 0;
+    public bool IsPoll => Poll is not null;
 
     /// <summary>Raw reaction lists (mutable: reaction events apply here, then Rebuild).</summary>
     public List<Reaction> RawReactions => reactions;
@@ -220,6 +228,7 @@ public sealed partial class MessageVm : Observable, IMessageItem
                     PollOptions.Add(new PollOptionVm { Message = this, Index = i, Text = poll.Options[i] });
             Raise(nameof(Poll));
             Raise(nameof(PollVisibility));
+            Raise(nameof(IsPoll));
             Raise(nameof(BodyVisibility));
         }
         RebuildReactions();
@@ -250,6 +259,7 @@ public sealed partial class MessageVm : Observable, IMessageItem
             }
         }
         Raise(nameof(ChipsVisibility));
+        Raise(nameof(HasChips));
     }
 
     string id;
@@ -282,12 +292,14 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public List<Attachment> Attachments { get; private set; }
     public ObservableCollection<AttachmentVm> Media { get; } = [];
     public Visibility MediaVisibility => Media.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    public bool HasMedia => Media.Count > 0;
     void SyncMedia()
     {
         if (Media.Select(a => a.A.Id).SequenceEqual(Attachments.Select(a => a.Id))) return;
         Media.Clear();
         foreach (var a in Attachments) Media.Add(new AttachmentVm { A = a });
         Raise(nameof(MediaVisibility));
+        Raise(nameof(HasMedia));
     }
     public string Content { get => content; private set { Set(ref content, value); Raise(nameof(Body)); Raise(nameof(BodyVisibility)); } }
     public string Author { get => author; set => Set(ref author, value); }
@@ -307,8 +319,9 @@ public sealed partial class MessageVm : Observable, IMessageItem
     string dayText = "";
     bool newHere;
     /// <summary>Day separator above this message ("" = none).</summary>
-    public string DayText { get => dayText; set { Set(ref dayText, value); Raise(nameof(DayVisibility)); } }
+    public string DayText { get => dayText; set { Set(ref dayText, value); Raise(nameof(DayVisibility)); Raise(nameof(HasDay)); } }
     public Visibility DayVisibility => DayText.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    public bool HasDay => DayText.Length > 0;
     /// <summary>The "new messages" divider sits above this message.</summary>
     public bool NewHere { get => newHere; set { Set(ref newHere, value); Raise(nameof(NewVisibility)); } }
     public Visibility NewVisibility => NewHere ? Visibility.Visible : Visibility.Collapsed;
