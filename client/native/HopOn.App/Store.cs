@@ -98,6 +98,30 @@ public sealed partial class Store
 
     public bool PrefBool(string key, bool fallback) => ReadBool(prefsJson, key, fallback);
 
+    /// <summary>"all" | "mentions" | "none" for a channel (synced prefs, default all).</summary>
+    public string ChannelLevel(string channelId) => notifyPrefs.Level(channelId);
+
+    public Task SetChannelLevel(string channelId, string level)
+    {
+        JsonObject map;
+        try { map = (JsonNode.Parse(prefsJson) as JsonObject)?["channelNotify"]?.DeepClone() as JsonObject ?? []; }
+        catch (JsonException) { map = []; }
+        if (level == "all") map.Remove(channelId); else map[channelId] = level;
+        return SavePref("channelNotify", map);
+    }
+
+    /// <summary>Presence mode and custom status ("" clears it).</summary>
+    public async Task SetStatus(string mode, string emoji, string text)
+    {
+        try
+        {
+            await core.CallAsync("set_status", new JsonObject { ["mode"] = mode, ["emoji"] = emoji, ["text"] = text, ["until"] = 0 });
+            MyStatus = new Status { Mode = mode, Emoji = emoji, Text = text, Until = 0 };
+            Changed?.Invoke();
+        }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
+    }
+
     public int PrefInt(string key, int fallback)
     {
         try

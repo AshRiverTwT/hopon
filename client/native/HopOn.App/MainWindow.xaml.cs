@@ -156,7 +156,19 @@ public sealed partial class MainWindow : Window
         SplashView.Visibility = Store.View == View.Splash ? Visibility.Visible : Visibility.Collapsed;
         LoginView.Visibility = Store.View == View.Login ? Visibility.Visible : Visibility.Collapsed;
         ShellView.Visibility = Store.View == View.Shell ? Visibility.Visible : Visibility.Collapsed;
-        MeText.Text = Store.Me?.Name ?? "";
+        var st = Store.MyStatus;
+        var mode = st?.Mode switch { "dnd" => " · Do not disturb", "invisible" => " · Invisible", "idle" => " · Idle", _ => "" };
+        MeText.Text = (Store.Me?.Name ?? "") + mode;
+        if (st is { Text.Length: > 0 }) MeText.Text += $" — {(st.Emoji + " " + st.Text).Trim()}";
+        if (Store.OpenChannel is { } oc)
+        {
+            var level = Store.ChannelLevel(oc.Id);
+            BellAll.IsChecked = level == "all";
+            BellMentions.IsChecked = level == "mentions";
+            BellNone.IsChecked = level == "none";
+            BellButton.Content = level == "none" ? "🔕" : "🔔";
+        }
+        BellButton.Visibility = Store.OpenChannel is null ? Visibility.Collapsed : Visibility.Visible;
         ConnText.Text = Store.ConnState switch
         {
             "online" => "Connected",
@@ -305,6 +317,37 @@ public sealed partial class MainWindow : Window
 
     void OnSignIn(object sender, RoutedEventArgs e) => _ = Auth("login");
     void OnSignUp(object sender, RoutedEventArgs e) => _ = Auth("signup");
+
+    async void OnBell(object sender, RoutedEventArgs e)
+    {
+        if (Store.OpenChannel is not { } ch || sender is not FrameworkElement { Tag: string level }) return;
+        await Store.SetChannelLevel(ch.Id, level);
+        Render();
+    }
+
+    void OnStatus(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string mode }) return;
+        _ = Store.SetStatus(mode, Store.MyStatus?.Emoji ?? "", Store.MyStatus?.Text ?? "");
+    }
+
+    void OnClearStatus(object sender, RoutedEventArgs e) => _ = Store.SetStatus(Store.MyStatus?.Mode ?? "online", "", "");
+
+    async void OnCustomStatus(object sender, RoutedEventArgs e)
+    {
+        var emoji = new TextBox { Header = "Emoji", Width = 80, Text = Store.MyStatus?.Emoji ?? "" };
+        var text = new TextBox { Header = "Status", Width = 260, MaxLength = 80, Text = Store.MyStatus?.Text ?? "" };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        row.Children.Add(emoji);
+        row.Children.Add(text);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot, Title = "Custom status", Content = row,
+            PrimaryButtonText = "Save", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            await Store.SetStatus(Store.MyStatus?.Mode ?? "online", emoji.Text.Trim(), text.Text.Trim());
+    }
 
     void OnSettings(object sender, RoutedEventArgs e) => _ = SettingsDialog.Show(Content.XamlRoot, Store);
 

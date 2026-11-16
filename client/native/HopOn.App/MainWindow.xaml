@@ -97,7 +97,17 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Spacing="2">
-                        <TextBlock x:Name="MeText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <StackPanel.ContextFlyout>
+                            <MenuFlyout>
+                                <MenuFlyoutItem Text="Online" Click="OnStatus" Tag="online" />
+                                <MenuFlyoutItem Text="Do not disturb" Click="OnStatus" Tag="dnd" />
+                                <MenuFlyoutItem Text="Invisible" Click="OnStatus" Tag="invisible" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Text="Set a custom status…" Click="OnCustomStatus" />
+                                <MenuFlyoutItem Text="Clear custom status" Click="OnClearStatus" />
+                            </MenuFlyout>
+                        </StackPanel.ContextFlyout>
+                        <TextBlock x:Name="MeText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="Right-click to set your status" />
                         <TextBlock x:Name="ConnText" FontSize="12" Opacity="0.65" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
@@ -118,6 +128,15 @@
                 <StackPanel Orientation="Horizontal" Spacing="12" Margin="20,14,20,10">
                     <TextBlock x:Name="ChannelTitle" FontSize="16" FontWeight="SemiBold" />
                     <TextBlock x:Name="ChannelTopic" Opacity="0.65" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Button x:Name="BellButton" Content="🔔" FontSize="12" Padding="6,2" ToolTipService.ToolTip="Notifications for this channel">
+                        <Button.Flyout>
+                            <MenuFlyout>
+                                <RadioMenuFlyoutItem x:Name="BellAll" Text="All messages" GroupName="bell" Click="OnBell" Tag="all" />
+                                <RadioMenuFlyoutItem x:Name="BellMentions" Text="Only @mentions" GroupName="bell" Click="OnBell" Tag="mentions" />
+                                <RadioMenuFlyoutItem x:Name="BellNone" Text="Nothing" GroupName="bell" Click="OnBell" Tag="none" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
                 </StackPanel>
 
                 <!-- Virtualized. KeepItemsInView: older pages load above without moving
