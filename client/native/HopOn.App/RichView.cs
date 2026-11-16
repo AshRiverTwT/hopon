@@ -24,6 +24,14 @@ public static partial class RichView
 
     static readonly FontFamily Mono = new("Cascadia Mono, Consolas");
 
+    static Brush? accent;
+    static Brush? Accent()
+    {
+        if (accent is not null) return accent;
+        if (Application.Current.Resources.TryGetValue("AccentTextFillColorPrimaryBrush", out var v) && v is Brush b) accent = b;
+        return accent;
+    }
+
     static void OnTextChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is not RichTextBlock block) return;
@@ -40,12 +48,12 @@ public static partial class RichView
                 block.Blocks.Add(code);
                 continue;
             }
-            para.Inlines.Add(Inline(n));
+            para.Inlines.Add(MakeInline(n));
         }
         if (para.Inlines.Count > 0 || block.Blocks.Count == 0) block.Blocks.Add(para);
     }
 
-    static Inline Inline(RichNode n)
+    static Microsoft.UI.Xaml.Documents.Inline MakeInline(RichNode n)
     {
         switch (n)
         {
@@ -60,11 +68,15 @@ public static partial class RichView
                 return h;
             }
             case RichMention m:
-                return new Run { Text = "@" + NameOf(m.Id), FontWeight = FontWeights.SemiBold, Foreground = (Brush)Application.Current.Resources["AccentTextFillColorPrimaryBrush"] };
+            {
+                var run = new Run { Text = "@" + NameOf(m.Id), FontWeight = FontWeights.SemiBold };
+                if (Accent() is Brush b) run.Foreground = b;
+                return run;
+            }
             case RichStyled s:
             {
-                Span span = s.Kind switch { 'b' => new Bold(), 'i' => new Italic(), _ => new Span { TextDecorations = TextDecorations.Strikethrough } };
-                foreach (var c in s.C) span.Inlines.Add(Inline(c));
+                Span span = s.Kind switch { 'b' => new Bold(), 'i' => new Italic(), _ => new Span { TextDecorations = Windows.UI.Text.TextDecorations.Strikethrough } };
+                foreach (var c in s.C) span.Inlines.Add(MakeInline(c));
                 return span;
             }
             default:
