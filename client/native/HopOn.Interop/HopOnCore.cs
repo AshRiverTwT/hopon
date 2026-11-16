@@ -126,6 +126,26 @@ public sealed unsafe class HopOnCore
         sinkOfLabel[label] = sink;
     }
 
+    /// <summary>
+    /// Typed events (see Models.cs). Kinds this build doesn't know (a newer core)
+    /// are logged and skipped.
+    /// </summary>
+    public void Subscribe(string label, Action<UiEvent> onEvent) => Subscribe(label, (JsonElement e) =>
+    {
+        UiEvent? ev;
+        try { ev = HopOnJson.Event(e); }
+        catch (JsonException x)
+        {
+            Console.Error.WriteLine($"HopOn: skipped an event ({x.Message})");
+            return;
+        }
+        if (ev is not null) onEvent(ev);
+    });
+
+    /// <summary>Command result as a model type (e.g. HopOnJson.Default.Page).</summary>
+    public Task<T> CallAsync<T>(string name, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> type, JsonObject? args = null)
+        => CallAsync(name, args).ContinueWith(t => t.GetAwaiter().GetResult().Deserialize(type)!, TaskContinuationOptions.ExecuteSynchronously);
+
     /// <summary>Stop events for a window (it closed).</summary>
     public void Unsubscribe(string label)
     {

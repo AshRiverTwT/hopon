@@ -28,7 +28,20 @@ void Fail(string what) { failures++; Console.WriteLine($"[{role}] FAIL {what}");
 Console.WriteLine($"[{role}] hopon_ffi {HopOnCore.NativeVersion}");
 var events = new BlockingCollection<JsonElement>();
 var core = HopOnCore.Start(new Host(), Path.Combine(work, role + "-data"));
-core.Subscribe("main", ev => events.Add(ev));
+// Every live event must also parse with the strict typed models.
+var strict = new HopOnJson(new JsonSerializerOptions(HopOnJson.Default.Options)
+{
+    UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow,
+    RespectNullableAnnotations = true,
+});
+var typedFailures = new ConcurrentBag<string>();
+var typedCount = 0;
+core.Subscribe("main", (JsonElement ev) =>
+{
+    try { ev.Deserialize(strict.UiEvent); Interlocked.Increment(ref typedCount); }
+    catch (JsonException e) { typedFailures.Add($"{ev.GetProperty("t")}: {e.Message}"); }
+    events.Add(ev);
+});
 
 // Wait for an event matching `pred` (other events are skipped).
 JsonElement? WaitFor(Func<JsonElement, bool> pred)
@@ -39,6 +52,11 @@ JsonElement? WaitFor(Func<JsonElement, bool> pred)
     return null;
 }
 static string T(JsonElement e) => e.GetProperty("t").GetString() ?? "";
+void CheckTyped()
+{
+    foreach (var f in typedFailures) Fail($"typed model: {f}");
+    if (typedFailures.IsEmpty) Pass($"all {typedCount} live events parse with the strict typed models");
+}
 
 if (WaitFor(e => T(e) == "conn" && e.GetProperty("state").GetString() == "online") is null) { Fail("connected"); return 1; }
 Pass("connected (conn: online event)");
@@ -71,6 +89,7 @@ if (role == "guest")
     Pass("sent a message");
     // Give the frame time to leave before the process exits.
     WaitFor(e => T(e) == "msgState" && e.GetProperty("state").GetInt32() >= 2);
+    CheckTyped();
     return failures == 0 ? 0 : 1;
 }
 
@@ -128,6 +147,7 @@ var older = await core.CallAsync("open_channel", new JsonObject { ["channelId"] 
 if (older.EnumerateArray().Any(m => m.GetProperty("content").GetString() == mine)) Pass("open_channel returns history");
 else Fail("history");
 
+CheckTyped();
 Console.WriteLine(failures == 0 ? "[owner] all checks passed" : $"[owner] {failures} check(s) failed");
 return failures == 0 ? 0 : 1;
 

@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- HopOn native client (WinUI 3): unpackaged, self-contained, on hopon_ffi.dll.
+       Builds on Windows only (the XAML compiler is a Windows tool). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>HopOn.App</RootNamespace>
+    <AssemblyName>HopOn</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <Platform>x64</Platform>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Native AOT on publish: fast start, no JIT, smaller download. -->
+    <PublishAot>true</PublishAot>
+    <Version>0.8.1</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Only the WinUI component (and what it needs): the Microsoft.WindowsAppSDK
+         metapackage would also pull in AI, ML, Widgets and Search. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.6.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../HopOn.Interop/HopOn.Interop.csproj" />
+  </ItemGroup>
+
+  <!-- The Rust core. Override with -p:HoponFfiDll=path\to\hopon_ffi.dll. -->
+  <PropertyGroup>
+    <HoponFfiDll Condition="'$(HoponFfiDll)' == ''">$(MSBuildThisFileDirectory)..\..\..\target\debug\hopon_ffi.dll</HoponFfiDll>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(HoponFfiDll)')">
+    <Content Include="$(HoponFfiDll)" Link="hopon_ffi.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

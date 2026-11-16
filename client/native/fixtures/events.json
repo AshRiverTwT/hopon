@@ -1,0 +1,476 @@
+[
+  {
+    "t": "conn",
+    "state": "online",
+    "rttMs": 1.5
+  },
+  {
+    "t": "session",
+    "user": {
+      "id": "1",
+      "name": "user 1",
+      "avatarV": 3,
+      "accent": 2
+    },
+    "servers": [
+      {
+        "id": "10",
+        "name": "test",
+        "ownerId": "1",
+        "channels": [
+          {
+            "id": "20",
+            "serverId": "10",
+            "name": "general",
+            "voice": false,
+            "topic": "hi",
+            "lastId": "99"
+          },
+          {
+            "id": "21",
+            "serverId": "10",
+            "name": "voice",
+            "voice": true,
+            "topic": "hi",
+            "lastId": "99"
+          }
+        ],
+        "memberIds": [
+          "1",
+          "2"
+        ],
+        "memberCount": 2,
+        "reads": {
+          "20": "98"
+        },
+        "online": [
+          "1"
+        ],
+        "activities": {
+          "1": "VALORANT"
+        },
+        "statuses": {
+          "1": {
+            "mode": "dnd",
+            "emoji": "🎮",
+            "text": "ranked",
+            "until": 1800000000000
+          }
+        },
+        "dmWith": "2"
+      }
+    ],
+    "users": [
+      {
+        "id": "1",
+        "name": "user 1",
+        "avatarV": 3,
+        "accent": 2
+      },
+      {
+        "id": "2",
+        "name": "user 2",
+        "avatarV": 3,
+        "accent": 2
+      }
+    ],
+    "voice": [
+      {
+        "userId": "1",
+        "channelId": "21",
+        "muted": true,
+        "deafened": false
+      }
+    ],
+    "media": [
+      {
+        "channelId": "21",
+        "userId": "1",
+        "source": "screen",
+        "active": true
+      }
+    ],
+    "username": "alice",
+    "friends": [
+      {
+        "user": {
+          "id": "2",
+          "name": "user 2",
+          "avatarV": 3,
+          "accent": 2
+        },
+        "username": "bob",
+        "state": "friends",
+        "dmServer": "11"
+      }
+    ],
+    "status": {
+      "mode": "dnd",
+      "emoji": "🎮",
+      "text": "ranked",
+      "until": 1800000000000
+    },
+    "authPending": false
+  },
+  {
+    "t": "friend",
+    "friend": {
+      "user": {
+        "id": "2",
+        "name": "user 2",
+        "avatarV": 3,
+        "accent": 2
+      },
+      "username": "bob",
+      "state": "friends",
+      "dmServer": "11"
+    }
+  },
+  {
+    "t": "friendRemoved",
+    "userId": "2"
+  },
+  {
+    "t": "server",
+    "server": {
+      "id": "10",
+      "name": "test",
+      "ownerId": "1",
+      "channels": [
+        {
+          "id": "20",
+          "serverId": "10",
+          "name": "general",
+          "voice": false,
+          "topic": "hi",
+          "lastId": "99"
+        },
+        {
+          "id": "21",
+          "serverId": "10",
+          "name": "voice",
+          "voice": true,
+          "topic": "hi",
+          "lastId": "99"
+        }
+      ],
+      "memberIds": [
+        "1",
+        "2"
+      ],
+      "memberCount": 2,
+      "reads": {
+        "20": "98"
+      },
+      "online": [
+        "1"
+      ],
+      "activities": {
+        "1": "VALORANT"
+      },
+      "statuses": {
+        "1": {
+          "mode": "dnd",
+          "emoji": "🎮",
+          "text": "ranked",
+          "until": 1800000000000
+        }
+      },
+      "dmWith": "2"
+    }
+  },
+  {
+    "t": "channelCreated",
+    "channel": {
+      "id": "20",
+      "serverId": "10",
+      "name": "general",
+      "voice": false,
+      "topic": "hi",
+      "lastId": "99"
+    }
+  },
+  {
+    "t": "memberJoined",
+    "serverId": "10",
+    "user": {
+      "id": "3",
+      "name": "user 3",
+      "avatarV": 3,
+      "accent": 2
+    }
+  },
+  {
+    "t": "memberPage",
+    "serverId": "10",
+    "offset": 0,
+    "users": [
+      {
+        "id": "1",
+        "name": "user 1",
+        "avatarV": 3,
+        "accent": 2
+      }
+    ],
+    "online": [
+      "1"
+    ],
+    "activities": {
+      "1": "Dota 2"
+    },
+    "statuses": {
+      "1": {
+        "mode": "dnd",
+        "emoji": "🎮",
+        "text": "ranked",
+        "until": 1800000000000
+      }
+    }
+  },
+  {
+    "t": "memberSearch",
+    "serverId": "10",
+    "users": [
+      {
+        "id": "2",
+        "name": "user 2",
+        "avatarV": 3,
+        "accent": 2
+      }
+    ]
+  },
+  {
+    "t": "userUpdated",
+    "user": {
+      "id": "2",
+      "name": "user 2",
+      "avatarV": 3,
+      "accent": 2
+    }
+  },
+  {
+    "t": "serverRemoved",
+    "serverId": "10",
+    "reason": "kicked"
+  },
+  {
+    "t": "channelDeleted",
+    "serverId": "10",
+    "channelId": "20"
+  },
+  {
+    "t": "readUpdated",
+    "channelId": "20",
+    "lastRead": "99"
+  },
+  {
+    "t": "channelActivity",
+    "channelId": "20",
+    "lastId": "99"
+  },
+  {
+    "t": "reaction",
+    "channelId": "20",
+    "messageId": "99",
+    "emoji": "🔥",
+    "userId": "2",
+    "add": true
+  },
+  {
+    "t": "typing",
+    "channelId": "20",
+    "userId": "2"
+  },
+  {
+    "t": "prefs",
+    "json": "{\"sounds\":true}"
+  },
+  {
+    "t": "mentioned",
+    "channelId": "20"
+  },
+  {
+    "t": "incomingMessage",
+    "channelId": "20",
+    "msg": {
+      "id": "99",
+      "channelId": "20",
+      "authorId": "1",
+      "content": "hello **world**",
+      "editedAt": 1700000000000,
+      "ts": 1700000000000,
+      "nonce": "12345",
+      "state": 2,
+      "replyTo": "98",
+      "reactions": [
+        {
+          "emoji": "👍",
+          "users": [
+            "2"
+          ]
+        }
+      ],
+      "attachments": [
+        {
+          "id": "f1",
+          "name": "cat.png",
+          "mime": "image/png",
+          "size": 1234,
+          "width": 64,
+          "height": 48,
+          "url": "",
+          "preview": ""
+        }
+      ]
+    }
+  },
+  {
+    "t": "userPresence",
+    "userId": "2",
+    "online": true
+  },
+  {
+    "t": "status",
+    "userId": "2",
+    "status": {
+      "mode": "dnd",
+      "emoji": "🎮",
+      "text": "ranked",
+      "until": 1800000000000
+    }
+  },
+  {
+    "t": "activity",
+    "userId": "2",
+    "game": "Fortnite"
+  },
+  {
+    "t": "messages",
+    "channelId": "20",
+    "msgs": [
+      {
+        "id": "99",
+        "channelId": "20",
+        "authorId": "1",
+        "content": "hello **world**",
+        "editedAt": 1700000000000,
+        "ts": 1700000000000,
+        "nonce": "12345",
+        "state": 2,
+        "replyTo": "98",
+        "reactions": [
+          {
+            "emoji": "👍",
+            "users": [
+              "2"
+            ]
+          }
+        ],
+        "attachments": [
+          {
+            "id": "f1",
+            "name": "cat.png",
+            "mime": "image/png",
+            "size": 1234,
+            "width": 64,
+            "height": 48,
+            "url": "",
+            "preview": ""
+          }
+        ]
+      },
+      {
+        "id": "99",
+        "channelId": "20",
+        "authorId": "1",
+        "content": "hello **world**",
+        "editedAt": null,
+        "ts": 1700000000000,
+        "nonce": "12345",
+        "state": 2,
+        "replyTo": null,
+        "reactions": [
+          {
+            "emoji": "👍",
+            "users": [
+              "2"
+            ]
+          }
+        ],
+        "attachments": [
+          {
+            "id": "f1",
+            "name": "cat.png",
+            "mime": "image/png",
+            "size": 1234,
+            "width": 64,
+            "height": 48,
+            "url": "",
+            "preview": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "t": "msgState",
+    "channelId": "20",
+    "nonce": "12345",
+    "id": "99",
+    "state": 2
+  },
+  {
+    "t": "edited",
+    "channelId": "20",
+    "id": "99",
+    "content": "edited",
+    "editedAt": 1700000000001
+  },
+  {
+    "t": "deleted",
+    "channelId": "20",
+    "id": "99"
+  },
+  {
+    "t": "presence",
+    "serverId": "10",
+    "presence": {
+      "userId": "1",
+      "channelId": null,
+      "muted": true,
+      "deafened": false
+    }
+  },
+  {
+    "t": "mediaPresence",
+    "media": {
+      "channelId": "21",
+      "userId": "1",
+      "source": "screen",
+      "active": true
+    }
+  },
+  {
+    "t": "voice",
+    "channelId": "21",
+    "state": "connected",
+    "muted": false,
+    "deafened": false,
+    "detail": null
+  },
+  {
+    "t": "speaking",
+    "userIds": [
+      "1",
+      "2"
+    ]
+  },
+  {
+    "t": "openChannel",
+    "channelId": "20"
+  },
+  {
+    "t": "error",
+    "message": "something failed"
+  }
+]

@@ -1,6 +1,8 @@
 # Native WinUI port: build and check on real Windows.
-# - bridge: hopon_ffi.dll (with voice) + hopon-server, Postgres on the runner,
-#   then the C# end-to-end check through the DLL (client/native/HopOn.BridgeCheck).
+# - bridge: hopon_ffi.dll (with voice), hopon-server and e2e_feed; Postgres on
+#   the runner; the C# end-to-end check through the DLL (JIT and Native AOT).
+# - app: the WinUI app, built, published with Native AOT, run against the
+#   server and measured (startup, paint latency, idle CPU/RAM, size, screenshot).
 name: windows-native
 
 on:
@@ -12,7 +14,9 @@ on:
       - "client/native/**"
       - "shared/**"
       - "server/**"
+      - "bench/**"
       - "vendor/**"
+      - "scripts/ci/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/windows-native.yml"
@@ -42,41 +46,34 @@ jobs:
         with:
           shared-key: windows-native
 
-      - name: Build hopon_ffi.dll (voice) and hopon-server
-        run: cargo build -p hopon-ffi -p hopon-server
+      - name: Build hopon_ffi.dll (voice), hopon-server, e2e_feed
+        run: cargo build -p hopon-ffi -p hopon-server -p hopon-bench --bin e2e_feed
 
       - name: C# bindings are current
         shell: bash
         run: git diff --exit-code client/ffi/bindings/
 
-      - name: Start Postgres
-        shell: pwsh
-        run: |
-          $svc = Get-Service -Name "postgresql*" | Select-Object -First 1
-          Set-Service $svc.Name -StartupType Manual
-          Start-Service $svc.Name
-          $env:PGPASSWORD = "root"
-          & "$env:PGBIN\psql.exe" -h 127.0.0.1 -U postgres -c "CREATE DATABASE hopon"
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-bin
+          path: |
+            target/debug/hopon_ffi.dll
+            target/debug/hopon-server.exe
+            target/debug/e2e_feed.exe
+          retention-days: 7
 
-      - name: Start hopon-server
+      - name: Model tests (C# models vs Rust fixtures, merge rules)
         shell: pwsh
+        working-directory: client/native/HopOn.Interop.Tests
         run: |
-          $env:DATABASE_URL = "postgres://postgres:root@127.0.0.1:5432/hopon"
-          $env:HOPON_JWT_SECRET = "ci-secret"
-          $env:LIVEKIT_URL = "ws://127.0.0.1:7880"
-          $env:LIVEKIT_API_KEY = "devkey"
-          $env:LIVEKIT_API_SECRET = "secret-secret-secret-secret-secret"
-          $env:HOPON_SEND_RATE = "100000"
-          $env:HOPON_BIND = "127.0.0.1:18080"
-          $env:RUST_LOG = "warn"
-          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\logs" | Out-Null
-          Start-Process target\debug\hopon-server.exe -NoNewWindow `
-            -RedirectStandardError "$env:RUNNER_TEMP\logs\server.err.log" -RedirectStandardOutput "$env:RUNNER_TEMP\logs\server.out.log"
-          for ($i = 0; $i -lt 100; $i++) {
-            try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18080/health | Out-Null; Write-Host "server up"; exit 0 } catch { Start-Sleep -Milliseconds 300 }
-          }
-          Get-Content "$env:RUNNER_TEMP\logs\server.err.log"
-          throw "server did not start"
+          dotnet build -c Debug -warnaserror
+          dotnet bin\Debug\net10.0\HopOn.Interop.Tests.dll
+          if ($LASTEXITCODE -ne 0) { throw "model tests failed" }
+
+      - name: Start Postgres and hopon-server
+        shell: pwsh
+        run: scripts\ci\start-server.ps1 -ServerExe target\debug\hopon-server.exe
 
       - name: Bridge check (C# -> hopon_ffi.dll -> server)
         shell: pwsh
@@ -97,9 +94,60 @@ jobs:
           $env:HOPON_URL = "ws://127.0.0.1:18080/ws"
           & "$env:RUNNER_TEMP\aot\HopOn.BridgeCheck.exe" owner "$env:RUNNER_TEMP\bridge-aot"
           if ($LASTEXITCODE -ne 0) { throw "AOT bridge check failed ($LASTEXITCODE)" }
-          Get-ChildItem "$env:RUNNER_TEMP\aot" | Format-Table Name, Length
 
       - name: Server log
         if: always()
         shell: pwsh
         run: Get-Content "$env:RUNNER_TEMP\logs\server.err.log" -ErrorAction SilentlyContinue | Select-Object -Last 50
+
+  app:
+    needs: bridge
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-bin
+          path: ${{ runner.temp }}\rust-bin
+
+      - name: Build the WinUI app
+        shell: pwsh
+        working-directory: client/native/HopOn.App
+        run: dotnet build -c Debug -p:HoponFfiDll="$env:RUNNER_TEMP\rust-bin\hopon_ffi.dll"
+
+      - name: Publish (self-contained, Native AOT)
+        shell: pwsh
+        working-directory: client/native/HopOn.App
+        run: |
+          dotnet publish -c Release -p:HoponFfiDll="$env:RUNNER_TEMP\rust-bin\hopon_ffi.dll" -o "$env:RUNNER_TEMP\HopOn"
+          Get-ChildItem "$env:RUNNER_TEMP\HopOn" | Sort-Object Length -Descending | Select-Object -First 15 | Format-Table Name, Length
+
+      - name: Start Postgres and hopon-server
+        shell: pwsh
+        run: scripts\ci\start-server.ps1 -ServerExe "$env:RUNNER_TEMP\rust-bin\hopon-server.exe"
+
+      - name: Run and measure the app
+        shell: pwsh
+        run: scripts\ci\measure-app.ps1 -AppDir "$env:RUNNER_TEMP\HopOn" -E2eFeed "$env:RUNNER_TEMP\rust-bin\e2e_feed.exe" -Out "$env:RUNNER_TEMP\results"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-app-results
+          path: ${{ runner.temp }}\results
+          retention-days: 14
+
+      - name: Upload the app (debug core; for trying it out)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HopOn-native-preview
+          path: ${{ runner.temp }}\HopOn
+          retention-days: 14
