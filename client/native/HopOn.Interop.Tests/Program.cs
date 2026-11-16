@@ -52,6 +52,7 @@ MergeTests.Run(Check);
 RichTests.Run(Check);
 PollTests.Run(Check);
 MediaTests.Run(Check);
+NotifyTests.Run(Check);
 
 Console.WriteLine(failures == 0 ? "all model checks passed" : $"{failures} check(s) failed");
 return failures == 0 ? 0 : 1;

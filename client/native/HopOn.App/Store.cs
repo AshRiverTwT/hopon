@@ -69,6 +69,14 @@ public sealed partial class Store
     public event Action? ComposerModeChanged;
     public void CancelComposerMode() { Replying = null; Editing = null; ComposerModeChanged?.Invoke(); }
 
+    /// <summary>(kind, title, body, channelId): show a banner or a Windows notification.</summary>
+    public event Action<NotifyKind, string, string, string>? Notify;
+    readonly Notifier notifier = new();
+    NotifyPrefs notifyPrefs = NotifyPrefs.Default;
+    /// <summary>The window is focused and visible (set by the window).</summary>
+    public bool Looking { get; set; } = true;
+    public Status? MyStatus { get; private set; }
+
     /// <summary>The "… is typing" line changed.</summary>
     public event Action<string>? TypingChanged;
     /// <summary>Keys of messages changed in this batch (for perf_painted).</summary>
@@ -194,6 +202,7 @@ public sealed partial class Store
                 membersDirty = true;
                 break;
             case StatusEvent st:
+                if (st.UserId == Me?.Id) MyStatus = st.Status;
                 if (st.Status.Mode == "online" && st.Status.Text.Length == 0 && st.Status.Emoji.Length == 0) statuses.Remove(st.UserId);
                 else statuses[st.UserId] = st.Status;
                 membersDirty = true;
@@ -205,6 +214,24 @@ public sealed partial class Store
                     if (row is not null) row.Unread = true;
                 }
                 break;
+            case PrefsEvent pe:
+                notifyPrefs = NotifyPrefs.FromJson(pe.Json);
+                break;
+            case IncomingMessageEvent im:
+            {
+                var (kind, _) = notifier.Decide(im.Msg, im.ChannelId, Me?.Id, OpenChannel?.Id, Looking,
+                    quiet: MyStatus?.Mode == "dnd", notifyPrefs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                if (kind == NotifyKind.None) break;
+                var inServer = Servers.FirstOrDefault(x => x.Channels.Any(c => c.Id == im.ChannelId));
+                var ch = inServer?.Channels.First(c => c.Id == im.ChannelId);
+                var where = ch is null ? "Direct message" : "#" + ch.Name;
+                var author = NameOf(im.Msg.AuthorId);
+                var title = kind == NotifyKind.System ? string.Join(" · ", new[] { author, where, inServer?.Name ?? "" }.Where(x => x.Length > 0)) : $"{author} · {where}";
+                var body = Preview(new MessageVm(im.Msg, author));
+                if (body.Length == 0 && im.Msg.Attachments.Count > 0) body = im.Msg.Attachments.Count == 1 ? "sent a file" : $"sent {im.Msg.Attachments.Count} files";
+                Notify?.Invoke(kind, title, body, im.ChannelId);
+                break;
+            }
             case TypingEvent t when t.ChannelId == OpenChannel?.Id && t.UserId != Me?.Id:
                 NoteTyping(t.UserId, true);
                 break;
@@ -284,6 +311,7 @@ public sealed partial class Store
         if (s.User is not null) users[s.User.Id] = s.User;
         Me = s.User;
         MessageVm.MeId = s.User?.Id;
+        MyStatus = s.Status;
         View = s.User is not null ? View.Shell : s.AuthPending ? View.Splash : View.Login;
         if (s.User is null)
         {
@@ -491,7 +519,7 @@ public sealed partial class Store
         if (first is not null) await OpenChannelRow(first);
     }
 
-    async Task OpenChannelById(string channelId)
+    public async Task OpenChannelById(string channelId)
     {
         var sv = Servers.FirstOrDefault(x => x.Channels.Any(c => c.Id == channelId));
         if (sv is null) return;

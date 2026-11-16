@@ -30,8 +30,31 @@ public partial class App : Application
         };
     }
 
+    /// <summary>A Windows notification was clicked: (channel id).</summary>
+    public static event Action<string>? NotificationClicked;
+
+    static void RegisterNotifications()
+    {
+        try
+        {
+            var m = Microsoft.Windows.AppNotifications.AppNotificationManager.Default;
+            m.NotificationInvoked += (_, e) =>
+            {
+                if (e.Arguments.TryGetValue("channel", out var channel)) NotificationClicked?.Invoke(channel);
+            };
+            m.Register();
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => { try { m.Unregister(); } catch (Exception) { } };
+        }
+        catch (Exception x)
+        {
+            // Notifications are optional (e.g. unavailable on this Windows build).
+            System.Diagnostics.Debug.WriteLine($"notifications unavailable: {x.Message}");
+        }
+    }
+
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        if (!PerfExit) RegisterNotifications();
         window = new MainWindow();
         window.Activate();
     }

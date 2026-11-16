@@ -37,6 +37,14 @@ public sealed partial class MainWindow : Window
         Store.Painted += MarkPainted;
         Store.TypingChanged += line => TypingText.Text = line;
         Store.ComposerModeChanged += OnComposerModeChanged;
+        Store.Notify += OnNotify;
+        Activated += (_, e) => Store.Looking = e.WindowActivationState != WindowActivationState.Deactivated && AppWindow.IsVisible;
+        App.NotificationClicked += channelId => dispatcher.TryEnqueue(() =>
+        {
+            AppWindow.Show();
+            Activate();
+            _ = Store.OpenChannelById(channelId);
+        });
         toastTimer = dispatcher.CreateTimer();
         toastTimer.Interval = TimeSpan.FromSeconds(4);
         toastTimer.Tick += (_, _) => { Toast.IsOpen = false; toastTimer.Stop(); };
@@ -165,6 +173,29 @@ public sealed partial class MainWindow : Window
     {
         // Follow new messages only if the user is at the bottom (or just opened the channel).
         if (Store.Messages.Count > 0 && Store.AtBottom) MessageList.ScrollIntoView(Store.Messages[^1]);
+    }
+
+    void OnNotify(NotifyKind kind, string title, string body, string channelId)
+    {
+        if (kind == NotifyKind.Banner)
+        {
+            ShowToast($"{title}: {body}");
+            return;
+        }
+        try
+        {
+            var n = new Microsoft.Windows.AppNotifications.Builder.AppNotificationBuilder()
+                .AddArgument("channel", channelId)
+                .AddText(title)
+                .AddText(body)
+                .BuildNotification();
+            Microsoft.Windows.AppNotifications.AppNotificationManager.Default.Show(n);
+        }
+        catch (Exception x)
+        {
+            System.Diagnostics.Debug.WriteLine($"notification failed: {x.Message}");
+        }
+        App.Host.RequestAttention();
     }
 
     void ShowToast(string message)
