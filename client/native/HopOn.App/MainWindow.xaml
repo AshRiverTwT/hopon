@@ -138,6 +138,16 @@
                                 <StackPanel.ContextFlyout>
                                     <MenuFlyout>
                                         <MenuFlyoutItem Text="Reply" Click="{x:Bind Reply}" />
+                                        <MenuFlyoutSubItem Text="React">
+                                            <MenuFlyoutItem Text="👍" Click="{x:Bind React0}" />
+                                            <MenuFlyoutItem Text="❤️" Click="{x:Bind React1}" />
+                                            <MenuFlyoutItem Text="😂" Click="{x:Bind React2}" />
+                                            <MenuFlyoutItem Text="😮" Click="{x:Bind React3}" />
+                                            <MenuFlyoutItem Text="😢" Click="{x:Bind React4}" />
+                                            <MenuFlyoutItem Text="🔥" Click="{x:Bind React5}" />
+                                            <MenuFlyoutItem Text="🎉" Click="{x:Bind React6}" />
+                                            <MenuFlyoutItem Text="👀" Click="{x:Bind React7}" />
+                                        </MenuFlyoutSubItem>
                                         <MenuFlyoutItem Text="Edit" Click="{x:Bind BeginEdit}" Visibility="{x:Bind MineVisibility}" />
                                         <MenuFlyoutItem Text="Delete" Click="{x:Bind Delete}" Visibility="{x:Bind MineVisibility}" />
                                     </MenuFlyout>

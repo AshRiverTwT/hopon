@@ -146,6 +146,19 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public bool IsMine => MeId is not null && AuthorId == MeId;
     public Visibility MineVisibility => IsMine ? Visibility.Visible : Visibility.Collapsed;
     public void Reply() => Act?.Invoke(this, "reply");
+
+    /// <summary>The React submenu's emoji (fixed set: menu items bind to methods, AOT-safe).</summary>
+    public static readonly string[] Quick = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "👀"];
+    bool Has(string e) => MeId is not null && reactions.Any(r => r.Emoji == e && r.Users.Contains(MeId));
+    void QuickReact(int i) => ToggleReaction?.Invoke(this, Quick[i], !Has(Quick[i]));
+    public void React0() => QuickReact(0);
+    public void React1() => QuickReact(1);
+    public void React2() => QuickReact(2);
+    public void React3() => QuickReact(3);
+    public void React4() => QuickReact(4);
+    public void React5() => QuickReact(5);
+    public void React6() => QuickReact(6);
+    public void React7() => QuickReact(7);
     public void BeginEdit() => Act?.Invoke(this, "edit");
     public void Delete() => Act?.Invoke(this, "delete");
 
