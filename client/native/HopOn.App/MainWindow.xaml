@@ -5,7 +5,8 @@
     xmlns:local="using:HopOn.App"
     Title="HopOn">
 
-    <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+          AllowDrop="True" DragOver="OnDragOver" Drop="OnDrop">
 
         <!-- Splash: still signing in with the saved login. -->
         <StackPanel x:Name="SplashView" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="16">
@@ -273,7 +274,7 @@
                     </Grid.ColumnDefinitions>
                 <Button x:Name="AttachButton" Content="+" Click="OnAttach" FontSize="16" Padding="10,2" VerticalAlignment="Stretch"
                         ToolTipService.ToolTip="Attach files" />
-                <TextBox x:Name="Composer" Grid.Column="1" PlaceholderText="Message"
+                <TextBox x:Name="Composer" Grid.Column="1" PlaceholderText="Message" Paste="OnComposerPaste"
                          PreviewKeyDown="OnComposerKeyDown" TextChanged="OnComposerChanged" />
                 </Grid>
                 </StackPanel>

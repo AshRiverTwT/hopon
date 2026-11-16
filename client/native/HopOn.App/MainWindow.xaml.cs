@@ -355,6 +355,71 @@ public sealed partial class MainWindow : Window
         foreach (var f in files) _ = AddStorageFile(f);
     }
 
+    // ---------- paste and drag-and-drop ----------
+
+    void OnDragOver(object sender, DragEventArgs e)
+    {
+        if (Store.OpenChannel is not null && e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
+        {
+            e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy;
+            e.DragUIOverride.Caption = "Attach";
+        }
+    }
+
+    async void OnDrop(object sender, DragEventArgs e)
+    {
+        if (Store.OpenChannel is null || !e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems)) return;
+        var deferral = e.GetDeferral();
+        try
+        {
+            foreach (var item in await e.DataView.GetStorageItemsAsync())
+                if (item is Windows.Storage.StorageFile f) _ = AddStorageFile(f);
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    /// <summary>Ctrl+V of an image or of copied files attaches them; text pastes as usual.</summary>
+    async void OnComposerPaste(object sender, TextControlPasteEventArgs e)
+    {
+        var view = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+        var formats = Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems;
+        if (view.Contains(formats))
+        {
+            e.Handled = true;
+            foreach (var item in await view.GetStorageItemsAsync())
+                if (item is Windows.Storage.StorageFile f) _ = AddStorageFile(f);
+            return;
+        }
+        if (!view.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Bitmap)) return;
+        e.Handled = true;
+        try
+        {
+            var reference = await view.GetBitmapAsync();
+            using var source = await reference.OpenReadAsync();
+            var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(source);
+            using var bitmap = await decoder.GetSoftwareBitmapAsync();
+            using var png = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+            var encoder = await Windows.Graphics.Imaging.BitmapEncoder.CreateAsync(Windows.Graphics.Imaging.BitmapEncoder.PngEncoderId, png);
+            encoder.SetSoftwareBitmap(bitmap);
+            await encoder.FlushAsync();
+            var bytes = new byte[png.Size];
+            png.Seek(0);
+            using (var reader = new Windows.Storage.Streams.DataReader(png.GetInputStreamAt(0)))
+            {
+                await reader.LoadAsync((uint)png.Size);
+                reader.ReadBytes(bytes);
+            }
+            await Store.AddFile($"pasted-{DateTime.Now:yyyyMMdd-HHmmss}.png", bytes, decoder.PixelWidth, decoder.PixelHeight);
+        }
+        catch (Exception x)
+        {
+            ShowToast($"Couldn't paste the image: {x.Message}");
+        }
+    }
+
     async Task AddStorageFile(Windows.Storage.StorageFile f)
     {
         try
