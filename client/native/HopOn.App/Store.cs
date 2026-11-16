@@ -121,6 +121,13 @@ public sealed partial class Store
         this.ui = ui;
         this.core = core;
         RichView.NameOf = NameOf;
+        avatars = new Avatars(core);
+        avatars.Loaded += userId =>
+        {
+            var img = AvatarOf(userId);
+            foreach (var m in Messages) if (m.AuthorId == userId) m.Avatar = img;
+            foreach (var mv in Members) if (mv.Id == userId) mv.Avatar = img;
+        };
         PendingFileVm.RemoveAction = f => PendingFiles.Remove(f);
         MessageVm.ToggleReaction = (m, emoji, add) => _ = React(m, emoji, add);
         MessageVm.Act = (m, what) =>
@@ -155,10 +162,14 @@ public sealed partial class Store
         if (painted.Count > 0) Painted?.Invoke(painted);
     }
 
+    readonly Avatars avatars;
+    Microsoft.UI.Xaml.Media.ImageSource? AvatarOf(string userId) =>
+        users.TryGetValue(userId, out var u) ? avatars.Get(userId, u.AvatarV) : null;
+
     string NameOf(string userId) =>
         userId == "0" ? "HopOn" : users.TryGetValue(userId, out var u) ? u.Name : "…";
 
-    MessageVm Row(Msg m) => new(m, NameOf(m.AuthorId));
+    MessageVm Row(Msg m) => new(m, NameOf(m.AuthorId)) { Avatar = AvatarOf(m.AuthorId) };
 
     void Apply(UiEvent e, List<string> painted, ref bool changed, ref bool appended)
     {
@@ -207,6 +218,7 @@ public sealed partial class Store
             case UserUpdatedEvent u:
                 users[u.User.Id] = u.User;
                 RefreshAuthors(u.User.Id);
+                foreach (var m in Messages) if (m.AuthorId == u.User.Id) m.Avatar = AvatarOf(u.User.Id);
                 membersDirty = true;
                 break;
             case MemberJoinedEvent m:
@@ -536,6 +548,7 @@ public sealed partial class Store
             }
             vm.Name = r.Name;
             vm.Online = r.Online;
+            vm.Avatar ??= AvatarOf(r.Id);
             vm.Detail = activities.TryGetValue(r.Id, out var game) ? $"Playing {game}"
                 : statuses.TryGetValue(r.Id, out var st) && st.Text.Length > 0 ? (st.Emoji + " " + st.Text).Trim()
                 : "";

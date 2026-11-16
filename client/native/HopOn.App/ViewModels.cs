@@ -35,6 +35,8 @@ public sealed partial class ServerVm : Observable
 /// <summary>A row of the people column.</summary>
 public sealed partial class MemberVm : Observable
 {
+    Microsoft.UI.Xaml.Media.ImageSource? avatar;
+    public Microsoft.UI.Xaml.Media.ImageSource? Avatar { get => avatar; set => Set(ref avatar, value); }
     string name = "";
     bool online;
     string detail = "";
@@ -274,6 +276,9 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public double Opacity => State == 0 ? 0.55 : 1.0;
     public string StateText => State == 3 ? "Not sent" : "";
     public Visibility HeaderVisibility => Header ? Visibility.Visible : Visibility.Collapsed;
+    Microsoft.UI.Xaml.Media.ImageSource? avatar;
+    /// <summary>Profile picture (null: initials).</summary>
+    public Microsoft.UI.Xaml.Media.ImageSource? Avatar { get => avatar; set => Set(ref avatar, value); }
     string dayText = "";
     bool newHere;
     /// <summary>Day separator above this message ("" = none).</summary>
@@ -282,7 +287,8 @@ public sealed partial class MessageVm : Observable, IMessageItem
     /// <summary>The "new messages" divider sits above this message.</summary>
     public bool NewHere { get => newHere; set { Set(ref newHere, value); Raise(nameof(NewVisibility)); } }
     public Visibility NewVisibility => NewHere ? Visibility.Visible : Visibility.Collapsed;
-    public Thickness RowPadding => Header ? new Thickness(0, 10, 0, 0) : new Thickness(0);
+    /// <summary>Indented by the avatar column; the header pulls back over it.</summary>
+    public Thickness RowPadding => new(36, Header ? 10 : 0, 0, 0);
 
     public void Update(Msg m, byte newState)
     {
