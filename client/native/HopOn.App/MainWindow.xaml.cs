@@ -386,7 +386,7 @@ public sealed partial class MainWindow : Window
         if (Store.Editing is { } ed)
         {
             ComposerBannerText.Text = "Editing your message (Enter to save, Esc to cancel)";
-            Composer.Text = ed.Content;
+            Composer.Text = Store.Editable(ed.Content);
             Composer.SelectionStart = Composer.Text.Length;
         }
         else if (Store.Replying is { } r)
@@ -406,6 +406,29 @@ public sealed partial class MainWindow : Window
 
     void OnComposerKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (MentionList.Visibility == Visibility.Visible && MentionList.ItemsSource is List<string> { Count: > 0 } names)
+        {
+            switch (e.Key)
+            {
+                case VirtualKey.Tab:
+                case VirtualKey.Enter:
+                    e.Handled = true;
+                    CompleteMention(names[Math.Max(0, MentionList.SelectedIndex)]);
+                    return;
+                case VirtualKey.Down:
+                    e.Handled = true;
+                    MentionList.SelectedIndex = (MentionList.SelectedIndex + 1) % names.Count;
+                    return;
+                case VirtualKey.Up:
+                    e.Handled = true;
+                    MentionList.SelectedIndex = (MentionList.SelectedIndex - 1 + names.Count) % names.Count;
+                    return;
+                case VirtualKey.Escape:
+                    e.Handled = true;
+                    MentionList.Visibility = Visibility.Collapsed;
+                    return;
+            }
+        }
         if (e.Key == VirtualKey.Escape && (Store.Editing is not null || Store.Replying is not null))
         {
             e.Handled = true;
@@ -425,5 +448,45 @@ public sealed partial class MainWindow : Window
     void OnComposerChanged(object sender, TextChangedEventArgs e)
     {
         if (Composer.Text.Length > 0) Store.Typing();
+        UpdateMentions();
+    }
+
+    /// <summary>"@que" right before the caret (after a space or at the start), or null.</summary>
+    string? MentionQuery(out int start)
+    {
+        start = -1;
+        var caret = Math.Min(Composer.SelectionStart, Composer.Text.Length);
+        var before = Composer.Text[..caret];
+        var at = before.LastIndexOf('@');
+        if (at < 0 || (at > 0 && !char.IsWhiteSpace(before[at - 1]) && before[at - 1] != '(')) return null;
+        var q = before[(at + 1)..];
+        if (q.Length > 32 || q.Contains('\n') || q.Contains('@')) return null;
+        start = at;
+        return q;
+    }
+
+    void UpdateMentions()
+    {
+        var q = MentionQuery(out _);
+        var list = q is null ? [] : Store.MentionSuggestions(q);
+        MentionList.ItemsSource = list;
+        MentionList.SelectedIndex = list.Count > 0 ? 0 : -1;
+        MentionList.Visibility = list.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    void CompleteMention(string name)
+    {
+        if (MentionQuery(out var start) is null) return;
+        var caret = Math.Min(Composer.SelectionStart, Composer.Text.Length);
+        var insert = "@" + name + " ";
+        Composer.Text = Composer.Text[..start] + insert + Composer.Text[caret..];
+        Composer.SelectionStart = start + insert.Length;
+        MentionList.Visibility = Visibility.Collapsed;
+        Composer.Focus(FocusState.Programmatic);
+    }
+
+    void OnMentionClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is string name) CompleteMention(name);
     }
 }

@@ -664,6 +664,25 @@ public sealed partial class Store
         }
     }
 
+    /// <summary>Stored text → editable text ("&lt;@id&gt;" → "@name").</summary>
+    public string Editable(string content) => Rich.DecodeMentions(content, NameOf);
+
+    /// <summary>Members of the open server (and you) as (id, name).</summary>
+    public List<(string Id, string Name)> MentionCandidates()
+    {
+        var ids = OpenServer?.MemberIds ?? [];
+        return ids.Where(users.ContainsKey).Select(id => (id, NameOf(id))).ToList();
+    }
+
+    /// <summary>Up to 6 members whose name starts with (or contains) <paramref name="query"/>.</summary>
+    public List<string> MentionSuggestions(string query)
+    {
+        var all = MentionCandidates().Where(c => c.Id != Me?.Id).Select(c => c.Name).Distinct().ToList();
+        return all.Where(n => n.StartsWith(query, StringComparison.CurrentCultureIgnoreCase))
+            .Concat(all.Where(n => !n.StartsWith(query, StringComparison.CurrentCultureIgnoreCase) && n.Contains(query, StringComparison.CurrentCultureIgnoreCase)))
+            .Take(6).ToList();
+    }
+
     async Task DeleteMessage(MessageVm m)
     {
         if (OpenChannel is null) return;
@@ -706,9 +725,11 @@ public sealed partial class Store
         {
             Editing = null;
             ComposerModeChanged?.Invoke();
-            _ = SaveEdit(editing, text);
+            _ = SaveEdit(editing, Rich.EncodeMentions(text, MentionCandidates()));
             return;
         }
+        // "@name" for members of this server → "<@id>" (same rule as the webview).
+        text = Rich.EncodeMentions(text, MentionCandidates());
         var replyTo = Replying is { } r && !MessageMerge.IsPending(r.Id) ? r.Id : null;
         if (Replying is not null) { Replying = null; ComposerModeChanged?.Invoke(); }
         var channelId = OpenChannel.Id;

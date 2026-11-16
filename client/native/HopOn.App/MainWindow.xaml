@@ -249,6 +249,9 @@
                     <TextBlock x:Name="ComposerBannerText" FontSize="12" Opacity="0.75" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                     <Button Grid.Column="1" Content="Cancel" Click="OnCancelComposerMode" FontSize="12" Padding="8,2" />
                 </Grid>
+                <!-- @mention suggestions -->
+                <ListView x:Name="MentionList" Visibility="Collapsed" MaxHeight="200" SelectionMode="Single" IsItemClickEnabled="True"
+                          ItemClick="OnMentionClick" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="6" />
                 <ItemsControl ItemsSource="{x:Bind Store.PendingFiles}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
