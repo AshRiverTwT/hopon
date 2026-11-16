@@ -17,6 +17,8 @@ public static class SettingsDialog
         public override string ToString() => Name;
     }
 
+    static string KeyName(int vk) => vk == 0 ? "Not set" : ((Windows.System.VirtualKey)vk).ToString();
+
     public static async Task Show(XamlRoot root, Store store)
     {
         var panel = new StackPanel { Spacing = 14, MinWidth = 380 };
@@ -34,12 +36,22 @@ public static class SettingsDialog
         panel.Children.Add(aec);
         panel.Children.Add(ns);
         panel.Children.Add(agc);
+        var ptt = new ToggleSwitch { Header = "Push to talk", IsOn = store.PrefBool("ptt", false) };
+        var pttKey = store.PrefInt("pttKey", 0);
+        var keyButton = new Button { Content = KeyName(pttKey) };
+        var pttRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        pttRow.Children.Add(new TextBlock { Text = "Key", VerticalAlignment = VerticalAlignment.Center });
+        pttRow.Children.Add(keyButton);
+        panel.Children.Add(ptt);
+        panel.Children.Add(pttRow);
+        var activity = new ToggleSwitch { Header = "Show what I'm playing", IsOn = store.PrefBool("showActivity", true) };
 
         // --- app ---
         panel.Children.Add(new TextBlock { Text = "App", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Margin = new Thickness(0, 8, 0, 0) });
         var tray = new ToggleSwitch { Header = "Close to the tray", IsOn = store.CloseToTray };
         var system = new ToggleSwitch { Header = "Windows notifications", IsOn = store.PrefBool("systemNotify", true) };
         var banners = new ToggleSwitch { Header = "In-app banners", IsOn = store.PrefBool("appNotify", true) };
+        panel.Children.Add(activity);
         panel.Children.Add(tray);
         panel.Children.Add(system);
         panel.Children.Add(banners);
@@ -93,7 +105,33 @@ public static class SettingsDialog
         {
             if (loading) return;
             _ = Try(App.Core.CallAsync("audio_processing", new JsonObject { ["aec"] = aec.IsOn, ["ns"] = ns.IsOn, ["agc"] = agc.IsOn }));
+            _ = store.SavePref("aec", aec.IsOn);
+            _ = store.SavePref("ns", ns.IsOn);
+            _ = store.SavePref("agc", agc.IsOn);
         }
+        void Ptt()
+        {
+            _ = Try(App.Core.CallAsync("voice_ptt", new JsonObject { ["enabled"] = ptt.IsOn, ["keyCode"] = pttKey }));
+            _ = store.SavePref("ptt", ptt.IsOn);
+            _ = store.SavePref("pttKey", pttKey);
+        }
+        ptt.Toggled += (_, _) => Ptt();
+        var capturing = false;
+        keyButton.Click += (_, _) => { capturing = true; keyButton.Content = "Press a key…"; };
+        keyButton.KeyDown += (_, e) =>
+        {
+            if (!capturing) return;
+            e.Handled = true;
+            capturing = false;
+            if (e.Key != Windows.System.VirtualKey.Escape) pttKey = (int)e.Key;
+            keyButton.Content = KeyName(pttKey);
+            Ptt();
+        };
+        activity.Toggled += (_, _) =>
+        {
+            _ = Try(App.Core.CallAsync("activity_sharing", new JsonObject { ["enabled"] = activity.IsOn }));
+            _ = store.SavePref("showActivity", activity.IsOn);
+        };
         input.SelectionChanged += (_, _) => Device(input, true);
         output.SelectionChanged += (_, _) => Device(output, false);
         aec.Toggled += (_, _) => Processing();

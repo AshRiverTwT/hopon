@@ -98,6 +98,27 @@ public sealed partial class Store
 
     public bool PrefBool(string key, bool fallback) => ReadBool(prefsJson, key, fallback);
 
+    public int PrefInt(string key, int fallback)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(prefsJson);
+            return doc.RootElement.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i) ? i : fallback;
+        }
+        catch (JsonException) { return fallback; }
+    }
+
+    /// <summary>Synced audio prefs → the core (same as the webview's applyToCore).</summary>
+    void ApplyToCore(string json)
+    {
+        _ = Try(core.CallAsync("audio_processing", new JsonObject
+        {
+            ["aec"] = ReadBool(json, "aec", true), ["ns"] = ReadBool(json, "ns", true), ["agc"] = ReadBool(json, "agc", true),
+        }));
+        _ = Try(core.CallAsync("voice_ptt", new JsonObject { ["enabled"] = ReadBool(json, "ptt", false), ["keyCode"] = PrefInt("pttKey", 0) }));
+        _ = Try(core.CallAsync("activity_sharing", new JsonObject { ["enabled"] = ReadBool(json, "showActivity", true) }));
+    }
+
     /// <summary>The close button hides to the tray (synced pref, default on).</summary>
     public bool CloseToTray { get; private set; } = true;
 
@@ -268,6 +289,7 @@ public sealed partial class Store
                 prefsJson = pe.Json;
                 notifyPrefs = NotifyPrefs.FromJson(pe.Json);
                 CloseToTray = ReadBool(pe.Json, "closeToTray", true);
+                ApplyToCore(pe.Json);
                 break;
             case IncomingMessageEvent im:
             {
