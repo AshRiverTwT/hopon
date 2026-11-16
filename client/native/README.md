@@ -81,3 +81,20 @@ WinUI reference assemblies: `scripts/native-check-linux.sh`.
   LZMA-compressed, like an installer) and a screenshot. Results are in the
   run's summary and the `native-app-results` artifact; the app itself is the
   `HopOn-native-preview` artifact.
+
+## First measurements (windows-latest CI runner, 2026-11-16)
+
+From `scripts/ci/measure-app.ps1`: a GitHub-hosted Windows VM (no GPU, WARP
+rendering), app published with Native AOT, **debug** core DLL, server on the
+same machine. Not a user's PC: treat as a smoke test of the targets, not the
+final numbers.
+
+| item | native WinUI | target (README) |
+|---|---|---|
+| process start → first frame, 5 runs | median 177 ms, worst 342 ms | < 1 s (Tauri: 657 ms) |
+| remote message → painted, 200 msgs at 20/s | p50 21.6 ms, p95 22.6 ms, p99 36 ms | < 100 ms LAN p95 |
+| idle CPU, 30 s | 0.12 % of all cores | < 1 % |
+| idle RAM | 68 MB private, 129 MB working set | < 200 MB (Tauri: 190 MB) |
+
+Size is being re-measured with the release core and without symbols (the
+first run's folder included a 30 MB `HopOn.pdb`).
