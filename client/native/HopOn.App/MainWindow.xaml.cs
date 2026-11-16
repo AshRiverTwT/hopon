@@ -36,6 +36,7 @@ public sealed partial class MainWindow : Window
         Store.Appended += ScrollToEnd;
         Store.Painted += MarkPainted;
         Store.TypingChanged += line => TypingText.Text = line;
+        Store.ComposerModeChanged += OnComposerModeChanged;
         toastTimer = dispatcher.CreateTimer();
         toastTimer.Interval = TimeSpan.FromSeconds(4);
         toastTimer.Tick += (_, _) => { Toast.IsOpen = false; toastTimer.Stop(); };
@@ -257,8 +258,37 @@ public sealed partial class MainWindow : Window
     void OnDeafen(object sender, RoutedEventArgs e) => _ = Store.SetDeafened(DeafenButton.IsChecked == true);
     void OnLeaveVoice(object sender, RoutedEventArgs e) => _ = Store.LeaveVoice();
 
+    void OnComposerModeChanged()
+    {
+        if (Store.Editing is { } ed)
+        {
+            ComposerBannerText.Text = "Editing your message (Enter to save, Esc to cancel)";
+            Composer.Text = ed.Content;
+            Composer.SelectionStart = Composer.Text.Length;
+        }
+        else if (Store.Replying is { } r)
+        {
+            ComposerBannerText.Text = $"Replying to {r.Author}: {Store.Preview(r)}";
+        }
+        ComposerBanner.Visibility = Store.Editing is null && Store.Replying is null ? Visibility.Collapsed : Visibility.Visible;
+        if (Store.Editing is null && Store.Replying is not null || Store.Editing is not null) Composer.Focus(FocusState.Programmatic);
+    }
+
+    void OnCancelComposerMode(object sender, RoutedEventArgs e)
+    {
+        var wasEditing = Store.Editing is not null;
+        Store.CancelComposerMode();
+        if (wasEditing) Composer.Text = "";
+    }
+
     void OnComposerKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (e.Key == VirtualKey.Escape && (Store.Editing is not null || Store.Replying is not null))
+        {
+            e.Handled = true;
+            OnCancelComposerMode(sender, e);
+            return;
+        }
         if (e.Key != VirtualKey.Enter) return;
         var shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift);
         if ((shift & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0) return;

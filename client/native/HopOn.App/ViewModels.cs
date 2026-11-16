@@ -101,6 +101,21 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public static string? MeId { get; set; }
     /// <summary>(message, emoji, add): set by the store.</summary>
     public static Action<MessageVm, string, bool>? ToggleReaction { get; set; }
+    /// <summary>(message, "reply" | "edit" | "delete"): set by the store.</summary>
+    public static Action<MessageVm, string>? Act { get; set; }
+
+    public bool IsMine => MeId is not null && AuthorId == MeId;
+    public Visibility MineVisibility => IsMine ? Visibility.Visible : Visibility.Collapsed;
+    public void Reply() => Act?.Invoke(this, "reply");
+    public void BeginEdit() => Act?.Invoke(this, "edit");
+    public void Delete() => Act?.Invoke(this, "delete");
+
+    string? replyTo;
+    string replyPreview = "";
+    public string? ReplyTo => replyTo;
+    /// <summary>"↪ name: first line" of the message this replies to (set by the store).</summary>
+    public string ReplyPreview { get => replyPreview; set { Set(ref replyPreview, value); Raise(nameof(ReplyVisibility)); } }
+    public Visibility ReplyVisibility => ReplyPreview.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
 
     List<Reaction> reactions = [];
     public ObservableCollection<ReactionVm> Chips { get; } = [];
@@ -176,6 +191,7 @@ public sealed partial class MessageVm : Observable, IMessageItem
         Ts = m.Ts;
         editedAt = m.EditedAt;
         Attachments = m.Attachments;
+        replyTo = m.ReplyTo;
         SetContentDerived(m.Content, m.Reactions);
     }
 

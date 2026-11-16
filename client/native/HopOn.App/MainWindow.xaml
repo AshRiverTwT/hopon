@@ -134,7 +134,16 @@
                     </ListView.ItemContainerStyle>
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:MessageVm">
-                            <StackPanel Padding="{x:Bind RowPadding, Mode=OneWay}" Opacity="{x:Bind Opacity, Mode=OneWay}">
+                            <StackPanel Padding="{x:Bind RowPadding, Mode=OneWay}" Opacity="{x:Bind Opacity, Mode=OneWay}" Background="Transparent">
+                                <StackPanel.ContextFlyout>
+                                    <MenuFlyout>
+                                        <MenuFlyoutItem Text="Reply" Click="{x:Bind Reply}" />
+                                        <MenuFlyoutItem Text="Edit" Click="{x:Bind BeginEdit}" Visibility="{x:Bind MineVisibility}" />
+                                        <MenuFlyoutItem Text="Delete" Click="{x:Bind Delete}" Visibility="{x:Bind MineVisibility}" />
+                                    </MenuFlyout>
+                                </StackPanel.ContextFlyout>
+                                <TextBlock Text="{x:Bind ReplyPreview, Mode=OneWay}" Visibility="{x:Bind ReplyVisibility, Mode=OneWay}"
+                                           FontSize="12" Opacity="0.6" TextTrimming="CharacterEllipsis" Margin="0,0,0,2" />
                                 <StackPanel Orientation="Horizontal" Spacing="8" Visibility="{x:Bind HeaderVisibility, Mode=OneWay}">
                                     <TextBlock Text="{x:Bind Author, Mode=OneWay}" FontWeight="SemiBold" />
                                     <TextBlock Text="{x:Bind Time}" FontSize="12" Opacity="0.55" VerticalAlignment="Bottom" />
@@ -186,8 +195,18 @@
                     </ListView.ItemTemplate>
                 </ListView>
 
-                <TextBox x:Name="Composer" Grid.Row="2" Margin="20,8,20,0" PlaceholderText="Message"
+                <StackPanel Grid.Row="2" Margin="20,8,20,0" Spacing="4">
+                <Grid x:Name="ComposerBanner" Visibility="Collapsed" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="ComposerBannerText" FontSize="12" Opacity="0.75" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Content="Cancel" Click="OnCancelComposerMode" FontSize="12" Padding="8,2" />
+                </Grid>
+                <TextBox x:Name="Composer" PlaceholderText="Message"
                          PreviewKeyDown="OnComposerKeyDown" TextChanged="OnComposerChanged" />
+                </StackPanel>
                 <TextBlock x:Name="TypingText" Grid.Row="3" Margin="22,4,20,8" FontSize="12" Opacity="0.7" MinHeight="16" />
             </Grid>
 

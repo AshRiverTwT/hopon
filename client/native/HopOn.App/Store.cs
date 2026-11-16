@@ -59,6 +59,12 @@ public sealed partial class Store
     public event Action<string>? Toast;
     /// <summary>Messages were added at the end (scroll to it if the user is at the bottom).</summary>
     public event Action? Appended;
+    /// <summary>The message being replied to / edited (composer banner).</summary>
+    public MessageVm? Replying { get; private set; }
+    public MessageVm? Editing { get; private set; }
+    public event Action? ComposerModeChanged;
+    public void CancelComposerMode() { Replying = null; Editing = null; ComposerModeChanged?.Invoke(); }
+
     /// <summary>The "… is typing" line changed.</summary>
     public event Action<string>? TypingChanged;
     /// <summary>Keys of messages changed in this batch (for perf_painted).</summary>
@@ -70,6 +76,15 @@ public sealed partial class Store
         this.core = core;
         RichView.NameOf = NameOf;
         MessageVm.ToggleReaction = (m, emoji, add) => _ = React(m, emoji, add);
+        MessageVm.Act = (m, what) =>
+        {
+            switch (what)
+            {
+                case "reply": Replying = m; Editing = null; ComposerModeChanged?.Invoke(); break;
+                case "edit" when m.IsMine && !MessageMerge.IsPending(m.Id): Editing = m; Replying = null; ComposerModeChanged?.Invoke(); break;
+                case "delete" when m.IsMine && !MessageMerge.IsPending(m.Id): _ = DeleteMessage(m); break;
+            }
+        };
     }
 
     /// <summary>From any thread.</summary>
@@ -324,8 +339,23 @@ public sealed partial class Store
         RefreshVoiceRows();
     }
 
+    public string Preview(MessageVm m)
+    {
+        var poll = Polls.Decode(m.Content);
+        var text = poll is not null ? "Poll: " + poll.Question : Rich.DecodeMentions(m.Content, NameOf);
+        text = string.Join(" ", text.Split((char[])['\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries)).Trim();
+        if (text.Length == 0 && m.Attachments.Count > 0) text = "📎 " + m.Attachments[0].Name;
+        return text.Length > 90 ? text[..89] + "…" : text;
+    }
+
     void RefreshHeaders()
     {
+        foreach (var m in Messages)
+        {
+            if (m.ReplyTo is null) { m.ReplyPreview = ""; continue; }
+            var i = MessageMerge.IndexOf(Messages, m.ReplyTo);
+            m.ReplyPreview = i >= 0 ? $"↪ {Messages[i].Author}: {Preview(Messages[i])}" : "↪ an earlier message";
+        }
         for (var i = 0; i < Messages.Count; i++)
         {
             var prev = i > 0 ? Messages[i - 1] : null;
@@ -476,6 +506,9 @@ public sealed partial class Store
         row.Unread = false;
         typers.Clear();
         TypingChanged?.Invoke("");
+        Replying = null;
+        Editing = null;
+        ComposerModeChanged?.Invoke();
         Messages.Clear();
         AtBottom = true;
         HasOlder = true;
@@ -543,17 +576,41 @@ public sealed partial class Store
         }
     }
 
+    async Task DeleteMessage(MessageVm m)
+    {
+        if (OpenChannel is null) return;
+        try { await core.CallAsync("delete_message", new JsonObject { ["channelId"] = OpenChannel.Id, ["id"] = m.Id }); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
+    }
+
+    async Task SaveEdit(MessageVm m, string text)
+    {
+        if (OpenChannel is null) return;
+        if (text == m.Content) return;
+        try { await core.CallAsync("edit_message", new JsonObject { ["channelId"] = OpenChannel.Id, ["id"] = m.Id, ["content"] = text }); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
+    }
+
     public void Send(string text, double tInputMs)
     {
         text = text.Trim();
         if (text.Length == 0 || OpenChannel is null || Me is null) return;
+        if (Editing is { } editing)
+        {
+            Editing = null;
+            ComposerModeChanged?.Invoke();
+            _ = SaveEdit(editing, text);
+            return;
+        }
+        var replyTo = Replying is { } r && !MessageMerge.IsPending(r.Id) ? r.Id : null;
+        if (Replying is not null) { Replying = null; ComposerModeChanged?.Invoke(); }
         var channelId = OpenChannel.Id;
         var nonce = RandomNonce();
         var pending = new Msg
         {
             Id = "p" + nonce, ChannelId = channelId, AuthorId = Me.Id, Content = text, EditedAt = null,
             Ts = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Nonce = nonce, State = 0,
-            ReplyTo = null, Reactions = [], Attachments = [],
+            ReplyTo = replyTo, Reactions = [], Attachments = [],
         };
         var painted = MessageMerge.Merge(Messages, [pending], Row);
         RefreshHeaders();
@@ -563,7 +620,7 @@ public sealed partial class Store
         core.CallAsync("send_message", new JsonObject
         {
             ["channelId"] = channelId, ["content"] = text, ["nonce"] = nonce, ["tInputMs"] = tInputMs,
-            ["replyTo"] = null, ["files"] = new JsonArray(), ["gifs"] = new JsonArray(),
+            ["replyTo"] = replyTo, ["files"] = new JsonArray(), ["gifs"] = new JsonArray(),
         }).ContinueWith(t =>
         {
             if (!t.IsFaulted) return;
