@@ -52,6 +52,16 @@ $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
 $bmp.Save((Join-Path $Out "screenshot.png"))
+# A small copy in the log (base64 JPEG), for reviewers who can't download artifacts.
+$small = New-Object System.Drawing.Bitmap $bmp, ([int]($b.Width / 2)), ([int]($b.Height / 2))
+$jpeg = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq "image/jpeg" }
+$ep = New-Object System.Drawing.Imaging.EncoderParameters 1
+$ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), 55L
+$ms = New-Object System.IO.MemoryStream
+$small.Save($ms, $jpeg, $ep)
+Write-Host "SCREENSHOT-BASE64-BEGIN"
+Write-Host ([Convert]::ToBase64String($ms.ToArray()))
+Write-Host "SCREENSHOT-BASE64-END"
 if (Test-Path $dump) {
   $d = Get-Content $dump | ConvertFrom-Json
   foreach ($r in $d.rows) {
@@ -69,17 +79,18 @@ $summary += "| idle CPU, 30 s | $([math]::Round($cpu, 3)) % of all cores |"
 $summary += "| idle RAM | private $([math]::Round($app.PrivateMemorySize64 / 1MB, 1)) MB, working set $([math]::Round($app.WorkingSet64 / 1MB, 1)) MB |"
 $app.Kill()
 
-# --- size (without hopon_ffi.dll: CI uses a debug core; the release DLL is measured separately) ---
-$files = Get-ChildItem $AppDir -Recurse -File | Where-Object { $_.Name -ne "hopon_ffi.dll" }
+# --- size (the published folder ships the release core DLL) ---
+$files = Get-ChildItem $AppDir -Recurse -File | Where-Object { $_.Extension -ne ".pdb" }
 $size = ($files | Measure-Object Length -Sum).Sum
-$summary += "| published app without the core DLL | $([math]::Round($size / 1MB, 1)) MB uncompressed |"
+$core = Get-Item (Join-Path $AppDir "hopon_ffi.dll") -ErrorAction SilentlyContinue
+$summary += "| published app (all files, no symbols) | $([math]::Round($size / 1MB, 1)) MB uncompressed, of which core DLL $([math]::Round($core.Length / 1MB, 1)) MB |"
 $stage = Join-Path $env:RUNNER_TEMP "size-stage"
 New-Item -ItemType Directory -Force $stage | Out-Null
 Copy-Item "$AppDir\*" $stage -Recurse -Force
-Remove-Item (Join-Path $stage "hopon_ffi.dll") -ErrorAction SilentlyContinue
+Get-ChildItem $stage -Recurse -Filter *.pdb | Remove-Item
 $zip = Join-Path $env:RUNNER_TEMP "app.7z"
 & 7z a -t7z -m0=lzma2 -mx=9 $zip "$stage\*" | Out-Null
-$summary += "| same, LZMA2 (installer-like) | **$([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB** |"
+$summary += "| same, LZMA2 -mx9 (installer estimate) | **$([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB** (target < 30 MB) |"
 $summary += ""
 $summary += "Largest files:"
 $summary += ""

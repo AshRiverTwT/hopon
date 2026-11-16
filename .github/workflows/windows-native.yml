@@ -58,6 +58,12 @@ jobs:
           cargo build -p hopon-ffi -p hopon-server
           cargo build -p hopon-bench --bin e2e_feed
 
+      - name: Build the release hopon_ffi.dll (what ships with the app)
+        run: |
+          cargo build --release -p hopon-ffi
+          New-Item -ItemType Directory -Force target\ship | Out-Null
+          Copy-Item target\release\hopon_ffi.dll target\ship\
+
       - name: C# bindings are current
         shell: bash
         run: git diff --exit-code client/ffi/bindings/
@@ -70,6 +76,7 @@ jobs:
             target/debug/hopon_ffi.dll
             target/debug/hopon-server.exe
             target/debug/e2e_feed.exe
+            target/ship/hopon_ffi.dll
           retention-days: 7
 
       - name: Model tests (C# models vs Rust fixtures, merge, formatting, polls)
@@ -100,15 +107,15 @@ jobs:
         shell: pwsh
         working-directory: client/native/HopOn.BridgeCheck
         run: |
-          & "$env:GITHUB_WORKSPACE\scripts\ci\start-server.ps1" -ServerExe "$env:RUNNER_TEMP\rust-bin\hopon-server.exe"
+          & "$env:GITHUB_WORKSPACE\scripts\ci\start-server.ps1" -ServerExe "$env:RUNNER_TEMP\rust-bin\debug\hopon-server.exe"
           $env:HOPON_URL = "ws://127.0.0.1:18080/ws"
           $env:RUST_LOG = "info,livekit=warn,libwebrtc=warn"
           dotnet build -c Debug -warnaserror
-          Copy-Item "$env:RUNNER_TEMP\rust-bin\hopon_ffi.dll" bin\Debug\net10.0\
+          Copy-Item "$env:RUNNER_TEMP\rust-bin\debug\hopon_ffi.dll" bin\Debug\net10.0\
           dotnet bin\Debug\net10.0\HopOn.BridgeCheck.dll owner "$env:RUNNER_TEMP\bridge"
           if ($LASTEXITCODE -ne 0) { throw "bridge check failed ($LASTEXITCODE)" }
           dotnet publish -c Release -r win-x64 -p:PublishAot=true -o "$env:RUNNER_TEMP\aot"
-          Copy-Item "$env:RUNNER_TEMP\rust-bin\hopon_ffi.dll" "$env:RUNNER_TEMP\aot\"
+          Copy-Item "$env:RUNNER_TEMP\rust-bin\debug\hopon_ffi.dll" "$env:RUNNER_TEMP\aot\"
           & "$env:RUNNER_TEMP\aot\HopOn.BridgeCheck.exe" owner "$env:RUNNER_TEMP\bridge-aot"
           if ($LASTEXITCODE -ne 0) { throw "AOT bridge check failed ($LASTEXITCODE)" }
 
@@ -136,20 +143,20 @@ jobs:
       - name: Build the WinUI app
         shell: pwsh
         working-directory: client/native/HopOn.App
-        run: dotnet build -c Debug -p:HoponFfiDll="$env:RUNNER_TEMP\rust-bin\hopon_ffi.dll"
+        run: dotnet build -c Debug -p:HoponFfiDll="$env:RUNNER_TEMP\rust-bin\debug\hopon_ffi.dll"
 
       - name: Publish (self-contained, Native AOT)
         shell: pwsh
         working-directory: client/native/HopOn.App
         run: |
-          dotnet publish -c Release -p:HoponFfiDll="$env:RUNNER_TEMP\rust-bin\hopon_ffi.dll" -o "$env:RUNNER_TEMP\HopOn"
+          dotnet publish -c Release -p:HoponFfiDll="$env:RUNNER_TEMP\rust-bin\ship\hopon_ffi.dll" -o "$env:RUNNER_TEMP\HopOn"
           Get-ChildItem "$env:RUNNER_TEMP\HopOn" | Sort-Object Length -Descending | Select-Object -First 15 | Format-Table Name, Length
 
       - name: Run and measure the app (against a server on the runner)
         shell: pwsh
         run: |
-          scripts\ci\start-server.ps1 -ServerExe "$env:RUNNER_TEMP\rust-bin\hopon-server.exe"
-          scripts\ci\measure-app.ps1 -AppDir "$env:RUNNER_TEMP\HopOn" -E2eFeed "$env:RUNNER_TEMP\rust-bin\e2e_feed.exe" -Out "$env:RUNNER_TEMP\results"
+          scripts\ci\start-server.ps1 -ServerExe "$env:RUNNER_TEMP\rust-bin\debug\hopon-server.exe"
+          scripts\ci\measure-app.ps1 -AppDir "$env:RUNNER_TEMP\HopOn" -E2eFeed "$env:RUNNER_TEMP\rust-bin\debug\e2e_feed.exe" -Out "$env:RUNNER_TEMP\results"
 
       - name: Upload results
         if: always()
@@ -159,7 +166,7 @@ jobs:
           path: ${{ runner.temp }}\results
           retention-days: 14
 
-      - name: Upload the app (debug core; for trying it out)
+      - name: Upload the app (release build; for trying it out)
         if: success()
         uses: actions/upload-artifact@v4
         with:

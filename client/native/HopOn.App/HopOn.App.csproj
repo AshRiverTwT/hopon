@@ -21,6 +21,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Native AOT on publish: fast start, no JIT, smaller download. -->
     <PublishAot>true</PublishAot>
+    <!-- Symbols stay out of the shipped folder (30 MB of HopOn.pdb otherwise). -->
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
     <Version>0.8.1</Version>
   </PropertyGroup>
 
