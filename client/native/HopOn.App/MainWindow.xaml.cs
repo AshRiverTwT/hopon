@@ -28,6 +28,15 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
 
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1200, 780));
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "HopOn.ico");
+        if (File.Exists(iconPath)) AppWindow.SetIcon(iconPath);
+        if (!App.PerfExit && File.Exists(iconPath))
+        {
+            tray = new TrayIcon(iconPath, "HopOn");
+            tray.Open += ShowFromTray;
+            tray.Quit += () => _ = QuitApp();
+        }
+        AppWindow.Closing += OnClosing;
         App.Host.SetWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
         AppWindow.Changed += OnAppWindowChanged;
 
@@ -55,6 +64,48 @@ public sealed partial class MainWindow : Window
 
         CompositionTarget.Rendering += OnFirstFrame;
         _ = LoadConfig();
+    }
+
+    // ---------- tray ----------
+
+    TrayIcon? tray;
+    bool quitting;
+
+    void OnClosing(AppWindow sender, AppWindowClosingEventArgs e)
+    {
+        if (quitting) return;
+        if (Store.CloseToTray && tray is not null)
+        {
+            // Hide: voice, notifications and hotkeys keep working.
+            e.Cancel = true;
+            AppWindow.Hide();
+            App.Host.SetHidden(true);
+            _ = App.Core.CallAsync("ui_set_visibility", new JsonObject { ["visible"] = false });
+            return;
+        }
+        e.Cancel = true;
+        _ = QuitApp();
+    }
+
+    void ShowFromTray()
+    {
+        AppWindow.Show();
+        if (AppWindow.Presenter is OverlappedPresenter p && p.State == OverlappedPresenterState.Minimized) p.Restore();
+        Activate();
+        App.Host.SetHidden(false);
+        _ = App.Core.CallAsync("ui_set_visibility", new JsonObject { ["visible"] = true });
+    }
+
+    /// <summary>Quit for real: leave voice cleanly (≤ 800 ms), then exit; 3 s at most in all.</summary>
+    async Task QuitApp()
+    {
+        if (quitting) return;
+        quitting = true;
+        _ = Task.Run(async () => { await Task.Delay(3000); Environment.Exit(0); });
+        try { await App.Core.CallAsync("voice_leave").WaitAsync(TimeSpan.FromMilliseconds(800)); }
+        catch (Exception) { }
+        tray?.Dispose();
+        Environment.Exit(0);
     }
 
     // ---------- instrumentation (same protocol as the webview) ----------

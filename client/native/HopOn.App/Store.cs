@@ -77,6 +77,19 @@ public sealed partial class Store
     public bool Looking { get; set; } = true;
     public Status? MyStatus { get; private set; }
 
+    /// <summary>The close button hides to the tray (synced pref, default on).</summary>
+    public bool CloseToTray { get; private set; } = true;
+
+    static bool ReadBool(string json, string key, bool fallback)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.TryGetProperty(key, out var v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False ? v.GetBoolean() : fallback;
+        }
+        catch (JsonException) { return fallback; }
+    }
+
     /// <summary>The "… is typing" line changed.</summary>
     public event Action<string>? TypingChanged;
     /// <summary>Keys of messages changed in this batch (for perf_painted).</summary>
@@ -220,6 +233,7 @@ public sealed partial class Store
                 break;
             case PrefsEvent pe:
                 notifyPrefs = NotifyPrefs.FromJson(pe.Json);
+                CloseToTray = ReadBool(pe.Json, "closeToTray", true);
                 break;
             case IncomingMessageEvent im:
             {
