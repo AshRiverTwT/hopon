@@ -96,6 +96,12 @@ on the same machine. Not a user's PC: a check of the targets, not final numbers.
 | idle RAM | 68–71 MB private, 129 MB working set | < 200 MB | 190 MB private |
 | installer estimate (LZMA2 of everything shipped) | 21.8 MB | < 30 MB | 10.5 MB |
 
+After the feature batches (run 35: chat, voice UI, attachments, GIFs, polls,
+notifications, tray, settings, owner tools): start → first frame median
+233 ms (worst 356), remote message → painted p95 25.5 ms, idle CPU 0.07 %,
+idle private RAM 81 MB (97 MB before rows created their optional parts and
+menus lazily), installer estimate 22.3 MB.
+
 Where the size goes (uncompressed, 92.7 MB): the core DLL (libwebrtc) 27.2 MB,
 WinUI/Windows App SDK runtime ~50 MB (`Microsoft.ui.xaml.dll` 14.5 MB, Controls
 7.1 MB, composition DLLs ~9 MB), `HopOn.exe` (Native AOT) 7.4 MB.
