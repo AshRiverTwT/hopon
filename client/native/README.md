@@ -108,7 +108,7 @@ PC = needs a person on a real PC to check (audio, devices, look and feel).
 | feature | native | notes |
 |---|---|---|
 | sign in / sign up, saved sign-in, server URL | built, CI | shares the Tauri build's data folder |
-| servers, text channels, topics | built, CI | |
+| servers, text channels, topics; create/join servers, invites, create channels | built, CI (browsing) | |
 | messages: send, optimistic copy, delivery state | built, CI | e2e_feed measures paint latency |
 | edit / delete own, replies with quote | built, CI | context menu; jump-to-message not yet |
 | reactions (toggle, quick React menu) | built, CI | full emoji picker not yet |
@@ -117,20 +117,20 @@ PC = needs a person on a real PC to check (audio, devices, look and feel).
 | formatting (bold, italic, strike, code, links) | built, tested | Rich.cs ≡ rich.ts on 4552 inputs |
 | attachments: images inline, files, + to upload, paste, drag-and-drop | built | videos as links |
 | GIFs (KLIPY search) | built | |
-| polls (show, vote) | built, tested | creating polls not yet |
+| polls (show, vote, create) | built, tested | |
 | unread markers, "new messages" divider, day separators | built, tested | |
 | load older history on scroll | built | |
 | presence, people column, "Playing …", status | built, CI | set your status: right-click your name |
 | notifications: banners, Windows notifications, per-channel bell | built, tested | |
 | voice: join/leave, mute/deafen, who's speaking | built, CI (compiles) | PC: audio path untested (no SFU in CI) |
 | audio devices, echo/noise/gain | built | PC |
-| push-to-talk | built | PC; other hotkeys not yet |
+| push-to-talk; in-app shortcuts (channel/unread/server, Ctrl+T, mute, deafen) | built | PC; rebinding and global hotkeys not yet |
 | per-person voice volume | not yet | core: voice_volume |
 | screen share / camera | not yet | decision pending: native vs WebView2 |
 | in-game overlay | not yet | |
 | games panel | not yet | plan: WebView2 (it shows the games' websites) |
 | close to tray, tray menu | built, CI (compiles) | |
-| profile pictures | built | profile cards and editor not yet |
+| profile pictures, profile cards | built | profile editor not yet |
 | server settings (owner) | not yet | |
 | friends, DMs | not yet | DM servers are hidden for now |
 | updates (latest.json) | not yet | core: update_check / update_install |

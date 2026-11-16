@@ -724,6 +724,29 @@ public sealed partial class Store
         }
     }
 
+    // ---------- keyboard navigation ----------
+
+    /// <summary>Next/previous text channel (unreadOnly: only unread ones), wrapping.</summary>
+    public Task StepChannel(int dir, bool unreadOnly)
+    {
+        var list = Channels.Where(c => !c.Voice).ToList();
+        if (list.Count == 0) return Task.CompletedTask;
+        var i = OpenChannel is null ? -1 : list.IndexOf(OpenChannel);
+        for (var n = 1; n <= list.Count; n++)
+        {
+            var c = list[((i + dir * n) % list.Count + list.Count) % list.Count];
+            if (!unreadOnly || c.Unread) return OpenChannelRow(c);
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task StepServer(int dir)
+    {
+        if (Servers.Count == 0) return Task.CompletedTask;
+        var i = OpenServer is null ? -1 : Servers.IndexOf(OpenServer);
+        return SelectServer(Servers[((i + dir) % Servers.Count + Servers.Count) % Servers.Count]);
+    }
+
     // ---------- servers ----------
 
     public bool IsOwner => OpenServer is not null && Me is not null && ownerOf.GetValueOrDefault(OpenServer.Id) == Me.Id;

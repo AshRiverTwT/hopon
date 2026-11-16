@@ -63,9 +63,36 @@ public sealed partial class MainWindow : Window
         App.Core.Subscribe("main", (UiEvent e) => Store.Enqueue(e));
 
         GifButton.Flyout = GifFlyout.Create(Store, NowMs);
+        AddShortcuts();
         MessageVm.ShowProfileAction = (userId, anchor) => _ = ShowProfileCard(userId, anchor);
         CompositionTarget.Rendering += OnFirstFrame;
         _ = LoadConfig();
+    }
+
+    // ---------- keyboard shortcuts (the README's defaults) ----------
+
+    void AddShortcuts()
+    {
+        void Add(VirtualKey key, Windows.System.VirtualKeyModifiers mods, Action act)
+        {
+            var a = new KeyboardAccelerator { Key = key, Modifiers = mods };
+            a.Invoked += (_, e) => { e.Handled = true; act(); };
+            Root.KeyboardAccelerators.Add(a);
+        }
+        var alt = Windows.System.VirtualKeyModifiers.Menu;
+        var shift = Windows.System.VirtualKeyModifiers.Shift;
+        var ctrl = Windows.System.VirtualKeyModifiers.Control;
+        Add(VirtualKey.Down, alt, () => _ = Store.StepChannel(1, false));
+        Add(VirtualKey.Up, alt, () => _ = Store.StepChannel(-1, false));
+        Add(VirtualKey.Down, alt | shift, () => _ = Store.StepChannel(1, true));
+        Add(VirtualKey.Up, alt | shift, () => _ = Store.StepChannel(-1, true));
+        Add(VirtualKey.Down, ctrl | alt, () => _ = Store.StepServer(1));
+        Add(VirtualKey.Up, ctrl | alt, () => _ = Store.StepServer(-1));
+        Add(VirtualKey.T, ctrl, () => Composer.Focus(FocusState.Keyboard));
+        Add(VirtualKey.M, ctrl | shift, () => { if (Store.MyVoice is { State: not "idle" } v) _ = Store.SetMuted(!v.Muted); });
+        Add(VirtualKey.D, ctrl | shift, () => { if (Store.MyVoice is { State: not "idle" } v) _ = Store.SetDeafened(!v.Deafened); });
+        // Shortcuts work everywhere, but don't advertise tooltips on the root.
+        Root.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
     }
 
     // ---------- tray ----------
