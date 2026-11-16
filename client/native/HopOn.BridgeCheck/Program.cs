@@ -25,7 +25,8 @@ var failures = 0;
 void Pass(string what) => Console.WriteLine($"[{role}] ok   {what}");
 void Fail(string what) { failures++; Console.WriteLine($"[{role}] FAIL {what}"); }
 
-Console.WriteLine($"[{role}] hopon_ffi {HopOnCore.NativeVersion}");
+Console.WriteLine($"[{role}] hopon_ffi {HopOnCore.NativeVersion}, server {Environment.GetEnvironmentVariable("HOPON_URL")}");
+if (Environment.GetEnvironmentVariable("RUST_LOG") is not null) HopOnCore.InitLogging();
 var events = new BlockingCollection<JsonElement>();
 var core = HopOnCore.Start(new Host(), Path.Combine(work, role + "-data"));
 // Every live event must also parse with the strict typed models.
@@ -43,12 +44,21 @@ core.Subscribe("main", (JsonElement ev) =>
     events.Add(ev);
 });
 
-// Wait for an event matching `pred` (other events are skipped).
+// Wait for an event matching `pred` (other events are skipped; the last few
+// are printed if nothing matches, to show what did arrive).
 JsonElement? WaitFor(Func<JsonElement, bool> pred)
 {
     var until = DateTime.UtcNow + timeout;
+    var skipped = new List<string>();
     while (DateTime.UtcNow < until)
-        if (events.TryTake(out var ev, 200) && pred(ev)) return ev;
+    {
+        if (!events.TryTake(out var ev, 200)) continue;
+        if (pred(ev)) return ev;
+        var raw = ev.GetRawText();
+        skipped.Add(raw.Length > 300 ? raw[..300] + "…" : raw);
+    }
+    Console.WriteLine($"[{role}] timed out; {skipped.Count} other event(s):");
+    foreach (var s in skipped.TakeLast(8)) Console.WriteLine($"    {s}");
     return null;
 }
 static string T(JsonElement e) => e.GetProperty("t").GetString() ?? "";

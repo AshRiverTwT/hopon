@@ -45,6 +45,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: windows-native
+          cache-on-failure: true
 
       - name: Build hopon_ffi.dll (voice), hopon-server, e2e_feed
         run: cargo build -p hopon-ffi -p hopon-server -p hopon-bench --bin e2e_feed
@@ -81,7 +82,10 @@ jobs:
         run: |
           dotnet build -c Debug -warnaserror
           Copy-Item ..\..\..\target\debug\hopon_ffi.dll bin\Debug\net10.0\
+          Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18080/health | Select-Object StatusCode, Content
+          Get-Process hopon-server -ErrorAction SilentlyContinue | Format-Table Id, StartTime
           $env:HOPON_URL = "ws://127.0.0.1:18080/ws"
+          $env:RUST_LOG = "info,livekit=warn,libwebrtc=warn"
           dotnet bin\Debug\net10.0\HopOn.BridgeCheck.dll owner "$env:RUNNER_TEMP\bridge"
           if ($LASTEXITCODE -ne 0) { throw "bridge check failed ($LASTEXITCODE)" }
 
