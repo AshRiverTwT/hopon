@@ -215,8 +215,10 @@ public sealed partial class MainWindow : Window
             "incompatible" => "Update needed",
             _ => "Offline, reconnecting…",
         };
-        ServerTitle.Text = Store.OpenServer?.Name ?? "";
-        ServerMenuButton.Visibility = Store.OpenServer is null ? Visibility.Collapsed : Visibility.Visible;
+        ServerTitle.Text = Store.HomeMode ? "Friends" : Store.OpenServer?.Name ?? "";
+        FriendsPanel.Visibility = Store.HomeMode ? Visibility.Visible : Visibility.Collapsed;
+        ChannelList.Visibility = Store.HomeMode ? Visibility.Collapsed : Visibility.Visible;
+        ServerMenuButton.Visibility = Store.OpenServer is null || Store.HomeMode ? Visibility.Collapsed : Visibility.Visible;
         CreateChannelItem.Visibility = Store.IsOwner ? Visibility.Visible : Visibility.Collapsed;
         ServerSettingsItem.Visibility = Store.IsOwner ? Visibility.Visible : Visibility.Collapsed;
         ChannelVm.OwnerTools = Store.IsOwner;
@@ -426,6 +428,19 @@ public sealed partial class MainWindow : Window
             PrimaryButtonText = ok, CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary,
         };
         return await dialog.ShowAsync() == ContentDialogResult.Primary && box.Text.Trim().Length > 0 ? box.Text.Trim() : null;
+    }
+
+    void OnHome(object sender, RoutedEventArgs e)
+    {
+        syncing = true;
+        ServerList.SelectedItem = null;
+        syncing = false;
+        Store.ShowHome();
+    }
+
+    async void OnAddFriend(object sender, RoutedEventArgs e)
+    {
+        if (await Ask("Add a friend", "Their username", "username", "Send request") is { } name) await Store.AddFriend(name);
     }
 
     async void OnCreateServer(object sender, RoutedEventArgs e)

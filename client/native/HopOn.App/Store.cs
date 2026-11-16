@@ -30,6 +30,10 @@ public sealed partial class Store
     public ObservableCollection<ChannelVm> Channels { get; } = [];
     public ObservableCollection<MessageVm> Messages { get; } = [];
     public ObservableCollection<MemberVm> Members { get; } = [];
+    public ObservableCollection<FriendVm> Friends { get; } = [];
+    /// <summary>The Friends view is showing (channel column lists friends; the chat is a DM).</summary>
+    public bool HomeMode { get; private set; }
+    readonly Dictionary<string, ServerVm> dmByUser = [];
     /// <summary>Files chosen for the next message (uploaded as soon as they're picked).</summary>
     public ObservableCollection<PendingFileVm> PendingFiles { get; } = [];
     const int MaxFiles = 10;
@@ -166,6 +170,16 @@ public sealed partial class Store
         this.ui = ui;
         this.core = core;
         RichView.NameOf = NameOf;
+        FriendVm.Act = (f, what) =>
+        {
+            switch (what)
+            {
+                case "open": _ = OpenDm(f.UserId); break;
+                case "accept": _ = Do("friend_respond", new JsonObject { ["userId"] = f.UserId, ["accept"] = true }); break;
+                case "remove": _ = Do(f.State == "incoming" ? "friend_respond" : "friend_remove",
+                    f.State == "incoming" ? new JsonObject { ["userId"] = f.UserId, ["accept"] = false } : new JsonObject { ["userId"] = f.UserId }); break;
+            }
+        };
         avatars = new Avatars(core);
         avatars.Loaded += userId =>
         {
@@ -231,6 +245,15 @@ public sealed partial class Store
             case ServerEvent s:
                 UpsertServer(s.Server);
                 changed = true;
+                break;
+            case FriendEvent fe:
+                users[fe.Friend.User.Id] = fe.Friend.User;
+                UpsertFriend(fe.Friend);
+                if (fe.Friend.State == "incoming") Toast?.Invoke($"{fe.Friend.User.Name} sent you a friend request");
+                break;
+            case FriendRemovedEvent fr:
+                var gone2 = Friends.FirstOrDefault(x => x.UserId == fr.UserId);
+                if (gone2 is not null) Friends.Remove(gone2);
                 break;
             case ChannelCreatedEvent c:
                 if (serverById.TryGetValue(c.Channel.ServerId, out var sv))
@@ -421,6 +444,9 @@ public sealed partial class Store
             OpenChannel = null;
             return;
         }
+        foreach (var dm in s.Servers.Where(x => x.DmWith is not null)) UpsertServer(dm);
+        Friends.Clear();
+        foreach (var f in s.Friends) UpsertFriend(f);
         var keep = new HashSet<string>();
         foreach (var sv in s.Servers.Where(x => x.DmWith is null))
         {
@@ -432,12 +458,24 @@ public sealed partial class Store
             Servers.Remove(gone);
             serverById.Remove(gone.Id);
         }
-        if (OpenServer is null || !serverById.ContainsKey(OpenServer.Id)) _ = SelectServer(Servers.FirstOrDefault());
+        if (!HomeMode && (OpenServer is null || !serverById.ContainsKey(OpenServer.Id))) _ = SelectServer(Servers.FirstOrDefault());
     }
 
     void UpsertServer(Server s)
     {
-        if (s.DmWith is not null) return;
+        if (s.DmWith is not null)
+        {
+            // A direct message: a hidden two-person server, reached from Friends.
+            if (!serverById.TryGetValue(s.Id, out var dm)) serverById[s.Id] = dm = new ServerVm { Id = s.Id };
+            dm.Name = NameOf(s.DmWith);
+            dm.Channels = s.Channels;
+            dm.Reads = new Dictionary<string, string>(s.Reads);
+            foreach (var id in s.MemberIds) dm.MemberIds.Add(id);
+            ownerOf[s.Id] = s.OwnerId;
+            dmByUser[s.DmWith] = dm;
+            if (OpenServer == dm) SyncChannels(dm, s);
+            return;
+        }
         if (!serverById.TryGetValue(s.Id, out var vm))
         {
             vm = new ServerVm { Id = s.Id };
@@ -454,7 +492,7 @@ public sealed partial class Store
         foreach (var (k, v) in s.Statuses) statuses[k] = v;
         membersDirty = true;
         if (OpenServer == vm) SyncChannels(vm, s);
-        else if (OpenServer is null && View == View.Shell) _ = SelectServer(vm);
+        else if (OpenServer is null && View == View.Shell && !HomeMode) _ = SelectServer(vm);
     }
 
     ChannelVm ChannelRow(Channel c) => new() { Id = c.Id, Voice = c.Voice, Name = c.Name, Topic = c.Topic };
@@ -616,6 +654,7 @@ public sealed partial class Store
 
     public async Task SelectServer(ServerVm? vm)
     {
+        HomeMode = false;
         OpenServer = vm;
         Channels.Clear();
         Members.Clear(); // rebuilt for this server (owner-only items read OwnerTools once)
@@ -749,6 +788,48 @@ public sealed partial class Store
         var i = OpenServer is null ? -1 : Servers.IndexOf(OpenServer);
         return SelectServer(Servers[((i + dir) % Servers.Count + Servers.Count) % Servers.Count]);
     }
+
+    // ---------- friends and direct messages ----------
+
+    void UpsertFriend(Friend f)
+    {
+        users[f.User.Id] = f.User;
+        var vm = Friends.FirstOrDefault(x => x.UserId == f.User.Id);
+        if (vm is null)
+        {
+            vm = new FriendVm { UserId = f.User.Id, Username = f.Username };
+            // Requests first, then friends, by name.
+            var at = 0;
+            while (at < Friends.Count && Order(Friends[at].State) <= Order(f.State)) at++;
+            Friends.Insert(at, vm);
+        }
+        vm.Name = f.User.Name;
+        vm.State = f.State;
+        static int Order(string st) => st switch { "incoming" => 0, "outgoing" => 1, _ => 2 };
+    }
+
+    public void ShowHome()
+    {
+        HomeMode = true;
+        OpenServer = null;
+        Channels.Clear();
+        Members.Clear();
+        Changed?.Invoke();
+    }
+
+    public async Task OpenDm(string userId)
+    {
+        if (!dmByUser.TryGetValue(userId, out var dm)) { Toast?.Invoke("You can message friends once they accept"); return; }
+        HomeMode = true;
+        OpenServer = dm;
+        SyncChannels(dm);
+        RebuildMembers();
+        Changed?.Invoke();
+        var first = Channels.FirstOrDefault(c => !c.Voice);
+        if (first is not null) await OpenChannelRow(first);
+    }
+
+    public Task AddFriend(string username) => Do("friend_request", new JsonObject { ["username"] = username.Trim().TrimStart('@') });
 
     // ---------- servers ----------
 

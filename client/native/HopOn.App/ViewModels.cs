@@ -32,6 +32,26 @@ public sealed partial class ServerVm : Observable
     public Dictionary<string, string> Reads { get; set; } = [];
 }
 
+/// <summary>A friend or a pending request (Friends view).</summary>
+public sealed partial class FriendVm : Observable
+{
+    string state = "";
+    string name = "";
+    public required string UserId { get; init; }
+    public required string Username { get; init; }
+    public string Name { get => name; set => Set(ref name, value); }
+    /// <summary>"friends" | "incoming" | "outgoing".</summary>
+    public string State { get => state; set { Set(ref state, value); Raise(nameof(Detail)); Raise(nameof(AcceptVisibility)); Raise(nameof(RemoveLabel)); } }
+    public string Detail => State switch { "incoming" => "Wants to be friends", "outgoing" => "Request sent", _ => "@" + Username };
+    public Visibility AcceptVisibility => State == "incoming" ? Visibility.Visible : Visibility.Collapsed;
+    public string RemoveLabel => State switch { "incoming" => "Decline", "outgoing" => "Cancel", _ => "Remove" };
+    /// <summary>(friend, "open" | "accept" | "remove"): set by the store.</summary>
+    public static Action<FriendVm, string>? Act { get; set; }
+    public void Open() => Act?.Invoke(this, "open");
+    public void Accept() => Act?.Invoke(this, "accept");
+    public void Remove() => Act?.Invoke(this, "remove");
+}
+
 /// <summary>A row of the people column.</summary>
 public sealed partial class MemberVm : Observable
 {
