@@ -11,7 +11,7 @@ trap 'rm -rf "$S"' EXIT
 python3 - "$APP" "$S" <<'PY'
 import re, sys, glob, os
 app, out = sys.argv[1], sys.argv[2]
-stubs = ["using Microsoft.UI.Xaml.Controls;"]
+stubs = ["using Microsoft.UI.Xaml.Controls;", "using Microsoft.UI.Xaml.Controls.Primitives;", "using Microsoft.UI.Xaml.Shapes;", "using Microsoft.UI.Xaml.Documents;"]
 for xaml in glob.glob(os.path.join(app, "*.xaml")):
     x = open(xaml).read()
     cls = re.search(r'x:Class="([\w.]+)\.(\w+)"', x)

@@ -57,6 +57,10 @@ public sealed partial class ChannelVm : Observable
     public string Name { get => name; set { Set(ref name, value); Raise(nameof(Label)); } }
     public string Topic { get => topic; set => Set(ref topic, value); }
     public string Label => (Voice ? "🔊 " : "# ") + Name;
+    string participants = "";
+    /// <summary>Voice rooms: who's in it ("● " marks who's speaking).</summary>
+    public string Participants { get => participants; set { Set(ref participants, value); Raise(nameof(ParticipantsVisibility)); } }
+    public Visibility ParticipantsVisibility => Participants.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
     public bool Unread { get => unread; set { Set(ref unread, value); Raise(nameof(LabelOpacity)); } }
     public double LabelOpacity => Unread ? 1.0 : 0.72;
 }

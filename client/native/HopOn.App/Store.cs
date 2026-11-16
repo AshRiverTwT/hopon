@@ -36,6 +36,12 @@ public sealed partial class Store
     readonly Dictionary<string, Status> statuses = [];
     bool membersDirty;
 
+    // Voice: who is in which room (user → presence), who's speaking, and your own connection.
+    readonly Dictionary<string, Presence> voice = [];
+    HashSet<string> speaking = [];
+    bool voiceDirty;
+    public VoiceEvent? MyVoice { get; private set; }
+
     public View View { get; private set; } = View.Splash;
     public User? Me { get; private set; }
     public string ConnState { get; private set; } = "connecting";
@@ -81,6 +87,7 @@ public sealed partial class Store
         var appended = false;
         while (queue.TryDequeue(out var e)) Apply(e, painted, ref changed, ref appended);
         if (membersDirty) RebuildMembers();
+        if (voiceDirty) RefreshVoiceRows();
         if (changed) Changed?.Invoke();
         if (appended) Appended?.Invoke();
         if (painted.Count > 0) Painted?.Invoke(painted);
@@ -219,6 +226,23 @@ public sealed partial class Store
                 if (i >= 0 && Reactions.Apply(Messages[i].RawReactions, r.Emoji, r.UserId, r.Add)) Messages[i].RebuildReactions();
                 break;
             }
+            case PresenceEvent pr:
+                if (pr.Presence.ChannelId is null) voice.Remove(pr.Presence.UserId);
+                else voice[pr.Presence.UserId] = pr.Presence;
+                voiceDirty = true;
+                break;
+            case SpeakingEvent sp:
+                speaking = [.. sp.UserIds];
+                voiceDirty = true;
+                break;
+            case VoiceEvent v:
+                MyVoice = v;
+                if (v.State == "idle") speaking.Clear();
+                if (v.Detail is { Length: > 0 } detail) Toast?.Invoke(detail);
+                voiceDirty = true;
+                changed = true;
+                _ = Try(core.CallAsync("ui_set_context", Context()));
+                break;
             case OpenChannelEvent o:
                 _ = OpenChannelById(o.ChannelId);
                 break;
@@ -233,6 +257,9 @@ public sealed partial class Store
 
     void ApplySession(SessionEvent s)
     {
+        voice.Clear();
+        foreach (var p in s.Voice) if (p.ChannelId is not null) voice[p.UserId] = p;
+        voiceDirty = true;
         foreach (var u in s.Users) users[u.Id] = u;
         if (s.User is not null) users[s.User.Id] = s.User;
         Me = s.User;
@@ -294,6 +321,7 @@ public sealed partial class Store
             Channels.Add(row);
         }
         if (OpenChannel is not null) OpenChannel = Channels.FirstOrDefault(x => x.Id == OpenChannel.Id) ?? OpenChannel;
+        RefreshVoiceRows();
     }
 
     void RefreshHeaders()
@@ -311,6 +339,53 @@ public sealed partial class Store
         var name = NameOf(userId);
         foreach (var m in Messages)
             if (m.AuthorId == userId) m.Author = name;
+    }
+
+    // ---------- voice ----------
+
+    JsonObject Context() => new()
+    {
+        ["serverId"] = OpenServer?.Id,
+        ["joinedVoice"] = MyVoice is { State: not "idle" } v ? v.ChannelId : null,
+        ["viewedVoice"] = null,
+    };
+
+    void RefreshVoiceRows()
+    {
+        voiceDirty = false;
+        foreach (var row in Channels)
+        {
+            if (!row.Voice) continue;
+            var names = voice.Values.Where(p => p.ChannelId == row.Id)
+                .Select(p => (speaking.Contains(p.UserId) ? "● " : "") + NameOf(p.UserId) + (p.Deafened ? " (deafened)" : p.Muted ? " (muted)" : ""))
+                .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase);
+            row.Participants = string.Join("\n", names);
+        }
+    }
+
+    public async Task JoinVoice(ChannelVm row)
+    {
+        if (!row.Voice) return;
+        try { await core.CallAsync("voice_join", new JsonObject { ["channelId"] = row.Id }); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
+    }
+
+    public async Task LeaveVoice()
+    {
+        try { await core.CallAsync("voice_leave"); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
+    }
+
+    public async Task SetMuted(bool muted)
+    {
+        try { await core.CallAsync("voice_mute", new JsonObject { ["muted"] = muted }); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
+    }
+
+    public async Task SetDeafened(bool deafened)
+    {
+        try { await core.CallAsync("voice_deafen", new JsonObject { ["deafened"] = deafened }); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
     }
 
     // ---------- people column ----------
@@ -374,7 +449,7 @@ public sealed partial class Store
         SyncChannels(vm);
         RebuildMembers();
         Changed?.Invoke();
-        _ = Try(core.CallAsync("ui_set_context", new JsonObject { ["serverId"] = vm.Id }));
+        _ = Try(core.CallAsync("ui_set_context", Context()));
         _ = Try(core.CallAsync("load_members", new JsonObject { ["serverId"] = vm.Id, ["offset"] = 0 }));
         _ = Try(core.CallAsync("games_server", new JsonObject { ["serverId"] = vm.Id }));
         var first = Channels.FirstOrDefault(c => !c.Voice);

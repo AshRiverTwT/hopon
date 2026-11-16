@@ -109,6 +109,23 @@ public sealed partial class MainWindow : Window
         Composer.PlaceholderText = Store.OpenChannel is null ? "" : $"Message #{Store.OpenChannel.Name}";
         Composer.IsEnabled = Store.OpenChannel is not null;
 
+        var v = Store.MyVoice;
+        var inVoice = v is not null && v.State != "idle";
+        VoicePanel.Visibility = inVoice ? Visibility.Visible : Visibility.Collapsed;
+        if (inVoice)
+        {
+            var room = Store.Channels.FirstOrDefault(c => c.Id == v!.ChannelId)?.Name ?? "voice";
+            VoiceText.Text = v!.State switch
+            {
+                "connected" => $"Voice connected · {room}",
+                "connecting" => $"Connecting to {room}…",
+                "reconnecting" => $"Reconnecting to {room}…",
+                _ => $"{v.State} · {room}",
+            };
+            MuteButton.IsChecked = v.Muted;
+            DeafenButton.IsChecked = v.Deafened;
+        }
+
         syncing = true;
         ServerList.SelectedItem = Store.OpenServer;
         ChannelList.SelectedItem = Store.OpenChannel;
@@ -224,8 +241,21 @@ public sealed partial class MainWindow : Window
     void OnChannelSelected(object sender, SelectionChangedEventArgs e)
     {
         if (syncing || ChannelList.SelectedItem is not ChannelVm vm || vm == Store.OpenChannel) return;
+        if (vm.Voice)
+        {
+            // A voice room: join it, keep the text channel open.
+            syncing = true;
+            ChannelList.SelectedItem = Store.OpenChannel;
+            syncing = false;
+            _ = Store.JoinVoice(vm);
+            return;
+        }
         _ = Store.OpenChannelRow(vm);
     }
+
+    void OnMute(object sender, RoutedEventArgs e) => _ = Store.SetMuted(MuteButton.IsChecked == true);
+    void OnDeafen(object sender, RoutedEventArgs e) => _ = Store.SetDeafened(DeafenButton.IsChecked == true);
+    void OnLeaveVoice(object sender, RoutedEventArgs e) => _ = Store.LeaveVoice();
 
     void OnComposerKeyDown(object sender, KeyRoutedEventArgs e)
     {

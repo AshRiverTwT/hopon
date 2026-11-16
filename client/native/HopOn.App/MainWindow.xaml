@@ -65,17 +65,32 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <TextBlock x:Name="ServerTitle" Margin="16,16,16,8" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                 <ListView x:Name="ChannelList" Grid.Row="1" ItemsSource="{x:Bind Store.Channels}"
                           SelectionMode="Single" SelectionChanged="OnChannelSelected">
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:ChannelVm">
-                            <TextBlock Text="{x:Bind Label, Mode=OneWay}" Opacity="{x:Bind LabelOpacity, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                            <StackPanel Padding="0,2">
+                                <TextBlock Text="{x:Bind Label, Mode=OneWay}" Opacity="{x:Bind LabelOpacity, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{x:Bind Participants, Mode=OneWay}" Visibility="{x:Bind ParticipantsVisibility, Mode=OneWay}"
+                                           Margin="18,2,0,0" FontSize="12" Opacity="0.8" />
+                            </StackPanel>
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
-                <Grid Grid.Row="2" Margin="16,10" ColumnSpacing="8">
+                <!-- Voice connection (shown while in a room) -->
+                <StackPanel x:Name="VoicePanel" Grid.Row="2" Visibility="Collapsed" Margin="12,6,12,0" Padding="10" Spacing="8"
+                            CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                    <TextBlock x:Name="VoiceText" FontSize="12" TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <ToggleButton x:Name="MuteButton" Content="Mute" Click="OnMute" FontSize="12" Padding="8,3" />
+                        <ToggleButton x:Name="DeafenButton" Content="Deafen" Click="OnDeafen" FontSize="12" Padding="8,3" />
+                        <Button Content="Leave" Click="OnLeaveVoice" FontSize="12" Padding="8,3" />
+                    </StackPanel>
+                </StackPanel>
+                <Grid Grid.Row="3" Margin="16,10" ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
