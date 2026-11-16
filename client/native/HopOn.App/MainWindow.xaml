@@ -324,8 +324,15 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                <Button x:Name="AttachButton" Content="+" Click="OnAttach" FontSize="16" Padding="10,2" VerticalAlignment="Stretch"
-                        ToolTipService.ToolTip="Attach files" />
+                <Button x:Name="AttachButton" Content="+" FontSize="16" Padding="10,2" VerticalAlignment="Stretch"
+                        ToolTipService.ToolTip="Attach files or create a poll">
+                    <Button.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Text="Attach files…" Click="OnAttach" />
+                            <MenuFlyoutItem Text="Create a poll…" Click="OnCreatePoll" />
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
                 <TextBox x:Name="Composer" Grid.Column="1" PlaceholderText="Message" Paste="OnComposerPaste"
                          PreviewKeyDown="OnComposerKeyDown" TextChanged="OnComposerChanged" />
                 <Button x:Name="GifButton" Grid.Column="2" Content="GIF" FontSize="12" Padding="10,2" VerticalAlignment="Stretch"

@@ -535,6 +535,34 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    async void OnCreatePoll(object sender, RoutedEventArgs e)
+    {
+        var question = new TextBox { Header = "Question", MaxLength = 200, MinWidth = 340 };
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(question);
+        var options = new List<TextBox>();
+        for (var i = 0; i < 5; i++)
+        {
+            var o = new TextBox { PlaceholderText = i < 2 ? $"Option {i + 1}" : $"Option {i + 1} (optional)", MaxLength = 80 };
+            options.Add(o);
+            panel.Children.Add(o);
+        }
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot, Title = "Create a poll", Content = panel,
+            PrimaryButtonText = "Post", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        var q = question.Text.Trim();
+        var opts = options.Select(o => o.Text.Trim()).Where(t => t.Length > 0).ToList();
+        if (q.Length == 0 || opts.Count < 2)
+        {
+            ShowToast("A poll needs a question and at least two options");
+            return;
+        }
+        Store.Send(Polls.Encode(new Poll(q, opts)), NowMs());
+    }
+
     async Task AddStorageFile(Windows.Storage.StorageFile f)
     {
         try
