@@ -1,0 +1,23 @@
+[package]
+name = "hopon-ffi"
+version.workspace = true
+edition.workspace = true
+description = "C ABI over hopon-core, for the native (WinUI / C#) shell"
+
+[lib]
+name = "hopon_ffi"
+# cdylib: hopon_ffi.dll / libhopon_ffi.so for the C# shell; rlib: Rust tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+hopon-core = { path = "../core", default-features = false }
+serde_json = "1"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[build-dependencies]
+csbindgen = "1.9"
+
+[features]
+default = ["voice"]
+voice = ["hopon-core/voice"]
