@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using HopOn.Native;
@@ -42,8 +43,99 @@ public sealed partial class ChannelVm : Observable
     public double LabelOpacity => Unread ? 1.0 : 0.72;
 }
 
+/// <summary>One reaction under a message: "👍 2"; click toggles yours.</summary>
+public sealed partial class ReactionVm : Observable
+{
+    int count;
+    bool mine;
+    public required MessageVm Message { get; init; }
+    public required string Emoji { get; init; }
+    public int Count { get => count; set { Set(ref count, value); Raise(nameof(Label)); } }
+    public bool Mine { get => mine; set { Set(ref mine, value); Raise(nameof(ChipOpacity)); } }
+    public string Label => $"{Emoji} {Count}";
+    public double ChipOpacity => Mine ? 1.0 : 0.7;
+    public void Toggle() => MessageVm.ToggleReaction?.Invoke(Message, Emoji, !Mine);
+}
+
+/// <summary>A poll option: votes are the 1️⃣–5️⃣ reactions.</summary>
+public sealed partial class PollOptionVm : Observable
+{
+    int votes;
+    double pct;
+    bool mine;
+    public required MessageVm Message { get; init; }
+    public required int Index { get; init; }
+    public required string Text { get; init; }
+    public int Votes { get => votes; set { Set(ref votes, value); Raise(nameof(VotesText)); } }
+    public double Pct { get => pct; set => Set(ref pct, value); }
+    public bool Mine { get => mine; set { Set(ref mine, value); Raise(nameof(VotesText)); } }
+    public string VotesText => (Mine ? "✓ " : "") + (Votes == 1 ? "1 vote" : $"{Votes} votes");
+    public void Toggle() => MessageVm.ToggleReaction?.Invoke(Message, Polls.Emoji[Index], !Mine);
+}
+
 public sealed partial class MessageVm : Observable, IMessageItem
 {
+    /// <summary>Your user id (for "mine" on reactions and votes).</summary>
+    public static string? MeId { get; set; }
+    /// <summary>(message, emoji, add): set by the store.</summary>
+    public static Action<MessageVm, string, bool>? ToggleReaction { get; set; }
+
+    List<Reaction> reactions = [];
+    public ObservableCollection<ReactionVm> Chips { get; } = [];
+    public Poll? Poll { get; private set; }
+    public ObservableCollection<PollOptionVm> PollOptions { get; } = [];
+    public Visibility PollVisibility => Poll is null ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility BodyVisibility => Poll is null ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ChipsVisibility => Chips.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+
+    /// <summary>Raw reaction lists (mutable: reaction events apply here, then Rebuild).</summary>
+    public List<Reaction> RawReactions => reactions;
+
+    void SetContentDerived(string text, List<Reaction> rs)
+    {
+        reactions = rs.Select(r => new Reaction { Emoji = r.Emoji, Users = [.. r.Users] }).ToList();
+        var poll = Polls.Decode(text);
+        if (poll != Poll)
+        {
+            Poll = poll;
+            PollOptions.Clear();
+            if (poll is not null)
+                for (var i = 0; i < poll.Options.Count; i++)
+                    PollOptions.Add(new PollOptionVm { Message = this, Index = i, Text = poll.Options[i] });
+            Raise(nameof(Poll));
+            Raise(nameof(PollVisibility));
+            Raise(nameof(BodyVisibility));
+        }
+        RebuildReactions();
+    }
+
+    /// <summary>Sync chips and poll votes from <see cref="RawReactions"/>.</summary>
+    public void RebuildReactions()
+    {
+        var shown = reactions.Where(r => Poll is null || !Polls.Emoji.Take(Poll.Options.Count).Contains(r.Emoji)).ToList();
+        for (var i = Chips.Count - 1; i >= 0; i--)
+            if (!shown.Any(r => r.Emoji == Chips[i].Emoji)) Chips.RemoveAt(i);
+        foreach (var r in shown)
+        {
+            var chip = Chips.FirstOrDefault(c => c.Emoji == r.Emoji);
+            if (chip is null) Chips.Add(chip = new ReactionVm { Message = this, Emoji = r.Emoji });
+            chip.Count = r.Users.Count;
+            chip.Mine = MeId is not null && r.Users.Contains(MeId);
+        }
+        if (Poll is not null)
+        {
+            var votes = PollOptions.Select(o => reactions.FirstOrDefault(r => r.Emoji == Polls.Emoji[o.Index])?.Users ?? []).ToList();
+            var total = votes.Sum(v => v.Count);
+            for (var i = 0; i < PollOptions.Count; i++)
+            {
+                PollOptions[i].Votes = votes[i].Count;
+                PollOptions[i].Pct = total == 0 ? 0 : 100.0 * votes[i].Count / total;
+                PollOptions[i].Mine = MeId is not null && votes[i].Contains(MeId);
+            }
+        }
+        Raise(nameof(ChipsVisibility));
+    }
+
     string id;
     string content;
     string author;
@@ -62,6 +154,7 @@ public sealed partial class MessageVm : Observable, IMessageItem
         Ts = m.Ts;
         editedAt = m.EditedAt;
         Attachments = m.Attachments;
+        SetContentDerived(m.Content, m.Reactions);
     }
 
     public string Id { get => id; private set => Set(ref id, value); }
@@ -92,6 +185,7 @@ public sealed partial class MessageVm : Observable, IMessageItem
         editedAt = m.EditedAt;
         Raise(nameof(Edited));
         Raise(nameof(Body));
+        SetContentDerived(m.Content, m.Reactions);
         State = newState;
     }
 
@@ -104,6 +198,7 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public void Edit(string newContent, long at)
     {
         Content = newContent;
+        SetContentDerived(newContent, reactions);
         editedAt = at;
         Raise(nameof(Edited));
     }

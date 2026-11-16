@@ -54,6 +54,7 @@ public sealed partial class Store
         this.ui = ui;
         this.core = core;
         RichView.NameOf = NameOf;
+        MessageVm.ToggleReaction = (m, emoji, add) => _ = React(m, emoji, add);
     }
 
     /// <summary>From any thread.</summary>
@@ -171,6 +172,12 @@ public sealed partial class Store
                 if (i >= 0) { Messages.RemoveAt(i); RefreshHeaders(); }
                 break;
             }
+            case ReactionEvent r when r.ChannelId == OpenChannel?.Id:
+            {
+                var i = MessageMerge.IndexOf(Messages, r.MessageId);
+                if (i >= 0 && Reactions.Apply(Messages[i].RawReactions, r.Emoji, r.UserId, r.Add)) Messages[i].RebuildReactions();
+                break;
+            }
             case OpenChannelEvent o:
                 _ = OpenChannelById(o.ChannelId);
                 break;
@@ -188,6 +195,7 @@ public sealed partial class Store
         foreach (var u in s.Users) users[u.Id] = u;
         if (s.User is not null) users[s.User.Id] = s.User;
         Me = s.User;
+        MessageVm.MeId = s.User?.Id;
         View = s.User is not null ? View.Shell : s.AuthPending ? View.Splash : View.Login;
         if (s.User is null)
         {
@@ -319,6 +327,22 @@ public sealed partial class Store
         }
         catch (HopOnException e)
         {
+            Toast?.Invoke(e.Message);
+        }
+    }
+
+    /// <summary>Add or remove your reaction (and poll vote): shown at once, sent to the server.</summary>
+    async Task React(MessageVm m, string emoji, bool add)
+    {
+        if (Me is null || OpenChannel is null || MessageMerge.IsPending(m.Id)) return;
+        if (Reactions.Apply(m.RawReactions, emoji, Me.Id, add)) m.RebuildReactions();
+        try
+        {
+            await core.CallAsync("react", new JsonObject { ["channelId"] = OpenChannel.Id, ["messageId"] = m.Id, ["emoji"] = emoji, ["add"] = add });
+        }
+        catch (HopOnException e)
+        {
+            if (Reactions.Apply(m.RawReactions, emoji, Me.Id, !add)) m.RebuildReactions();
             Toast?.Invoke(e.Message);
         }
     }
