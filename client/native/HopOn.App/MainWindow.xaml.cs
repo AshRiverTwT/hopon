@@ -65,6 +65,8 @@ public sealed partial class MainWindow : Window
         GifButton.Flyout = GifFlyout.Create(Store, NowMs);
         AddShortcuts();
         MessageVm.ShowProfileAction = (userId, anchor) => _ = ShowProfileCard(userId, anchor);
+        ChannelVm.Act = (c, what) => _ = ChannelAction(c, what);
+        MemberVm.KickAction = (id, name) => _ = KickMember(id, name);
         CompositionTarget.Rendering += OnFirstFrame;
         _ = LoadConfig();
     }
@@ -207,6 +209,8 @@ public sealed partial class MainWindow : Window
         ServerTitle.Text = Store.OpenServer?.Name ?? "";
         ServerMenuButton.Visibility = Store.OpenServer is null ? Visibility.Collapsed : Visibility.Visible;
         CreateChannelItem.Visibility = Store.IsOwner ? Visibility.Visible : Visibility.Collapsed;
+        ServerSettingsItem.Visibility = Store.IsOwner ? Visibility.Visible : Visibility.Collapsed;
+        ChannelVm.OwnerTools = Store.IsOwner;
         LeaveServerItem.Visibility = Store.IsOwner ? Visibility.Collapsed : Visibility.Visible;
         ChannelTitle.Text = Store.OpenChannel is null ? "" : "# " + Store.OpenChannel.Name;
         ChannelTopic.Text = Store.OpenChannel?.Topic ?? "";
@@ -413,6 +417,73 @@ public sealed partial class MainWindow : Window
             Content = "You can come back with an invite.", PrimaryButtonText = "Leave", CloseButtonText = "Cancel",
         };
         if (await dialog.ShowAsync() == ContentDialogResult.Primary) await Store.LeaveServer();
+    }
+
+    async Task<bool> Confirm(string title, string body, string ok, string? typeToConfirm = null)
+    {
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(new TextBlock { Text = body, TextWrapping = TextWrapping.Wrap });
+        TextBox? typed = null;
+        if (typeToConfirm is not null)
+        {
+            typed = new TextBox { PlaceholderText = typeToConfirm, Header = $"Type \"{typeToConfirm}\" to confirm" };
+            panel.Children.Add(typed);
+        }
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot, Title = title, Content = panel, PrimaryButtonText = ok, CloseButtonText = "Cancel",
+        };
+        if (typed is not null)
+        {
+            dialog.IsPrimaryButtonEnabled = false;
+            typed.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = typed.Text.Trim() == typeToConfirm;
+        }
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    async Task ChannelAction(ChannelVm c, string what)
+    {
+        switch (what)
+        {
+            case "rename":
+                if (await Ask($"Rename #{c.Name}", "Name", c.Name, "Save") is { } name) await Store.UpdateChannel(c.Id, name, null);
+                break;
+            case "topic":
+                if (await Ask($"Topic for #{c.Name}", "Topic", c.Topic, "Save") is { } topic) await Store.UpdateChannel(c.Id, null, topic);
+                break;
+            case "delete":
+                if (await Confirm($"Delete #{c.Name}?", "Its messages are deleted for everyone.", "Delete", c.Name)) await Store.DeleteChannel(c.Id);
+                break;
+        }
+    }
+
+    async Task KickMember(string userId, string name)
+    {
+        if (await Confirm($"Remove {name}?", "They can come back with a new invite.", "Remove")) await Store.KickMember(userId);
+    }
+
+    async void OnServerSettings(object sender, RoutedEventArgs e)
+    {
+        if (Store.OpenServer is not { } sv) return;
+        var name = new TextBox { Header = "Server name", Text = sv.Name, MinWidth = 320 };
+        var revoke = new Button { Content = "Revoke all invite links" };
+        var delete = new Button { Content = "Delete server…" };
+        var panel = new StackPanel { Spacing = 12 };
+        panel.Children.Add(name);
+        panel.Children.Add(revoke);
+        panel.Children.Add(delete);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot, Title = "Server settings", Content = panel,
+            PrimaryButtonText = "Save", CloseButtonText = "Close", DefaultButton = ContentDialogButton.Primary,
+        };
+        var deleteAsked = false;
+        revoke.Click += async (_, _) => { await Store.RevokeInvites(); ShowToast("Invite links revoked"); };
+        delete.Click += (_, _) => { deleteAsked = true; dialog.Hide(); };
+        var r = await dialog.ShowAsync();
+        if (r == ContentDialogResult.Primary && name.Text.Trim() is { Length: > 0 } n && n != sv.Name) await Store.RenameServer(n);
+        if (deleteAsked && await Confirm($"Delete {sv.Name}?", "Every channel and message is deleted for everyone. This can't be undone.", "Delete server", sv.Name))
+            await Store.DeleteServer();
     }
 
     async void OnBell(object sender, RoutedEventArgs e)

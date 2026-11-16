@@ -181,7 +181,7 @@ public sealed partial class Store
             {
                 case "reply": Replying = m; Editing = null; ComposerModeChanged?.Invoke(); break;
                 case "edit" when m.IsMine && !MessageMerge.IsPending(m.Id): Editing = m; Replying = null; ComposerModeChanged?.Invoke(); break;
-                case "delete" when m.IsMine && !MessageMerge.IsPending(m.Id): _ = DeleteMessage(m); break;
+                case "delete" when (m.IsMine || IsOwner) && !MessageMerge.IsPending(m.Id): _ = DeleteMessage(m); break;
             }
         };
     }
@@ -214,7 +214,7 @@ public sealed partial class Store
     string NameOf(string userId) =>
         userId == "0" ? "HopOn" : users.TryGetValue(userId, out var u) ? u.Name : "…";
 
-    MessageVm Row(Msg m) => new(m, NameOf(m.AuthorId)) { Avatar = AvatarOf(m.AuthorId) };
+    MessageVm Row(Msg m) => new(m, NameOf(m.AuthorId)) { Avatar = AvatarOf(m.AuthorId), CanDelete = m.AuthorId == Me?.Id || IsOwner };
 
     void Apply(UiEvent e, List<string> painted, ref bool changed, ref bool appended)
     {
@@ -461,6 +461,8 @@ public sealed partial class Store
 
     void SyncChannels(ServerVm vm, Server? s = null)
     {
+        // Before rows are built: their owner-only menu items read it once.
+        ChannelVm.OwnerTools = Me is not null && ownerOf.GetValueOrDefault(vm.Id) == Me.Id;
         Channels.Clear();
         foreach (var c in vm.Channels)
         {
@@ -616,6 +618,7 @@ public sealed partial class Store
     {
         OpenServer = vm;
         Channels.Clear();
+        Members.Clear(); // rebuilt for this server (owner-only items read OwnerTools once)
         if (vm is null)
         {
             OpenChannel = null;
@@ -776,6 +779,19 @@ public sealed partial class Store
         try { await core.CallAsync("create_channel", new JsonObject { ["serverId"] = OpenServer.Id, ["name"] = name, ["voice"] = voice }); }
         catch (HopOnException e) { Toast?.Invoke(e.Message); }
     }
+
+    async Task Do(string command, JsonObject args)
+    {
+        try { await core.CallAsync(command, args); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
+    }
+
+    public Task RenameServer(string name) => OpenServer is null ? Task.CompletedTask : Do("rename_server", new JsonObject { ["serverId"] = OpenServer.Id, ["name"] = name });
+    public Task DeleteServer() => OpenServer is null ? Task.CompletedTask : Do("delete_server", new JsonObject { ["serverId"] = OpenServer.Id });
+    public Task RevokeInvites() => OpenServer is null ? Task.CompletedTask : Do("revoke_invites", new JsonObject { ["serverId"] = OpenServer.Id });
+    public Task UpdateChannel(string channelId, string? name, string? topic) => Do("update_channel", new JsonObject { ["channelId"] = channelId, ["name"] = name, ["topic"] = topic });
+    public Task DeleteChannel(string channelId) => Do("delete_channel", new JsonObject { ["channelId"] = channelId });
+    public Task KickMember(string userId) => OpenServer is null ? Task.CompletedTask : Do("kick_member", new JsonObject { ["serverId"] = OpenServer.Id, ["userId"] = userId });
 
     public async Task LeaveServer()
     {

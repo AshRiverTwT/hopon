@@ -35,6 +35,10 @@ public sealed partial class ServerVm : Observable
 /// <summary>A row of the people column.</summary>
 public sealed partial class MemberVm : Observable
 {
+    /// <summary>(user id, name): owner removes a member; set by the window.</summary>
+    public static Action<string, string>? KickAction { get; set; }
+    public Visibility KickVisibility => ChannelVm.OwnerTools && Id != MessageVm.MeId ? Visibility.Visible : Visibility.Collapsed;
+    public void Kick() => KickAction?.Invoke(Id, Name);
     public void ShowProfile(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
     {
         if (sender is FrameworkElement fe) MessageVm.ShowProfileAction?.Invoke(Id, fe);
@@ -65,6 +69,13 @@ public sealed partial class ChannelVm : Observable
     public string Name { get => name; set { Set(ref name, value); Raise(nameof(Label)); } }
     public string Topic { get => topic; set => Set(ref topic, value); }
     public string Label => (Voice ? "🔊 " : "# ") + Name;
+    /// <summary>(channel, "rename" | "topic" | "delete"): set by the window.</summary>
+    public static Action<ChannelVm, string>? Act { get; set; }
+    public static bool OwnerTools { get; set; }
+    public Visibility OwnerVisibility => OwnerTools ? Visibility.Visible : Visibility.Collapsed;
+    public void Rename() => Act?.Invoke(this, "rename");
+    public void EditTopic() => Act?.Invoke(this, "topic");
+    public void Remove() => Act?.Invoke(this, "delete");
     string participants = "";
     /// <summary>Voice rooms: who's in it ("● " marks who's speaking).</summary>
     public string Participants { get => participants; set { Set(ref participants, value); Raise(nameof(ParticipantsVisibility)); } }
@@ -151,6 +162,9 @@ public sealed partial class MessageVm : Observable, IMessageItem
 
     public bool IsMine => MeId is not null && AuthorId == MeId;
     public Visibility MineVisibility => IsMine ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>Your own message, or you own the server.</summary>
+    public bool CanDelete { get; init; }
+    public Visibility DeleteVisibility => CanDelete ? Visibility.Visible : Visibility.Collapsed;
     public void Reply() => Act?.Invoke(this, "reply");
 
     /// <summary>(user id, anchor element): set by the window.</summary>

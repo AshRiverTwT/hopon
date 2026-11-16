@@ -94,6 +94,7 @@
                             <MenuFlyout>
                                 <MenuFlyoutItem Text="Invite people (copy link)" Click="OnInvite" />
                                 <MenuFlyoutItem x:Name="CreateChannelItem" Text="Create a channel…" Click="OnCreateChannel" />
+                                <MenuFlyoutItem x:Name="ServerSettingsItem" Text="Server settings…" Click="OnServerSettings" />
                                 <MenuFlyoutSeparator />
                                 <MenuFlyoutItem x:Name="LeaveServerItem" Text="Leave server" Click="OnLeaveServer" />
                             </MenuFlyout>
@@ -104,7 +105,14 @@
                           SelectionMode="Single" SelectionChanged="OnChannelSelected">
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:ChannelVm">
-                            <StackPanel Padding="0,2">
+                            <StackPanel Padding="0,2" Background="Transparent">
+                                <StackPanel.ContextFlyout>
+                                    <MenuFlyout>
+                                        <MenuFlyoutItem Text="Rename…" Click="{x:Bind Rename}" Visibility="{x:Bind OwnerVisibility}" />
+                                        <MenuFlyoutItem Text="Set topic…" Click="{x:Bind EditTopic}" Visibility="{x:Bind OwnerVisibility}" />
+                                        <MenuFlyoutItem Text="Delete channel…" Click="{x:Bind Remove}" Visibility="{x:Bind OwnerVisibility}" />
+                                    </MenuFlyout>
+                                </StackPanel.ContextFlyout>
                                 <TextBlock Text="{x:Bind Label, Mode=OneWay}" Opacity="{x:Bind LabelOpacity, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
                                 <TextBlock Text="{x:Bind Participants, Mode=OneWay}" Visibility="{x:Bind ParticipantsVisibility, Mode=OneWay}"
                                            Margin="18,2,0,0" FontSize="12" Opacity="0.8" />
@@ -203,7 +211,7 @@
                                             <MenuFlyoutItem Text="👀" Click="{x:Bind React7}" />
                                         </MenuFlyoutSubItem>
                                         <MenuFlyoutItem Text="Edit" Click="{x:Bind BeginEdit}" Visibility="{x:Bind MineVisibility}" />
-                                        <MenuFlyoutItem Text="Delete" Click="{x:Bind Delete}" Visibility="{x:Bind MineVisibility}" />
+                                        <MenuFlyoutItem Text="Delete" Click="{x:Bind Delete}" Visibility="{x:Bind DeleteVisibility}" />
                                     </MenuFlyout>
                                 </StackPanel.ContextFlyout>
                                 <Grid Visibility="{x:Bind DayVisibility, Mode=OneWay}" Margin="0,12,0,4" ColumnSpacing="10">
@@ -353,6 +361,11 @@
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:MemberVm">
                             <Grid ColumnSpacing="10" Padding="0,4" Opacity="{x:Bind RowOpacity, Mode=OneWay}" Tapped="{x:Bind ShowProfile}" Background="Transparent">
+                                <Grid.ContextFlyout>
+                                    <MenuFlyout>
+                                        <MenuFlyoutItem Text="Remove from server…" Click="{x:Bind Kick}" Visibility="{x:Bind KickVisibility}" />
+                                    </MenuFlyout>
+                                </Grid.ContextFlyout>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
