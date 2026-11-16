@@ -27,6 +27,24 @@ public sealed partial class ServerVm : Observable
     public string Name { get => name; set { Set(ref name, value); Raise(nameof(Initials)); } }
     public string Initials => string.Concat(Name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0])));
     public List<Channel> Channels { get; set; } = [];
+    public HashSet<string> MemberIds { get; } = [];
+}
+
+/// <summary>A row of the people column.</summary>
+public sealed partial class MemberVm : Observable
+{
+    string name = "";
+    bool online;
+    string detail = "";
+    public required string Id { get; init; }
+    public string Name { get => name; set => Set(ref name, value); }
+    public bool Online { get => online; set { Set(ref online, value); Raise(nameof(DotBrush)); Raise(nameof(RowOpacity)); } }
+    /// <summary>"Playing X", or the custom status.</summary>
+    public string Detail { get => detail; set { Set(ref detail, value); Raise(nameof(DetailVisibility)); } }
+    public Visibility DetailVisibility => Detail.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    public double RowOpacity => Online ? 1.0 : 0.5;
+    public Microsoft.UI.Xaml.Media.Brush DotBrush => new Microsoft.UI.Xaml.Media.SolidColorBrush(
+        Online ? Microsoft.UI.ColorHelper.FromArgb(255, 59, 165, 93) : Microsoft.UI.ColorHelper.FromArgb(255, 116, 127, 141));
 }
 
 public sealed partial class ChannelVm : Observable

@@ -33,6 +33,7 @@
                 <ColumnDefinition Width="72" />
                 <ColumnDefinition Width="240" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="230" />
             </Grid.ColumnDefinitions>
 
             <!-- Servers -->
@@ -173,6 +174,33 @@
                 <TextBox x:Name="Composer" Grid.Row="2" Margin="20,8,20,0" PlaceholderText="Message"
                          PreviewKeyDown="OnComposerKeyDown" TextChanged="OnComposerChanged" />
                 <TextBlock x:Name="TypingText" Grid.Row="3" Margin="22,4,20,8" FontSize="12" Opacity="0.7" MinHeight="16" />
+            </Grid>
+
+            <!-- People -->
+            <Grid Grid.Column="3" Background="{ThemeResource LayerFillColorDefaultBrush}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="People" Margin="16,16,16,8" FontSize="13" FontWeight="SemiBold" Opacity="0.7" />
+                <ListView Grid.Row="1" ItemsSource="{x:Bind Store.Members}" SelectionMode="None">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:MemberVm">
+                            <Grid ColumnSpacing="10" Padding="0,4" Opacity="{x:Bind RowOpacity, Mode=OneWay}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Ellipse Width="9" Height="9" Fill="{x:Bind DotBrush, Mode=OneWay}" VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{x:Bind Name, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{x:Bind Detail, Mode=OneWay}" Visibility="{x:Bind DetailVisibility, Mode=OneWay}"
+                                               FontSize="12" Opacity="0.65" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
             </Grid>
         </Grid>
 

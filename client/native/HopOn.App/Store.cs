@@ -28,6 +28,13 @@ public sealed partial class Store
     public ObservableCollection<ServerVm> Servers { get; } = [];
     public ObservableCollection<ChannelVm> Channels { get; } = [];
     public ObservableCollection<MessageVm> Messages { get; } = [];
+    public ObservableCollection<MemberVm> Members { get; } = [];
+
+    // Presence of people we can see (the core reports it for the open server's visible members).
+    readonly HashSet<string> online = [];
+    readonly Dictionary<string, string> activities = [];
+    readonly Dictionary<string, Status> statuses = [];
+    bool membersDirty;
 
     public View View { get; private set; } = View.Splash;
     public User? Me { get; private set; }
@@ -73,6 +80,7 @@ public sealed partial class Store
         var changed = false;
         var appended = false;
         while (queue.TryDequeue(out var e)) Apply(e, painted, ref changed, ref appended);
+        if (membersDirty) RebuildMembers();
         if (changed) Changed?.Invoke();
         if (appended) Appended?.Invoke();
         if (painted.Count > 0) Painted?.Invoke(painted);
@@ -130,12 +138,38 @@ public sealed partial class Store
             case UserUpdatedEvent u:
                 users[u.User.Id] = u.User;
                 RefreshAuthors(u.User.Id);
+                membersDirty = true;
                 break;
             case MemberJoinedEvent m:
                 users[m.User.Id] = m.User;
+                if (serverById.TryGetValue(m.ServerId, out var js)) js.MemberIds.Add(m.User.Id);
+                membersDirty = true;
                 break;
             case MemberPageEvent p:
                 foreach (var u in p.Users) users[u.Id] = u;
+                if (serverById.TryGetValue(p.ServerId, out var ps))
+                    foreach (var u in p.Users) ps.MemberIds.Add(u.Id);
+                foreach (var u in p.Users)
+                {
+                    if (p.Online.Contains(u.Id)) online.Add(u.Id); else online.Remove(u.Id);
+                }
+                foreach (var (k, v) in p.Activities) activities[k] = v;
+                foreach (var (k, v) in p.Statuses) statuses[k] = v;
+                membersDirty = true;
+                break;
+            case UserPresenceEvent up:
+                if (up.Online) online.Add(up.UserId);
+                else { online.Remove(up.UserId); statuses.Remove(up.UserId); activities.Remove(up.UserId); }
+                membersDirty = true;
+                break;
+            case ActivityEvent act:
+                if (act.Game.Length > 0) activities[act.UserId] = act.Game; else activities.Remove(act.UserId);
+                membersDirty = true;
+                break;
+            case StatusEvent st:
+                if (st.Status.Mode == "online" && st.Status.Text.Length == 0 && st.Status.Emoji.Length == 0) statuses.Remove(st.UserId);
+                else statuses[st.UserId] = st.Status;
+                membersDirty = true;
                 break;
             case ChannelActivityEvent a:
                 if (a.ChannelId != OpenChannel?.Id)
@@ -239,6 +273,11 @@ public sealed partial class Store
         }
         vm.Name = s.Name;
         vm.Channels = s.Channels;
+        foreach (var id in s.MemberIds) vm.MemberIds.Add(id);
+        online.UnionWith(s.Online);
+        foreach (var (k, v) in s.Activities) activities[k] = v;
+        foreach (var (k, v) in s.Statuses) statuses[k] = v;
+        membersDirty = true;
         if (OpenServer == vm) SyncChannels(vm, s);
         else if (OpenServer is null && View == View.Shell) _ = SelectServer(vm);
     }
@@ -274,6 +313,51 @@ public sealed partial class Store
             if (m.AuthorId == userId) m.Author = name;
     }
 
+    // ---------- people column ----------
+
+    const int VisibleMembers = 200;
+    string lastVisible = "";
+
+    void RebuildMembers()
+    {
+        membersDirty = false;
+        var sv = OpenServer;
+        var rows = sv is null ? [] : sv.MemberIds
+            .Where(users.ContainsKey)
+            .Select(id => (Id: id, Name: NameOf(id), Online: online.Contains(id) && statuses.GetValueOrDefault(id)?.Mode != "invisible"))
+            .OrderByDescending(r => r.Online)
+            .ThenBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase)
+            .Take(VisibleMembers)
+            .ToList();
+        // Update in place where possible (no flicker, rows keep their containers).
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var r = rows[i];
+            MemberVm vm;
+            if (i < Members.Count && Members[i].Id == r.Id) vm = Members[i];
+            else
+            {
+                var at = -1;
+                for (var j = i + 1; j < Members.Count; j++) if (Members[j].Id == r.Id) { at = j; break; }
+                if (at >= 0) { vm = Members[at]; Members.Move(at, i); }
+                else { vm = new MemberVm { Id = r.Id }; Members.Insert(i, vm); }
+            }
+            vm.Name = r.Name;
+            vm.Online = r.Online;
+            vm.Detail = activities.TryGetValue(r.Id, out var game) ? $"Playing {game}"
+                : statuses.TryGetValue(r.Id, out var st) && st.Text.Length > 0 ? (st.Emoji + " " + st.Text).Trim()
+                : "";
+        }
+        while (Members.Count > rows.Count) Members.RemoveAt(Members.Count - 1);
+        // Tell the core whose presence to keep us posted on.
+        var ids = string.Join(",", rows.Select(r => r.Id));
+        if (ids != lastVisible && sv is not null)
+        {
+            lastVisible = ids;
+            _ = Try(core.CallAsync("ui_set_visible_members", new JsonObject { ["userIds"] = new JsonArray(rows.Select(r => (JsonNode)r.Id).ToArray()) }));
+        }
+    }
+
     // ---------- user actions ----------
 
     public async Task SelectServer(ServerVm? vm)
@@ -288,8 +372,10 @@ public sealed partial class Store
             return;
         }
         SyncChannels(vm);
+        RebuildMembers();
         Changed?.Invoke();
         _ = Try(core.CallAsync("ui_set_context", new JsonObject { ["serverId"] = vm.Id }));
+        _ = Try(core.CallAsync("load_members", new JsonObject { ["serverId"] = vm.Id, ["offset"] = 0 }));
         _ = Try(core.CallAsync("games_server", new JsonObject { ["serverId"] = vm.Id }));
         var first = Channels.FirstOrDefault(c => !c.Voice);
         if (first is not null) await OpenChannelRow(first);
