@@ -407,6 +407,36 @@ pub async fn screen_grant(core: &Arc<Core>, channel_id: String) -> Res<(String, 
     }
 }
 
+/// Screens and windows you can share (native shell).
+pub async fn screen_sources(_core: &Arc<Core>) -> Res<Vec<crate::voice::Source>> {
+    tokio::task::spawn_blocking(crate::voice::screen::sources).await.map_err(|e| e.to_string())
+}
+
+/// Share a screen or window (`source` from screen_sources) in your voice room.
+/// `quality`: "720p30" | "720p60" | "1080p60" | "1440p60".
+pub async fn screen_share(core: &Arc<Core>, source: String, quality: String) -> Res<()> {
+    core.voice.screen.share(core, &source, &quality).await
+}
+
+pub async fn screen_stop(core: &Arc<Core>) -> Res<()> {
+    core.voice.screen.stop_share(core).await
+}
+
+pub async fn screen_watch(core: &Arc<Core>, user_id: String) -> Res<()> {
+    core.voice.screen.watch(core, user_id).await
+}
+
+pub async fn screen_unwatch(core: &Arc<Core>, user_id: String) -> Res<()> {
+    core.voice.screen.unwatch(core, &user_id).await;
+    Ok(())
+}
+
+/// Stream sound volume for one sharer, 0.0 – 2.0.
+pub async fn screen_volume(core: &Arc<Core>, user_id: String, volume: f64) -> Res<()> {
+    core.voice.screen.set_volume(user_id, volume).await;
+    Ok(())
+}
+
 pub async fn media_presence(core: &Arc<Core>, channel_id: String, source: String, active: bool) -> Res<()> {
     let source = match source.as_str() {
         "screen" => MediaSource::Screen,
@@ -652,6 +682,12 @@ pub async fn call(core: &Arc<Core>, name: &str, args_json: Value, blob: Option<V
         async voice_volume(user_id: String, volume: f64),
         async screen_grant(channel_id: String),
         async media_presence(channel_id: String, source: String, active: bool),
+        async screen_sources(),
+        async screen_share(source: String, quality: String),
+        async screen_stop(),
+        async screen_watch(user_id: String),
+        async screen_unwatch(user_id: String),
+        async screen_volume(user_id: String, volume: f64),
         sync audio_processing(aec: bool, ns: bool, agc: bool),
         async audio_devices(),
         sync audio_set_device(input: bool, id: Option<String>),
@@ -681,6 +717,7 @@ pub const COMMANDS: &[&str] = &[
     "get_profile", "set_status", "set_idle", "idle_seconds", "set_display_name", "friend_request",
     "friend_respond", "friend_remove", "activity_sharing", "voice_prepare", "voice_join", "voice_leave",
     "voice_mute", "voice_deafen", "voice_ptt", "voice_volume", "screen_grant", "media_presence",
+    "screen_sources", "screen_share", "screen_stop", "screen_watch", "screen_unwatch", "screen_volume",
     "audio_processing", "audio_devices", "audio_set_device", "games_server", "games_select",
     "games_deselect", "games_result", "games_open_external", "open_url", "update_check",
     "update_install", "overlay_context", "perf_painted", "perf_stats", "perf_reset",

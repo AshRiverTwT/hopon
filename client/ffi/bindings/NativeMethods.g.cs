@@ -91,6 +91,24 @@ namespace HopOn.Native
         [DllImport(__DllName, EntryPoint = "hopon_call", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int hopon_call(ulong req, byte* name, nuint name_len, byte* args, nuint args_len, byte* blob, nuint blob_len);
 
+        /// <summary>
+        ///  Pull the newest frame of a screen share you watch (`screen_watch`), as
+        ///  BGRA (opaque) fitted inside `max_w` × `max_h`, written to `dst` with
+        ///  stride width × 4. Synchronous and cheap when nothing changed: call it at
+        ///  your display refresh.
+        ///
+        ///  Returns 1 and sets `out_w`/`out_h`/`out_seq` when a frame newer than
+        ///  `last_seq` was written; 0 if there is nothing new (`out_w`/`out_h` then
+        ///  hold the stream's own size, 0 × 0 before the first frame). A `dst` of
+        ///  `max_w * max_h * 4` bytes always fits. Other values: `HOPON_*` errors.
+        ///
+        ///  # Safety
+        ///  `user_id` must point to `user_id_len` readable bytes, `dst` to `dst_len`
+        ///  writable bytes, and the `out_*` pointers to writable values.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "hopon_screen_frame", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int hopon_screen_frame(byte* user_id, nuint user_id_len, ulong last_seq, byte* dst, nuint dst_len, uint max_w, uint max_h, uint* out_w, uint* out_h, ulong* out_seq);
+
 
     }
 

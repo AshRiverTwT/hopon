@@ -39,6 +39,7 @@ enum UiCoalesceKey {
     Activity(String),
     Status(String),
     Speaking,
+    Screen,
     ChannelActivity(String),
 }
 
@@ -62,6 +63,7 @@ impl UiEvent {
             UiEvent::Activity { user_id, .. } => Some(UiCoalesceKey::Activity(user_id.clone())),
             UiEvent::Status { user_id, .. } => Some(UiCoalesceKey::Status(user_id.clone())),
             UiEvent::Speaking { .. } => Some(UiCoalesceKey::Speaking),
+            UiEvent::Screen { .. } => Some(UiCoalesceKey::Screen),
             UiEvent::ChannelActivity { channel_id, .. } => {
                 Some(UiCoalesceKey::ChannelActivity(channel_id.clone()))
             }

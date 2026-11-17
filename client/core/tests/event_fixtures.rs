@@ -116,6 +116,16 @@ fn samples() -> Vec<UiEvent> {
         UiEvent::MediaPresence { media: media() },
         UiEvent::Voice { channel_id: Some("21".into()), state: "connected", muted: false, deafened: false, detail: None },
         UiEvent::Speaking { user_ids: vec!["1".into(), "2".into()] },
+        UiEvent::Screen {
+            state: hopon_core::ui::ScreenState {
+                channel_id: Some("21".into()),
+                sharing: true,
+                watching: vec!["2".into()],
+                live: vec!["2".into()],
+                viewers: [("2".to_owned(), vec!["1".to_owned(), "3".to_owned()])].into_iter().collect(),
+                detail: None,
+            },
+        },
         UiEvent::OpenChannel { channel_id: "20".into() },
         UiEvent::Error { message: "something failed".into() },
     ];
@@ -132,7 +142,7 @@ fn samples() -> Vec<UiEvent> {
             | UiEvent::UserPresence { .. } | UiEvent::Status { .. } | UiEvent::Activity { .. }
             | UiEvent::Messages { .. } | UiEvent::MsgState { .. } | UiEvent::Edited { .. } | UiEvent::Deleted { .. }
             | UiEvent::Presence { .. } | UiEvent::MediaPresence { .. } | UiEvent::Voice { .. }
-            | UiEvent::Speaking { .. } | UiEvent::OpenChannel { .. } | UiEvent::Error { .. } => {}
+            | UiEvent::Speaking { .. } | UiEvent::Screen { .. } | UiEvent::OpenChannel { .. } | UiEvent::Error { .. } => {}
         }
     }
     all

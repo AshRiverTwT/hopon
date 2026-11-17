@@ -267,6 +267,22 @@ impl From<&MediaPresence> for UiMedia {
     }
 }
 
+/// The native shell's screen-share connection (voice::screen).
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenState {
+    pub channel_id: Option<String>,
+    pub sharing: bool,
+    /// user ids you watch
+    pub watching: Vec<String>,
+    /// watched streams whose video has arrived
+    pub live: Vec<String>,
+    /// sharer user id → viewer user ids (you included)
+    pub viewers: std::collections::HashMap<String, Vec<String>>,
+    /// last error worth showing (share failed, stream ended...)
+    pub detail: Option<String>,
+}
+
 #[derive(Serialize, Clone, Debug)]
 #[serde(tag = "t", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum UiEvent {
@@ -408,6 +424,10 @@ pub enum UiEvent {
         muted: bool,
         deafened: bool,
         detail: Option<String>,
+    },
+    /// Native screen sharing / watching state (Tauri does this in the webview).
+    Screen {
+        state: ScreenState,
     },
     /// Users currently speaking in the joined voice channel.
     Speaking {

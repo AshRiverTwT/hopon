@@ -177,6 +177,7 @@ public sealed record MediaPresence
 [JsonDerivedType(typeof(MediaPresenceEvent), "mediaPresence")]
 [JsonDerivedType(typeof(VoiceEvent), "voice")]
 [JsonDerivedType(typeof(SpeakingEvent), "speaking")]
+[JsonDerivedType(typeof(ScreenEvent), "screen")]
 [JsonDerivedType(typeof(OpenChannelEvent), "openChannel")]
 [JsonDerivedType(typeof(ErrorEvent), "error")]
 public abstract record UiEvent;
@@ -350,6 +351,30 @@ public sealed record VoiceEvent : UiEvent
 
 public sealed record SpeakingEvent : UiEvent { public required List<string> UserIds { get; init; } }
 
+/// <summary>The native screen-share connection: what you share and watch, who watches whom.</summary>
+public sealed record ScreenState
+{
+    public string? ChannelId { get; init; }
+    public bool Sharing { get; init; }
+    public List<string> Watching { get; init; } = [];
+    /// <summary>Watched streams whose video has arrived.</summary>
+    public List<string> Live { get; init; } = [];
+    /// <summary>Sharer user id → viewer user ids (you included).</summary>
+    public Dictionary<string, List<string>> Viewers { get; init; } = [];
+    public string? Detail { get; init; }
+}
+
+public sealed record ScreenEvent : UiEvent { public required ScreenState State { get; init; } }
+
+/// <summary>A screen or window that can be shared (screen_sources).</summary>
+public sealed record ScreenSource
+{
+    /// <summary>"screen:&lt;id&gt;" or "window:&lt;id&gt;".</summary>
+    public required string Id { get; init; }
+    public required string Title { get; init; }
+    public required string Kind { get; init; }
+}
+
 /// <summary>Open this channel (a notification was clicked).</summary>
 public sealed record OpenChannelEvent : UiEvent { public required string ChannelId { get; init; } }
 
@@ -389,6 +414,7 @@ public sealed record GifResults
 [JsonSerializable(typeof(Config))]
 [JsonSerializable(typeof(Page))]
 [JsonSerializable(typeof(GifResults))]
+[JsonSerializable(typeof(List<ScreenSource>))]
 public sealed partial class HopOnJson : JsonSerializerContext
 {
     /// <summary>Parse one event (as delivered to a Subscribe handler).</summary>

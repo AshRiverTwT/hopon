@@ -9,6 +9,8 @@
 //! Audio is only opened while in a channel: idle CPU stays at zero.
 
 mod ptt;
+pub mod screen;
+pub use screen::Source;
 
 use crate::core::{Core, Res};
 use crate::perf::H;
@@ -60,6 +62,7 @@ pub struct Voice {
     /// Per-person playout volume (user id → gain, 1.0 = unchanged, max 2.0).
     volumes: Mutex<HashMap<String, f64>>,
     pub ptt: Ptt,
+    pub screen: screen::Screen,
 }
 
 fn apply_volume(track: &RemoteTrack, v: f64) {
@@ -112,6 +115,7 @@ impl Voice {
             grants: Mutex::new(HashMap::new()),
             volumes: Mutex::new(HashMap::new()),
             ptt: Ptt::new(),
+            screen: screen::Screen::new(),
         }
     }
 
@@ -326,7 +330,14 @@ impl Voice {
         });
     }
 
+    /// The voice room you're connected to.
+    pub async fn channel(&self) -> Option<Id> {
+        self.active.lock().await.as_ref().map(|a| a.channel_id)
+    }
+
     pub async fn leave(&self, core: &Arc<Core>, notify_server: bool) {
+        // Sharing and watching need the voice room.
+        self.screen.close(core).await;
         let a = self.active.lock().await.take();
         let was = a.is_some();
         if let Some(a) = a {

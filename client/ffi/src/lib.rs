@@ -251,3 +251,51 @@ pub unsafe extern "C" fn hopon_call(
     });
     HOPON_OK
 }
+
+/// Pull the newest frame of a screen share you watch (`screen_watch`), as
+/// BGRA (opaque) fitted inside `max_w` × `max_h`, written to `dst` with
+/// stride width × 4. Synchronous and cheap when nothing changed: call it at
+/// your display refresh.
+///
+/// Returns 1 and sets `out_w`/`out_h`/`out_seq` when a frame newer than
+/// `last_seq` was written; 0 if there is nothing new (`out_w`/`out_h` then
+/// hold the stream's own size, 0 × 0 before the first frame). A `dst` of
+/// `max_w * max_h * 4` bytes always fits. Other values: `HOPON_*` errors.
+///
+/// # Safety
+/// `user_id` must point to `user_id_len` readable bytes, `dst` to `dst_len`
+/// writable bytes, and the `out_*` pointers to writable values.
+#[no_mangle]
+pub unsafe extern "C" fn hopon_screen_frame(
+    user_id: *const u8,
+    user_id_len: usize,
+    last_seq: u64,
+    dst: *mut u8,
+    dst_len: usize,
+    max_w: u32,
+    max_h: u32,
+    out_w: *mut u32,
+    out_h: *mut u32,
+    out_seq: *mut u64,
+) -> i32 {
+    let Some(st) = STATE.get() else { return HOPON_NOT_STARTED };
+    let Some(user) = str_arg(user_id, user_id_len) else { return HOPON_BAD_ARGUMENT };
+    if dst.is_null() || out_w.is_null() || out_h.is_null() || out_seq.is_null() {
+        return HOPON_BAD_ARGUMENT;
+    }
+    let buf = std::slice::from_raw_parts_mut(dst, dst_len);
+    match st.core.voice.screen.frame(user, last_seq, buf, max_w, max_h) {
+        Some((w, h, seq)) => {
+            *out_w = w;
+            *out_h = h;
+            *out_seq = seq;
+            1
+        }
+        None => {
+            let (w, h) = st.core.voice.screen.frame_size(user);
+            *out_w = w;
+            *out_h = h;
+            0
+        }
+    }
+}
