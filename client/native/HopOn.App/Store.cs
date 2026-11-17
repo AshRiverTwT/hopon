@@ -53,6 +53,8 @@ public sealed partial class Store
     public View View { get; private set; } = View.Splash;
     public User? Me { get; private set; }
     public string ConnState { get; private set; } = "connecting";
+    /// <summary>Best round trip to the server (ms), for the status corner.</summary>
+    public double? RttMs { get; private set; }
 
     bool splashGaveUp;
 
@@ -268,13 +270,32 @@ public sealed partial class Store
     }
 
     readonly Avatars avatars;
-    Microsoft.UI.Xaml.Media.ImageSource? AvatarOf(string userId) =>
+    public Microsoft.UI.Xaml.Media.ImageSource? AvatarOf(string userId) =>
         users.TryGetValue(userId, out var u) ? avatars.Get(userId, u.AvatarV) : null;
 
     public string NameOf(string userId) =>
         userId == "0" ? "HopOn" : users.TryGetValue(userId, out var u) ? u.Name : "…";
 
-    MessageVm Row(Msg m) => new(m, NameOf(m.AuthorId)) { Avatar = AvatarOf(m.AuthorId), CanDelete = m.AuthorId == Me?.Id || IsOwner };
+    MessageVm Row(Msg m) => new(m, NameOf(m.AuthorId)) { Avatar = AvatarOf(m.AuthorId), AuthorBrush = AccentBrush(m.AuthorId), CanDelete = m.AuthorId == Me?.Id || IsOwner };
+
+    /// <summary>Profile colours (index 0 = none), same as client/ui/src/profile.ts ACCENTS.</summary>
+    static readonly uint[] Accents = [0, 0xff1b50, 0xff7a4d, 0xf2b84b, 0xb8d65a, 0x4fd1a5, 0x5ab4f0, 0xa58cf5, 0xf283c4];
+    readonly Dictionary<int, Microsoft.UI.Xaml.Media.SolidColorBrush> accentBrushes = [];
+
+    /// <summary>The person's name colour: their profile accent, else white.</summary>
+    public Microsoft.UI.Xaml.Media.Brush AccentBrush(string userId)
+    {
+        var i = users.TryGetValue(userId, out var u) && u.Accent < Accents.Length ? u.Accent : 0;
+        if (accentBrushes.TryGetValue(i, out var b)) return b;
+        var c = i == 0 ? 0xffffffu : Accents[i];
+        b = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(255, (byte)(c >> 16), (byte)(c >> 8), (byte)c));
+        accentBrushes[i] = b;
+        return b;
+    }
+
+    /// <summary>Who is in a voice room (presence), you included.</summary>
+    public List<Presence> VoiceMembers(string channelId) => [.. voice.Values.Where(p => p.ChannelId == channelId)];
+    public bool IsSpeaking(string userId) => speaking.Contains(userId);
 
     void Apply(UiEvent e, List<string> painted, ref bool changed, ref bool appended)
     {
@@ -282,6 +303,7 @@ public sealed partial class Store
         {
             case ConnEvent c:
                 ConnState = c.State;
+                if (c.RttMs is { } rtt) RttMs = rtt;
                 changed = true;
                 break;
             case SessionEvent s:
@@ -613,8 +635,9 @@ public sealed partial class Store
     void RefreshAuthors(string userId)
     {
         var name = NameOf(userId);
+        var brush = AccentBrush(userId);
         foreach (var m in Messages)
-            if (m.AuthorId == userId) m.Author = name;
+            if (m.AuthorId == userId) { m.Author = name; m.AuthorBrush = brush; }
     }
 
     // ---------- voice ----------
@@ -626,9 +649,13 @@ public sealed partial class Store
         ["viewedVoice"] = null,
     };
 
+    /// <summary>Voice presence or speaking changed (the dial's counts, the voice room).</summary>
+    public event Action? VoiceChanged;
+
     void RefreshVoiceRows()
     {
         voiceDirty = false;
+        VoiceChanged?.Invoke();
         foreach (var row in Channels)
         {
             if (!row.Voice) continue;

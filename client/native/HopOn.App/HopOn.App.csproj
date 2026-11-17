@@ -37,6 +37,11 @@
     <ProjectReference Include="../HopOn.Interop/HopOn.Interop.csproj" />
     <!-- Window and tray icon (the same one the Tauri build uses). -->
     <Content Include="..\..\src-tauri\icons\icon.ico" Link="HopOn.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- The web UI's type, as static TTF instances (WinUI can't load woff2 or
+         pick variable-font widths): Archivo Expanded Black for titles, Archivo
+         Condensed, Geist, Geist Mono. Renamed per the OFL; licences alongside. -->
+    <Content Include="Fonts\*.ttf;Fonts\*.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\*.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- The Rust core. Override with -p:HoponFfiDll=path\to\hopon_ffi.dll. -->

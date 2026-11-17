@@ -69,14 +69,17 @@ public sealed partial class MemberVm : Observable
     bool online;
     string detail = "";
     public required string Id { get; init; }
-    public string Name { get => name; set => Set(ref name, value); }
+    public string Name { get => name; set { Set(ref name, value); Raise(nameof(Initial)); } }
+    public string Initial => name.Length > 0 ? name[..1].ToUpperInvariant() : "";
     public bool Online { get => online; set { Set(ref online, value); Raise(nameof(DotBrush)); Raise(nameof(RowOpacity)); } }
     /// <summary>"Playing X", or the custom status.</summary>
     public string Detail { get => detail; set { Set(ref detail, value); Raise(nameof(DetailVisibility)); } }
     public Visibility DetailVisibility => Detail.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
     public double RowOpacity => Online ? 1.0 : 0.5;
+    public double RowOpacityDim => Online ? 1.0 : 0.45;
+    /// <summary>A small square: cream when online, nothing when not (the row dims instead).</summary>
     public Microsoft.UI.Xaml.Media.Brush DotBrush => new Microsoft.UI.Xaml.Media.SolidColorBrush(
-        Online ? Microsoft.UI.ColorHelper.FromArgb(255, 59, 165, 93) : Microsoft.UI.ColorHelper.FromArgb(255, 116, 127, 141));
+        Online ? Microsoft.UI.ColorHelper.FromArgb(255, 0xED, 0xED, 0xEE) : Microsoft.UI.Colors.Transparent);
 }
 
 public sealed partial class ChannelVm : Observable
@@ -117,6 +120,9 @@ public sealed partial class AttachmentVm : Observable
     public Visibility ImageVisibility => IsImage ? Visibility.Visible : Visibility.Collapsed;
     public Visibility FileVisibility => IsImage ? Visibility.Collapsed : Visibility.Visible;
     public string FileLabel => $"📎 {A.Name} ({Media.FormatSize(A.Size)})";
+    /// <summary>File kind badge (PDF, ZIP...) and "1.2 MB · Download", like the web's file row.</summary>
+    public string Ext => System.IO.Path.GetExtension(A.Name).TrimStart('.') is { Length: > 0 and <= 4 } e ? e.ToUpperInvariant() : "FILE";
+    public string SizeText => $"{Media.FormatSize(A.Size)} · Download";
     /// <summary>Decoded at display size: a 4000 px photo doesn't cost 64 MB of RAM.</summary>
     public Microsoft.UI.Xaml.Media.Imaging.BitmapImage? Image
     {
@@ -322,7 +328,12 @@ public sealed partial class MessageVm : Observable, IMessageItem
         Raise(nameof(HasMedia));
     }
     public string Content { get => content; private set { Set(ref content, value); Raise(nameof(Body)); Raise(nameof(BodyVisibility)); } }
-    public string Author { get => author; set => Set(ref author, value); }
+    public string Author { get => author; set { Set(ref author, value); Raise(nameof(AuthorCaps)); Raise(nameof(Initial)); } }
+    public string AuthorCaps => author.ToUpperInvariant();
+    public string Initial => author.Length > 0 ? author[..1].ToUpperInvariant() : "";
+    Microsoft.UI.Xaml.Media.Brush? authorBrush;
+    /// <summary>The author's profile colour (white when none), set by the store.</summary>
+    public Microsoft.UI.Xaml.Media.Brush? AuthorBrush { get => authorBrush; set => Set(ref authorBrush, value); }
     public byte State { get => state; private set { Set(ref state, value); Raise(nameof(Opacity)); Raise(nameof(StateText)); } }
     public bool Header { get => header; set { Set(ref header, value); Raise(nameof(HeaderVisibility)); Raise(nameof(RowPadding)); } }
 
@@ -339,14 +350,15 @@ public sealed partial class MessageVm : Observable, IMessageItem
     string dayText = "";
     bool newHere;
     /// <summary>Day separator above this message ("" = none).</summary>
-    public string DayText { get => dayText; set { Set(ref dayText, value); Raise(nameof(DayVisibility)); Raise(nameof(HasDay)); } }
+    public string DayText { get => dayText; set { Set(ref dayText, value); Raise(nameof(DayVisibility)); Raise(nameof(HasDay)); Raise(nameof(DayCaps)); } }
+    public string DayCaps => DayText.ToUpperInvariant();
     public Visibility DayVisibility => DayText.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
     public bool HasDay => DayText.Length > 0;
     /// <summary>The "new messages" divider sits above this message.</summary>
     public bool NewHere { get => newHere; set { Set(ref newHere, value); Raise(nameof(NewVisibility)); } }
     public Visibility NewVisibility => NewHere ? Visibility.Visible : Visibility.Collapsed;
     /// <summary>Indented by the avatar column; the header pulls back over it.</summary>
-    public Thickness RowPadding => new(36, Header ? 10 : 0, 0, 0);
+    public Thickness RowPadding => new(0, Header ? 20 : 3, 0, 3);
 
     public void Update(Msg m, byte newState)
     {

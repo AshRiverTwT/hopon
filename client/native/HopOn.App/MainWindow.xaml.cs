@@ -19,7 +19,6 @@ public sealed partial class MainWindow : Window
     readonly List<string> paintPending = [];
     bool paintArmed;
     bool readySent;
-    bool syncing;
 
     public MainWindow()
     {
@@ -45,6 +44,19 @@ public sealed partial class MainWindow : Window
         AppWindow.Changed += OnAppWindowChanged;
 
         Store.Changed += Render;
+        Store.Changed += () => { if (Store.OpenServer is { } sv && !Store.HomeMode) lastServer = sv; };
+        Store.VoiceChanged += () => { if (Store.View == View.Shell) { if (!Store.HomeMode) SyncDial(); RenderStage(); } };
+        Store.ScreenChanged += () => { if (Store.View == View.Shell) RenderStage(); };
+        ChannelDial.ChannelPicked += OnDialChannel;
+        ChannelDial.NewChannel += OnDialNewChannel;
+        ChannelDial.ServerPicked += sv => { stage = null; if (sv != Store.OpenServer) _ = Store.SelectServer(sv); };
+        ChannelDial.MonogramClicked += OnMonogram;
+        Root.SizeChanged += (_, _) => FitTitle();
+        // The status corner's clock: once a minute, on the minute.
+        var clock = DispatcherQueue.CreateTimer();
+        clock.Interval = TimeSpan.FromSeconds(60.05 - DateTime.Now.Second - DateTime.Now.Millisecond / 1000.0);
+        clock.Tick += (t, _) => { t.Interval = TimeSpan.FromSeconds(60); if (Store.View == View.Shell) RenderStatus(); };
+        clock.Start();
         var splashTimer = DispatcherQueue.CreateTimer();
         splashTimer.Interval = TimeSpan.FromSeconds(5);
         splashTimer.IsRepeating = false;
@@ -65,7 +77,7 @@ public sealed partial class MainWindow : Window
         });
         toastTimer = dispatcher.CreateTimer();
         toastTimer.Interval = TimeSpan.FromSeconds(4);
-        toastTimer.Tick += (_, _) => { Toast.IsOpen = false; toastTimer.Stop(); };
+        toastTimer.Tick += (_, _) => { Toast.Visibility = Visibility.Collapsed; toastTimer.Stop(); };
 
         // First events (prefs, session) are delivered right here, synchronously:
         // the store only queues them.
@@ -195,6 +207,11 @@ public sealed partial class MainWindow : Window
 
     // ---------- rendering ----------
 
+    /// <summary>The voice room shown in the main column (a voice channel picked on the dial), or null.</summary>
+    ChannelVm? stage;
+
+    static string Caps(string s) => s.ToUpperInvariant();
+
     void Render()
     {
         SplashView.Visibility = Store.View == View.Splash ? Visibility.Visible : Visibility.Collapsed;
@@ -205,70 +222,201 @@ public sealed partial class MainWindow : Window
             "incompatible" => "This server runs a different HopOn version.",
             _ => "Connecting to the server…",
         };
-        SplashStatus.Text = conn;
-        LoginConn.Text = conn.Length == 0 ? "" : $"{conn} ({UrlBox.Text})";
+        SplashStatus.Text = Caps(conn);
+        LoginConn.Text = conn.Length == 0 ? "" : conn;
         LoginView.Visibility = Store.View == View.Login ? Visibility.Visible : Visibility.Collapsed;
         ShellView.Visibility = Store.View == View.Shell ? Visibility.Visible : Visibility.Collapsed;
+        if (Store.View != View.Shell)
+        {
+            if (Store.View == View.Login && UserBox.FocusState == FocusState.Unfocused) UserBox.Focus(FocusState.Programmatic);
+            return;
+        }
+
+        // nav: Friends | Servers
+        var home = Store.HomeMode;
+        FriendsTab.Style = (Style)Application.Current.Resources[home ? "SolidKeyButton" : "KeyButton"];
+        ServersTab.Style = (Style)Application.Current.Resources[home ? "KeyButton" : "SolidKeyButton"];
+        FriendsTab.Height = ServersTab.Height = 36;
+        var requests = Store.Friends.Count(f => f.State == "incoming");
+        FriendsBadge.Visibility = requests > 0 ? Visibility.Visible : Visibility.Collapsed;
+        FriendsBadgeText.Text = requests.ToString();
+        FriendsPanel.Visibility = home ? Visibility.Visible : Visibility.Collapsed;
+        ChannelDial.Visibility = home ? Visibility.Collapsed : Visibility.Visible;
+        if (!home) SyncDial();
+
+        // you (bottom left)
         var st = Store.MyStatus;
-        var mode = st?.Mode switch { "dnd" => " · Do not disturb", "invisible" => " · Invisible", "idle" => " · Idle", _ => "" };
-        MeText.Text = (Store.Me?.Name ?? "") + mode;
-        if (st is { Text.Length: > 0 }) MeText.Text += $" — {(st.Emoji + " " + st.Text).Trim()}";
-        if (Store.OpenChannel is { } oc)
+        MeText.Text = Store.Me?.Name ?? "";
+        MeInitial.Text = Store.Me?.Name is { Length: > 0 } n ? n[..1].ToUpperInvariant() : "";
+        MeAvatar.Source = Store.Me is { } me ? Store.AvatarOf(me.Id) : null;
+        MeDot.Fill = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[st?.Mode is "dnd" ? "Signal" : st?.Mode is "invisible" or "idle" ? "Cream35" : "Cream"];
+        ToolTipService.SetToolTip(MeButton, st is { Text.Length: > 0 } ? $"{st.Emoji} {st.Text}".Trim() : "Your status");
+        var v = Store.MyVoice;
+        var muted = v?.Muted ?? false;
+        var deafened = v?.Deafened ?? false;
+        Toggle(MuteButton, MicLed, MicText, !muted, muted ? "MIC OFF" : "MIC ON");
+        Toggle(DeafenButton, SoundLed, SoundText, !deafened, deafened ? "SOUND OFF" : "SOUND ON");
+
+        // head + main: a text channel, or the voice room
+        if (stage is not null && !Store.Channels.Contains(stage)) stage = null;
+        var serverName = home ? "Direct messages" : Store.OpenServer?.Name ?? "";
+        var room = stage is not null;
+        if (room)
+        {
+            ServerTitle.Text = Caps($"Voice room · {serverName}");
+            ChannelTitle.Text = Caps(stage!.Name);
+            ChannelTopic.Text = "";
+        }
+        else
+        {
+            ServerTitle.Text = Store.OpenChannel is null ? Caps(serverName) : Caps($"{(home ? "Direct message" : "Text channel")} · {serverName}");
+            ChannelTitle.Text = Caps(Store.OpenChannel?.Name ?? (home ? "Friends" : ""));
+            ChannelTopic.Text = Store.OpenChannel?.Topic ?? "";
+        }
+        ChannelTopic.Visibility = ChannelTopic.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        FitTitle();
+        MessageList.Visibility = room ? Visibility.Collapsed : Visibility.Visible;
+        ComposerPanel.Visibility = room ? Visibility.Collapsed : Visibility.Visible;
+        StagePanel.Visibility = room ? Visibility.Visible : Visibility.Collapsed;
+        if (Store.OpenChannel is { } oc && !room)
         {
             var level = Store.ChannelLevel(oc.Id);
             BellAll.IsChecked = level == "all";
             BellMentions.IsChecked = level == "mentions";
             BellNone.IsChecked = level == "none";
-            BellButton.Content = level == "none" ? "🔕" : "🔔";
+            BellPath.Data = (Microsoft.UI.Xaml.Media.Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Microsoft.UI.Xaml.Media.Geometry),
+                level == "none" ? "M4 11V7a4 4 0 016.7-3M12 7v4l1.2 1.5H5M6.5 14h3M2 2l12 12" : "M4 11V7a4 4 0 018 0v4l1.2 1.5H2.8zM6.5 14h3");
         }
-        BellButton.Visibility = Store.OpenChannel is null ? Visibility.Collapsed : Visibility.Visible;
-        ConnText.Text = Store.ConnState switch
-        {
-            "online" => "Connected",
-            "connecting" => "Connecting…",
-            "incompatible" => "Update needed",
-            _ => "Offline, reconnecting…",
-        };
-        ServerTitle.Text = Store.HomeMode ? "Friends" : Store.OpenServer?.Name ?? "";
-        FriendsPanel.Visibility = Store.HomeMode ? Visibility.Visible : Visibility.Collapsed;
-        ChannelList.Visibility = Store.HomeMode ? Visibility.Collapsed : Visibility.Visible;
-        ServerMenuButton.Visibility = Store.OpenServer is null || Store.HomeMode ? Visibility.Collapsed : Visibility.Visible;
-        CreateChannelItem.Visibility = Store.IsOwner ? Visibility.Visible : Visibility.Collapsed;
-        ServerSettingsItem.Visibility = Store.IsOwner ? Visibility.Visible : Visibility.Collapsed;
-        ChannelVm.OwnerTools = Store.IsOwner;
-        LeaveServerItem.Visibility = Store.IsOwner ? Visibility.Collapsed : Visibility.Visible;
-        ChannelTitle.Text = Store.OpenChannel is null ? "" : "# " + Store.OpenChannel.Name;
-        ChannelTopic.Text = Store.OpenChannel?.Topic ?? "";
-        Composer.PlaceholderText = Store.OpenChannel is null ? "" : $"Message #{Store.OpenChannel.Name}";
+        BellButton.Visibility = Store.OpenChannel is null || room ? Visibility.Collapsed : Visibility.Visible;
+        Composer.PlaceholderText = Store.OpenChannel is null ? "" : $"Write in {Store.OpenChannel.Name}";
         Composer.IsEnabled = Store.OpenChannel is not null;
         AttachButton.IsEnabled = Store.OpenChannel is not null;
         GifButton.IsEnabled = Store.OpenChannel is not null;
 
+        // side: toolbar strip, people
+        ServerMenuButton.Visibility = Store.OpenServer is null || home ? Visibility.Collapsed : Visibility.Visible;
+        PeopleKey.Visibility = Store.OpenServer is null || home ? Visibility.Collapsed : Visibility.Visible;
+        PeopleCount.Text = Store.OpenServer?.MemberIds.Count.ToString() ?? "";
+        CreateChannelItem.Visibility = Store.IsOwner ? Visibility.Visible : Visibility.Collapsed;
+        ServerSettingsItem.Visibility = Store.IsOwner ? Visibility.Visible : Visibility.Collapsed;
+        ChannelVm.OwnerTools = Store.IsOwner;
+        LeaveServerItem.Visibility = Store.IsOwner ? Visibility.Collapsed : Visibility.Visible;
+        OnlineHead.Text = $"ONLINE · {Store.Members.Count(m => m.Online)}";
+
+        RenderStatus();
+        RenderStage();
+    }
+
+    /// <summary>Mic / Sound key: a lit LED when on; transparent with a hollow LED when off.</summary>
+    static void Toggle(Button b, Microsoft.UI.Xaml.Shapes.Rectangle led, TextBlock label, bool on, string text)
+    {
+        var res = Application.Current.Resources;
+        label.Text = text;
+        b.Background = on ? (Microsoft.UI.Xaml.Media.Brush)res["Key"] : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        label.Foreground = (Microsoft.UI.Xaml.Media.Brush)res[on ? "Cream80" : "Cream35"];
+        led.Fill = on ? (Microsoft.UI.Xaml.Media.Brush)res["Signal"] : null;
+        led.Stroke = on ? null : (Microsoft.UI.Xaml.Media.Brush)res["Cream35"];
+        led.StrokeThickness = 1;
+    }
+
+    /// <summary>Titles fit the column like the web's clamp(34px, 5.2vw, 72px).</summary>
+    void FitTitle()
+    {
+        var w = Root.ActualWidth > 0 ? Root.ActualWidth : 1200;
+        ChannelTitle.FontSize = Math.Clamp(w * 0.052, 34, 72);
+        var col = Math.Max(200, w - DialColumn.ActualWidth - RailColumn.ActualWidth - 80);
+        ChannelTitle.MaxWidth = col;
+        LoginHop.FontSize = LoginOn.FontSize = Math.Clamp(w * 0.11, 64, 168);
+    }
+
+    void SyncDial()
+    {
+        ChannelDial.Update(Store.Channels, stage ?? Store.OpenChannel, Store.IsOwner, Store.Servers, Store.OpenServer, c =>
+        {
+            var people = c.Voice ? Store.VoiceMembers(c.Id) : [];
+            var live = c.Voice ? people.Any(p => Store.IsSpeaking(p.UserId)) : c.Unread && c != Store.OpenChannel;
+            return (people.Count, live, 0);
+        });
+    }
+
+    /// <summary>Bottom right: the light, the room you're live in, latency, clock.</summary>
+    void RenderStatus()
+    {
+        var res = Application.Current.Resources;
         var v = Store.MyVoice;
         var inVoice = v is not null && v.State != "idle";
-        VoicePanel.Visibility = inVoice ? Visibility.Visible : Visibility.Collapsed;
+        var online = Store.ConnState == "online";
+        StatusLed.Fill = (Microsoft.UI.Xaml.Media.Brush)res[!online ? "White" : inVoice ? "Signal" : "Cream35"];
         if (inVoice)
         {
-            var room = Store.Channels.FirstOrDefault(c => c.Id == v!.ChannelId)?.Name ?? "voice";
-            VoiceText.Text = v!.State switch
-            {
-                "connected" => $"Voice connected · {room}",
-                "connecting" => $"Connecting to {room}…",
-                "reconnecting" => $"Reconnecting to {room}…",
-                _ => $"{v.State} · {room}",
-            };
-            MuteButton.IsChecked = v.Muted;
-            DeafenButton.IsChecked = v.Deafened;
-            ShareButton.Content = Store.Screen.Sharing ? "Stop sharing" : "Share screen";
-            ShareButton.IsEnabled = v.State == "connected" || Store.Screen.Sharing;
+            var roomName = Store.Channels.FirstOrDefault(c => c.Id == v!.ChannelId)?.Name ?? "voice";
+            StatusVoice.Text = Caps($"{(v!.State == "connected" ? "Live" : v.State == "reconnecting" ? "Reconnecting" : "Joining")} · {roomName}");
+            StatusVoice.Visibility = Visibility.Visible;
         }
-        SyncSharers(inVoice);
+        else StatusVoice.Visibility = Visibility.Collapsed;
+        ConnText.Text = Caps(Store.ConnState switch
+        {
+            "online" => Store.RttMs is { } r ? (r < 1 ? "<1 ms" : $"{r:0} ms") : "Online",
+            "connecting" => "Connecting",
+            "incompatible" => "Update needed",
+            _ => "Offline",
+        });
+        ClockText.Text = DateTime.Now.ToString("hh:mm tt", System.Globalization.CultureInfo.InvariantCulture);
+    }
 
-        syncing = true;
-        ServerList.SelectedItem = Store.OpenServer;
-        ChannelList.SelectedItem = Store.OpenChannel;
-        syncing = false;
-        if (Store.View == View.Login && UserBox.FocusState == FocusState.Unfocused) UserBox.Focus(FocusState.Programmatic);
+    /// <summary>The voice room: everyone in it (big names, like the web's index), Join / Leave, Stream.</summary>
+    void RenderStage()
+    {
+        if (stage is null) return;
+        var res = Application.Current.Resources;
+        var v = Store.MyVoice;
+        var joined = v is not null && v.State != "idle" && v.ChannelId == stage.Id;
+        var connected = joined && v!.State == "connected";
+        StagePeople.Children.Clear();
+        var people = Store.VoiceMembers(stage.Id);
+        if (people.Count == 0)
+            StagePeople.Children.Add(new TextBlock { Text = "Nobody is here yet.", FontSize = 17, Foreground = (Microsoft.UI.Xaml.Media.Brush)res["Cream55"], Margin = new Thickness(0, 14, 0, 0) });
+        foreach (var p in people.OrderBy(p => Store.NameOf(p.UserId), StringComparer.CurrentCultureIgnoreCase))
+        {
+            var row = new Grid { ColumnSpacing = 16, Padding = new Thickness(4, 14, 4, 14), BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = (Microsoft.UI.Xaml.Media.Brush)res["Cream10"] };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var name = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+            var speaking = Store.IsSpeaking(p.UserId);
+            var av = new Grid { Width = 40, Height = 40 };
+            av.Children.Add(new Border { Background = (Microsoft.UI.Xaml.Media.Brush)res["Cream10"], BorderThickness = new Thickness(speaking ? 2 : 0), BorderBrush = (Microsoft.UI.Xaml.Media.Brush)res["Signal"],
+                Child = new TextBlock { Text = Store.NameOf(p.UserId)[..1].ToUpperInvariant(), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } });
+            if (Store.AvatarOf(p.UserId) is { } img) av.Children.Add(new Image { Source = img, Stretch = Microsoft.UI.Xaml.Media.Stretch.UniformToFill, Margin = new Thickness(speaking ? 2 : 0) });
+            name.Children.Add(av);
+            name.Children.Add(new TextBlock { Text = Store.NameOf(p.UserId), FontSize = 28, VerticalAlignment = VerticalAlignment.Center, Foreground = (Microsoft.UI.Xaml.Media.Brush)res[speaking ? "Cream" : "Cream80"] });
+            if (speaking) name.Children.Add(new Microsoft.UI.Xaml.Shapes.Rectangle { Width = 8, Height = 8, Fill = (Microsoft.UI.Xaml.Media.Brush)res["Signal"], VerticalAlignment = VerticalAlignment.Center });
+            if (Store.IsSharing(p.UserId))
+                name.Children.Add(new Border { Background = (Microsoft.UI.Xaml.Media.Brush)res["Signal"], Padding = new Thickness(5, 1, 5, 1), VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock { Text = "LIVE", FontSize = 11, FontFamily = (Microsoft.UI.Xaml.Media.FontFamily)res["MonoSemiFont"], Foreground = (Microsoft.UI.Xaml.Media.Brush)res["Ink"] } });
+            row.Children.Add(name);
+            var meta = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
+            if (connected && p.UserId != Store.Me?.Id && Store.IsSharing(p.UserId))
+            {
+                var user = p.UserId;
+                var watch = new Button { Content = StreamWindow.IsOpen(user) ? "OPEN" : "WATCH", Style = (Style)res["KeyButton"] };
+                watch.Click += (_, _) => { StreamWindow.Open(Store, user); RenderStage(); };
+                meta.Children.Add(watch);
+            }
+            var flags = string.Join(" · ", new[] { p.Muted ? "Mic off" : null, p.Deafened ? "Sound off" : null }.Where(x => x is not null));
+            if (flags.Length > 0) meta.Children.Add(new TextBlock { Text = flags, FontSize = 13, Foreground = (Microsoft.UI.Xaml.Media.Brush)res["Cream55"], VerticalAlignment = VerticalAlignment.Center });
+            Grid.SetColumn(meta, 1);
+            row.Children.Add(meta);
+            StagePeople.Children.Add(row);
+        }
+        StageJoin.Visibility = joined ? Visibility.Collapsed : Visibility.Visible;
+        StageJoin.Content = v is not null && v.State != "idle" ? "SWITCH TO THIS ROOM" : "JOIN";
+        StageJoin.IsEnabled = Store.ConnState == "online";
+        StageLeave.Visibility = joined ? Visibility.Visible : Visibility.Collapsed;
+        ShareButton.Visibility = joined ? Visibility.Visible : Visibility.Collapsed;
+        ShareButton.IsEnabled = connected || Store.Screen.Sharing;
+        ShareText.Text = Store.Screen.Sharing ? "STOP STREAMING" : "STREAM";
+        VoiceText.Text = !joined ? "" : v!.State == "connected" ? "You're live" : v.State == "reconnecting" ? "Reconnecting…" : "Joining…";
+        SyncSharers(v is not null && v.State != "idle");
     }
 
     ScrollViewer? messageScroll;
@@ -328,8 +476,8 @@ public sealed partial class MainWindow : Window
 
     void ShowToast(string message)
     {
-        Toast.Message = message;
-        Toast.IsOpen = true;
+        ToastText.Text = message;
+        Toast.Visibility = Visibility.Visible;
         toastTimer.Stop();
         toastTimer.Start();
     }
@@ -452,10 +600,64 @@ public sealed partial class MainWindow : Window
 
     void OnHome(object sender, RoutedEventArgs e)
     {
-        syncing = true;
-        ServerList.SelectedItem = null;
-        syncing = false;
+        stage = null;
         Store.ShowHome();
+    }
+
+    /// <summary>Servers tab: back to the last server (or the first).</summary>
+    void OnServersTab(object sender, RoutedEventArgs e)
+    {
+        if (!Store.HomeMode) return;
+        _ = Store.SelectServer(lastServer is not null && Store.Servers.Contains(lastServer) ? lastServer : Store.Servers.FirstOrDefault());
+    }
+
+    ServerVm? lastServer;
+
+    /// <summary>The monogram: every server, plus create / join.</summary>
+    void OnMonogram(FrameworkElement anchor)
+    {
+        var menu = new MenuFlyout();
+        foreach (var sv in Store.Servers)
+        {
+            var item = new ToggleMenuFlyoutItem { Text = sv.Name, IsChecked = sv == Store.OpenServer };
+            var target = sv;
+            item.Click += (_, _) => { stage = null; _ = Store.SelectServer(target); };
+            menu.Items.Add(item);
+        }
+        if (Store.Servers.Count > 0) menu.Items.Add(new MenuFlyoutSeparator());
+        var create = new MenuFlyoutItem { Text = "Create a server…" };
+        create.Click += OnCreateServer;
+        var join = new MenuFlyoutItem { Text = "Join with an invite…" };
+        join.Click += OnJoinServer;
+        menu.Items.Add(create);
+        menu.Items.Add(join);
+        menu.ShowAt(anchor);
+    }
+
+    void OnDialChannel(ChannelVm vm)
+    {
+        if (vm.Voice)
+        {
+            // A voice room: show it (Join is a click away); the text channel stays open underneath.
+            stage = vm;
+            Render();
+            return;
+        }
+        var wasStage = stage is not null;
+        stage = null;
+        if (vm != Store.OpenChannel) _ = Store.OpenChannelRow(vm);
+        else if (wasStage) Render();
+    }
+
+    async void OnDialNewChannel(bool voice)
+    {
+        var box = new CheckBox { Content = "Voice room", IsChecked = voice };
+        if (await Ask("Create a channel", "Name", voice ? "Lounge" : "new-channel", "Create", box) is { } name) await Store.CreateChannel(name, box.IsChecked == true);
+    }
+
+    void OnStageJoin(object sender, RoutedEventArgs e)
+    {
+        if (stage is not null) _ = Store.JoinVoice(stage);
     }
 
     async void OnAddFriend(object sender, RoutedEventArgs e)
@@ -612,29 +814,8 @@ public sealed partial class MainWindow : Window
 
     // ---------- navigation and composing ----------
 
-    void OnServerSelected(object sender, SelectionChangedEventArgs e)
-    {
-        if (syncing || ServerList.SelectedItem is not ServerVm vm || vm == Store.OpenServer) return;
-        _ = Store.SelectServer(vm);
-    }
-
-    void OnChannelSelected(object sender, SelectionChangedEventArgs e)
-    {
-        if (syncing || ChannelList.SelectedItem is not ChannelVm vm || vm == Store.OpenChannel) return;
-        if (vm.Voice)
-        {
-            // A voice room: join it, keep the text channel open.
-            syncing = true;
-            ChannelList.SelectedItem = Store.OpenChannel;
-            syncing = false;
-            _ = Store.JoinVoice(vm);
-            return;
-        }
-        _ = Store.OpenChannelRow(vm);
-    }
-
-    void OnMute(object sender, RoutedEventArgs e) => _ = Store.SetMuted(MuteButton.IsChecked == true);
-    void OnDeafen(object sender, RoutedEventArgs e) => _ = Store.SetDeafened(DeafenButton.IsChecked == true);
+    void OnMute(object sender, RoutedEventArgs e) => _ = Store.SetMuted(!(Store.MyVoice?.Muted ?? false));
+    void OnDeafen(object sender, RoutedEventArgs e) => _ = Store.SetDeafened(!(Store.MyVoice?.Deafened ?? false));
     void OnLeaveVoice(object sender, RoutedEventArgs e) => _ = Store.LeaveVoice();
 
     async void OnShareScreen(object sender, RoutedEventArgs e)
@@ -645,35 +826,10 @@ public sealed partial class MainWindow : Window
         finally { ShareButton.IsEnabled = true; }
     }
 
-    string sharersShown = "";
-
-    /// <summary>One row per person sharing in your room: name, viewers, Watch / Open.</summary>
+    /// <summary>Leaving voice closes every stream window (watching needs the room).</summary>
     void SyncSharers(bool inVoice)
     {
-        var sharers = inVoice ? Store.SharersInMyRoom() : [];
         if (!inVoice) StreamWindow.CloseAll();
-        var key = string.Join(",", sharers.Select(u => $"{u}:{Store.ViewerCount(u)}:{StreamWindow.IsOpen(u)}:{Store.NameOf(u)}"));
-        if (key == sharersShown) return;
-        sharersShown = key;
-        SharersPanel.Children.Clear();
-        foreach (var u in sharers)
-        {
-            var row = new Grid { ColumnSpacing = 6 };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var n = Store.ViewerCount(u);
-            row.Children.Add(new TextBlock
-            {
-                Text = $"🖥 {Store.NameOf(u)}" + (n > 0 ? $" · {n} watching" : ""),
-                FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
-            });
-            var watch = new Button { Content = StreamWindow.IsOpen(u) ? "Open" : "Watch", FontSize = 12, Padding = new Thickness(8, 2, 8, 2) };
-            var user = u;
-            watch.Click += (_, _) => { StreamWindow.Open(Store, user); sharersShown = ""; SyncSharers(true); };
-            Grid.SetColumn(watch, 1);
-            row.Children.Add(watch);
-            SharersPanel.Children.Add(row);
-        }
     }
 
     async void OnAttach(object sender, RoutedEventArgs e)

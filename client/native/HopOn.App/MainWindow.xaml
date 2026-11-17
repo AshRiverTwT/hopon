@@ -5,96 +5,426 @@
     xmlns:local="using:HopOn.App"
     Title="HopOn">
 
-    <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
-          AllowDrop="True" DragOver="OnDragOver" Drop="OnDrop">
+    <!-- Same frame as the web UI (styles.css .frame): dial | main | rail across,
+         nav/head/side on top, foot-l/foot-r in the bottom corners, viewfinder
+         marks on the frame. -->
+    <Grid x:Name="Root" Background="{StaticResource Ink}" AllowDrop="True" DragOver="OnDragOver" Drop="OnDrop">
 
-        <!-- Splash: still signing in with the saved login. -->
-        <StackPanel x:Name="SplashView" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="16">
-            <TextBlock Text="HopOn" FontSize="34" FontWeight="SemiBold" HorizontalAlignment="Center" />
-            <ProgressRing IsActive="True" Width="28" Height="28" />
-            <TextBlock x:Name="SplashStatus" FontSize="12" Opacity="0.7" HorizontalAlignment="Center" />
+        <!-- Splash: the HopOn mark, while the saved sign-in runs. -->
+        <StackPanel x:Name="SplashView" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="22">
+            <Viewbox Width="120" Height="120">
+                <Canvas Width="512" Height="512">
+                    <Rectangle Canvas.Left="100" Canvas.Top="160" Width="96" Height="256" Fill="{StaticResource Cream}" />
+                    <Rectangle Canvas.Left="316" Canvas.Top="96" Width="96" Height="256" Fill="{StaticResource Cream}" />
+                    <Rectangle Canvas.Left="196" Canvas.Top="228" Width="120" Height="64" Fill="{StaticResource Signal}" />
+                </Canvas>
+            </Viewbox>
+            <TextBlock x:Name="SplashStatus" Style="{StaticResource Eyebrow}" HorizontalAlignment="Center" />
         </StackPanel>
 
-        <!-- Sign in / sign up. -->
-        <StackPanel x:Name="LoginView" Visibility="Collapsed" Width="320"
-                    HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
-            <TextBlock Text="HopOn" FontSize="34" FontWeight="SemiBold" />
-            <TextBox x:Name="UserBox" Header="Username" />
-            <PasswordBox x:Name="PassBox" Header="Password" KeyDown="OnPasswordKeyDown" />
-            <TextBox x:Name="UrlBox" Header="Server" />
-            <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button x:Name="SignInButton" Content="Sign in" Style="{StaticResource AccentButtonStyle}" Click="OnSignIn" />
-                <Button x:Name="SignUpButton" Content="Create account" Click="OnSignUp" />
+        <!-- Sign in: HOP / ON on the left, a line form on the right (.login) -->
+        <Grid x:Name="LoginView" Visibility="Collapsed" Padding="56,0" ColumnSpacing="48">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.2*" />
+                <ColumnDefinition Width="*" MinWidth="320" />
+            </Grid.ColumnDefinitions>
+            <Image Source="ms-appx:///Assets/dots-login.png" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Center"
+                   Margin="-56,0,0,0" Grid.ColumnSpan="2" IsHitTestVisible="False" />
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock x:Name="LoginHop" Text="HOP" Style="{StaticResource Display}" FontSize="132" />
+                <TextBlock x:Name="LoginOn" Text="ON" Style="{StaticResource Display}" FontSize="132" Foreground="{StaticResource Cream35}" Margin="0,4,0,0" />
             </StackPanel>
-            <TextBlock x:Name="LoginError" TextWrapping="Wrap" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-            <TextBlock x:Name="LoginConn" TextWrapping="Wrap" FontSize="12" Opacity="0.75" />
-        </StackPanel>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" MaxWidth="420" HorizontalAlignment="Left" Spacing="8">
+                <TextBlock Text="SIGN IN" Style="{StaticResource Eyebrow}" Margin="0,0,0,10" />
+                <TextBox x:Name="UserBox" PlaceholderText="Username" FontSize="22" Padding="0,10,0,12" MinWidth="380" />
+                <PasswordBox x:Name="PassBox" PlaceholderText="Password" FontSize="22" Padding="0,10,0,12" KeyDown="OnPasswordKeyDown" />
+                <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,22,0,0">
+                    <Button x:Name="SignInButton" Content="LOG IN" Style="{StaticResource SolidKeyButton}" Click="OnSignIn" />
+                    <Button x:Name="SignUpButton" Content="CREATE ACCOUNT" Style="{StaticResource KeyButton}" Click="OnSignUp" />
+                </StackPanel>
+                <TextBlock x:Name="LoginError" TextWrapping="Wrap" Foreground="{StaticResource Signal}" Margin="0,14,0,0"
+                           FontFamily="{StaticResource MonoFont}" FontSize="11" />
+                <Grid Margin="0,26,0,0" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Server ·" Foreground="{StaticResource Cream55}" FontSize="12" VerticalAlignment="Center"
+                               FontFamily="{StaticResource MonoFont}" />
+                    <TextBox x:Name="UrlBox" Grid.Column="1" FontSize="12" FontFamily="{StaticResource MonoFont}" Padding="0,4,0,4" MinHeight="0"
+                             Foreground="{StaticResource Cream55}" />
+                </Grid>
+                <TextBlock x:Name="LoginConn" TextWrapping="Wrap" FontSize="11" FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource Cream55}" />
+            </StackPanel>
+        </Grid>
 
-        <!-- Signed in. -->
+        <!-- Signed in -->
         <Grid x:Name="ShellView" Visibility="Collapsed">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="72" />
-                <ColumnDefinition Width="240" />
+                <ColumnDefinition x:Name="DialColumn" Width="300" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="230" />
+                <ColumnDefinition x:Name="RailColumn" Width="230" />
             </Grid.ColumnDefinitions>
-
-            <!-- Servers -->
-            <Grid Grid.Column="0" Background="{ThemeResource LayerOnMicaBaseAltFillColorSecondaryBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
+                <RowDefinition Height="64" />
             </Grid.RowDefinitions>
-            <Button x:Name="HomeButton" Grid.Row="0" Content="👥" FontSize="18" Width="46" Height="46" CornerRadius="16" Margin="0,12,0,4"
-                    HorizontalAlignment="Center" ToolTipService.ToolTip="Friends and direct messages" Click="OnHome" />
-            <Button Grid.Row="2" Content="+" FontSize="20" Width="46" Height="46" CornerRadius="16" Margin="0,4,0,12"
-                    HorizontalAlignment="Center" ToolTipService.ToolTip="Create or join a server">
-                <Button.Flyout>
-                    <MenuFlyout>
-                        <MenuFlyoutItem Text="Create a server…" Click="OnCreateServer" />
-                        <MenuFlyoutItem Text="Join with an invite…" Click="OnJoinServer" />
-                    </MenuFlyout>
-                </Button.Flyout>
-            </Button>
-            <ListView x:Name="ServerList" Grid.Row="1" Padding="0,8"
-                      Background="{ThemeResource LayerOnMicaBaseAltFillColorSecondaryBrush}"
-                      ItemsSource="{x:Bind Store.Servers}" SelectionMode="Single"
-                      SelectionChanged="OnServerSelected">
-                <ListView.ItemContainerStyle>
-                    <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
-                        <Setter Property="Padding" Value="0" />
-                        <Setter Property="HorizontalContentAlignment" Value="Center" />
-                    </Style>
-                </ListView.ItemContainerStyle>
-                <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="local:ServerVm">
-                        <Border Width="46" Height="46" CornerRadius="16" Margin="0,4"
-                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                ToolTipService.ToolTip="{x:Bind Name, Mode=OneWay}">
-                            <TextBlock Text="{x:Bind Initials, Mode=OneWay}" FontWeight="SemiBold"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+            <!-- nav: Friends | Servers, a two-position switch -->
+            <Grid Margin="28,24,28,0" VerticalAlignment="Top">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Button x:Name="FriendsTab" Click="OnHome" HorizontalAlignment="Stretch" Height="36" Padding="10,0">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock Text="FRIENDS" FontFamily="{StaticResource MonoSemiFont}" FontSize="11" CharacterSpacing="180" VerticalAlignment="Center" />
+                        <Border x:Name="FriendsBadge" Background="{StaticResource Signal}" Padding="5,0" Visibility="Collapsed" VerticalAlignment="Center">
+                            <TextBlock x:Name="FriendsBadgeText" FontFamily="{StaticResource MonoSemiFont}" FontSize="11" Foreground="{StaticResource Ink}" />
                         </Border>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="ServersTab" Grid.Column="1" Click="OnServersTab" HorizontalAlignment="Stretch" Height="36" Padding="10,0" Margin="-1,0,0,0">
+                    <TextBlock Text="SERVERS" FontFamily="{StaticResource MonoSemiFont}" FontSize="11" CharacterSpacing="180" />
+                </Button>
             </Grid>
 
-            <!-- Channels -->
-            <Grid Grid.Column="1" Background="{ThemeResource LayerFillColorDefaultBrush}">
+            <!-- head: eyebrow, the channel's name in Archivo, topic, a rule -->
+            <StackPanel x:Name="HeadPanel" Grid.Column="1" Margin="0,24,20,0" Padding="0,4,0,18" BorderThickness="0,0,0,1" BorderBrush="{StaticResource Cream10}">
+                <TextBlock x:Name="ServerTitle" Style="{StaticResource Eyebrow}" Margin="0,0,0,10" />
+                <StackPanel Orientation="Horizontal" Spacing="14">
+                    <TextBlock x:Name="ChannelTitle" Style="{StaticResource Display}" FontSize="62" MaxWidth="900" />
+                    <Button x:Name="BellButton" Style="{StaticResource BareIcon}" VerticalAlignment="Center" ToolTipService.ToolTip="Notifications for this channel">
+                        <Path x:Name="BellPath" Style="{StaticResource Glyph}" Stroke="{StaticResource Cream80}" Data="M4 11V7a4 4 0 018 0v4l1.2 1.5H2.8zM6.5 14h3" />
+                        <Button.Flyout>
+                            <MenuFlyout>
+                                <RadioMenuFlyoutItem x:Name="BellAll" Text="All messages" GroupName="bell" Click="OnBell" Tag="all" />
+                                <RadioMenuFlyoutItem x:Name="BellMentions" Text="Only @mentions" GroupName="bell" Click="OnBell" Tag="mentions" />
+                                <RadioMenuFlyoutItem x:Name="BellNone" Text="Nothing" GroupName="bell" Click="OnBell" Tag="none" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
+                </StackPanel>
+                <TextBlock x:Name="ChannelTopic" Foreground="{StaticResource Cream55}" FontSize="15" Margin="0,10,0,0" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+
+            <!-- dial (servers) or the friends index -->
+            <local:Dial x:Name="ChannelDial" Grid.Row="1" />
+            <Grid x:Name="FriendsPanel" Grid.Row="1" Visibility="Collapsed" Margin="28,24,16,0" RowSpacing="12">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Button Content="+ ADD A FRIEND" Style="{StaticResource KeyButton}" Click="OnAddFriend" HorizontalAlignment="Stretch" />
+                <ListView Grid.Row="1" ItemsSource="{x:Bind Store.Friends}" SelectionMode="None" Padding="0">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                            <Setter Property="Padding" Value="4,0" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:FriendVm">
+                            <Grid ColumnSpacing="6" Padding="0,10" Tapped="{x:Bind Open}" Background="Transparent"
+                                  BorderThickness="0,0,0,1" BorderBrush="{StaticResource Cream10}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="18" TextTrimming="CharacterEllipsis" Foreground="{StaticResource Cream80}" />
+                                    <TextBlock Text="{x:Bind Detail, Mode=OneWay}" FontSize="11" FontFamily="{StaticResource MonoFont}" Foreground="{StaticResource Cream55}" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="ACCEPT" Style="{StaticResource SolidKeyButton}" Height="26" FontSize="10" Click="{x:Bind Accept}" Visibility="{x:Bind AcceptVisibility, Mode=OneWay}" />
+                                <Button Grid.Column="2" Content="{x:Bind RemoveLabel, Mode=OneWay}" Style="{StaticResource KeyButton}" Height="26" FontSize="10" Click="{x:Bind Remove}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+
+            <!-- foot-l: you, then the Mic / Sound keys with their LEDs -->
+            <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6" Margin="24,0,0,19" VerticalAlignment="Bottom">
+                <Button x:Name="MeButton" Background="Transparent" BorderThickness="0" Padding="0,0,8,0" Height="30" ToolTipService.ToolTip="Your status">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Grid Width="28" Height="28">
+                            <Border Background="{StaticResource Cream10}">
+                                <TextBlock x:Name="MeInitial" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource Cream80}" />
+                            </Border>
+                            <Image x:Name="MeAvatar" Stretch="UniformToFill" />
+                            <Rectangle x:Name="MeDot" Width="7" Height="7" Fill="{StaticResource Cream}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-2,-2" />
+                        </Grid>
+                        <TextBlock x:Name="MeText" FontSize="14" Foreground="{StaticResource Cream55}" VerticalAlignment="Center" MaxWidth="90" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <Button.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Text="Online" Click="OnStatus" Tag="online" />
+                            <MenuFlyoutItem Text="Do not disturb" Click="OnStatus" Tag="dnd" />
+                            <MenuFlyoutItem Text="Invisible" Click="OnStatus" Tag="invisible" />
+                            <MenuFlyoutSeparator />
+                            <MenuFlyoutItem Text="Set a custom status…" Click="OnCustomStatus" />
+                            <MenuFlyoutItem Text="Clear custom status" Click="OnClearStatus" />
+                            <MenuFlyoutSeparator />
+                            <MenuFlyoutItem Text="Edit profile…" Click="OnEditProfile" />
+                            <MenuFlyoutItem Text="Sign out" Click="OnSignOut" />
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
+                <Button x:Name="MuteButton" Click="OnMute" Height="30" Padding="12,0">
+                    <StackPanel Orientation="Horizontal" Spacing="9">
+                        <Rectangle x:Name="MicLed" Width="6" Height="6" Fill="{StaticResource Signal}" />
+                        <TextBlock x:Name="MicText" Text="MIC ON" FontFamily="{StaticResource MonoFont}" FontSize="10.5" CharacterSpacing="140" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="DeafenButton" Click="OnDeafen" Height="30" Padding="12,0">
+                    <StackPanel Orientation="Horizontal" Spacing="9">
+                        <Rectangle x:Name="SoundLed" Width="6" Height="6" Fill="{StaticResource Signal}" />
+                        <TextBlock x:Name="SoundText" Text="SOUND ON" FontFamily="{StaticResource MonoFont}" FontSize="10.5" CharacterSpacing="140" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+
+            <!-- main: messages + composer, or the voice room -->
+            <Grid Grid.Column="1" Grid.Row="1" Grid.RowSpan="2" Margin="0,0,20,19">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <Grid Margin="16,12,8,4" ColumnSpacing="4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="ServerTitle" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                    <Button x:Name="ServerMenuButton" Grid.Column="1" Content="⋯" Padding="8,2" ToolTipService.ToolTip="Server">
+
+                <!-- Virtualized. KeepItemsInView: older pages load above without moving
+                     what you're reading; the window follows new messages only at the bottom. -->
+                <ListView x:Name="MessageList" ItemsSource="{x:Bind Store.Messages}" Margin="-12,0,0,0"
+                          SelectionMode="None" IsItemClickEnabled="False" Loaded="OnMessageListLoaded">
+                    <ListView.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <ItemsStackPanel ItemsUpdatingScrollMode="KeepItemsInView" VerticalAlignment="Bottom" />
+                        </ItemsPanelTemplate>
+                    </ListView.ItemsPanel>
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                            <Setter Property="Padding" Value="12,0,0,0" />
+                            <Setter Property="Margin" Value="0" />
+                            <Setter Property="MinHeight" Value="0" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:MessageVm">
+                            <Grid Padding="{x:Bind RowPadding, Mode=OneWay}" Opacity="{x:Bind Opacity, Mode=OneWay}" Background="Transparent"
+                                  ContextRequested="{x:Bind OnContextRequested}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="52" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="100" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <!-- day / new separators: mono caps, full width -->
+                                <StackPanel Grid.ColumnSpan="3">
+                                    <Grid x:Name="DayRow" x:Load="{x:Bind HasDay, Mode=OneWay}" Margin="0,18,0,6" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{x:Bind DayCaps, Mode=OneWay}" FontFamily="{StaticResource MonoFont}" FontSize="10" CharacterSpacing="200" Foreground="{StaticResource Cream35}" />
+                                        <Rectangle Grid.Column="1" Height="1" Fill="{StaticResource Cream10}" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Grid x:Name="NewRow" x:Load="{x:Bind NewHere, Mode=OneWay}" Margin="0,10,0,4" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="NEW" FontFamily="{StaticResource MonoFont}" FontSize="10" CharacterSpacing="200" Foreground="{StaticResource Signal}" />
+                                        <Rectangle Grid.Column="1" Height="1" Fill="{StaticResource Signal}" Opacity="0.35" VerticalAlignment="Center" />
+                                    </Grid>
+                                </StackPanel>
+                                <!-- avatar in the left gutter of its group -->
+                                <Grid Grid.Row="1" Width="40" Height="40" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="0,2,0,0"
+                                      Visibility="{x:Bind HeaderVisibility, Mode=OneWay}" Tapped="{x:Bind ShowProfile}">
+                                    <Border Background="{StaticResource Cream10}">
+                                        <TextBlock Text="{x:Bind Initial, Mode=OneWay}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource Cream80}" FontFamily="{StaticResource TextSemiFont}" />
+                                    </Border>
+                                    <Image Source="{x:Bind Avatar, Mode=OneWay}" Stretch="UniformToFill" />
+                                </Grid>
+                                <StackPanel Grid.Row="1" Grid.Column="1">
+                                    <TextBlock x:Name="ReplyRow" x:Load="{x:Bind HasReply, Mode=OneWay}" Text="{x:Bind ReplyPreview, Mode=OneWay}"
+                                               FontSize="12" Foreground="{StaticResource Cream55}" TextTrimming="CharacterEllipsis" Margin="0,0,0,2" />
+                                    <StackPanel Orientation="Horizontal" Spacing="10" Height="22" Visibility="{x:Bind HeaderVisibility, Mode=OneWay}">
+                                        <TextBlock Text="{x:Bind AuthorCaps, Mode=OneWay}" Foreground="{x:Bind AuthorBrush, Mode=OneWay}" Tapped="{x:Bind ShowProfile}"
+                                                   FontFamily="{StaticResource MonoSemiFont}" FontSize="11.5" CharacterSpacing="120" VerticalAlignment="Center" />
+                                        <TextBlock Text="{x:Bind Time}" FontFamily="{StaticResource MonoFont}" FontSize="10.5" CharacterSpacing="60" Foreground="{StaticResource Cream35}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <RichTextBlock local:RichView.Text="{x:Bind Body, Mode=OneWay}" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                                                   FontSize="16" LineHeight="24" Foreground="{StaticResource Cream}" Visibility="{x:Bind BodyVisibility, Mode=OneWay}" />
+                                    <!-- Attachments: images inline (decoded at display size), files as a framed row -->
+                                    <ItemsControl x:Name="MediaRow" x:Load="{x:Bind HasMedia, Mode=OneWay}" ItemsSource="{x:Bind Media}" Margin="0,6,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="local:AttachmentVm">
+                                                <StackPanel Margin="0,2">
+                                                    <Border Visibility="{x:Bind ImageVisibility}" Width="{x:Bind BoxWidth}" Height="{x:Bind BoxHeight}"
+                                                            HorizontalAlignment="Left" Background="{StaticResource Key}">
+                                                        <Image Source="{x:Bind Image}" Stretch="UniformToFill" />
+                                                    </Border>
+                                                    <HyperlinkButton Visibility="{x:Bind FileVisibility}" NavigateUri="{x:Bind Uri}" Padding="0" HorizontalAlignment="Left">
+                                                        <Grid Width="360" Padding="10" ColumnSpacing="12" Background="{StaticResource Key}" BorderThickness="1" BorderBrush="{StaticResource Hair}">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="44" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <Border Background="{StaticResource KeyHi}" Height="44">
+                                                                <TextBlock Text="{x:Bind Ext}" FontFamily="{StaticResource MonoSemiFont}" FontSize="10" Foreground="{StaticResource Cream80}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                            </Border>
+                                                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                                <TextBlock Text="{x:Bind A.Name}" Foreground="{StaticResource Cream}" FontSize="15" TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{x:Bind SizeText}" Foreground="{StaticResource Cream55}" FontSize="11" FontFamily="{StaticResource MonoFont}" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </HyperlinkButton>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <!-- Poll: options with vote bars; votes are 1️⃣–5️⃣ reactions. -->
+                                    <StackPanel x:Name="PollRow" x:Load="{x:Bind IsPoll, Mode=OneWay}" Spacing="6" MaxWidth="440" HorizontalAlignment="Left"
+                                                Padding="14" Margin="0,6,0,0" Background="{StaticResource Key}" BorderThickness="1" BorderBrush="{StaticResource Hair}">
+                                        <TextBlock Text="POLL" FontFamily="{StaticResource MonoFont}" FontSize="10.5" CharacterSpacing="160" Foreground="{StaticResource Cream55}" />
+                                        <TextBlock Text="{x:Bind Poll.Question, Mode=OneWay, FallbackValue=''}" FontSize="17" TextWrapping="Wrap" />
+                                        <ItemsControl ItemsSource="{x:Bind PollOptions}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="local:PollOptionVm">
+                                                    <Button Click="{x:Bind Toggle}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,2" Padding="10,6">
+                                                        <Grid ColumnSpacing="12" MinWidth="300">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <ProgressBar Grid.ColumnSpan="2" Value="{x:Bind Pct, Mode=OneWay}" Maximum="100" VerticalAlignment="Bottom" Opacity="0.6" />
+                                                            <TextBlock Text="{x:Bind Text}" TextWrapping="Wrap" Margin="0,0,0,6" />
+                                                            <TextBlock Grid.Column="1" Text="{x:Bind VotesText, Mode=OneWay}" Foreground="{StaticResource Cream55}" FontFamily="{StaticResource MonoFont}" FontSize="11" Margin="0,0,0,6" />
+                                                        </Grid>
+                                                    </Button>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                    <!-- Reactions -->
+                                    <ItemsControl x:Name="ChipsRow" x:Load="{x:Bind HasChips, Mode=OneWay}" ItemsSource="{x:Bind Chips}" Margin="0,6,0,0">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal" Spacing="6" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="local:ReactionVm">
+                                                <Button Click="{x:Bind Toggle}" Content="{x:Bind Label, Mode=OneWay}" Opacity="{x:Bind ChipOpacity, Mode=OneWay}"
+                                                        Padding="8,1" MinHeight="0" Height="26" FontSize="13" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{x:Bind Edited, Mode=OneWay}" FontSize="12" Foreground="{StaticResource Cream35}" />
+                                        <TextBlock Text="{x:Bind StateText, Mode=OneWay}" FontSize="12" Foreground="{StaticResource White}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+
+                <!-- the voice room (a voice channel picked on the dial) -->
+                <ScrollViewer x:Name="StagePanel" Visibility="Collapsed">
+                    <StackPanel Spacing="22" Padding="0,0,0,12">
+                        <StackPanel x:Name="StagePeople" BorderThickness="0,0,0,0" />
+                        <StackPanel x:Name="SharersPanel" Spacing="6" />
+                        <StackPanel Orientation="Horizontal" Spacing="14">
+                            <Button x:Name="StageJoin" Content="JOIN" Style="{StaticResource SolidKeyButton}" Height="44" Padding="24,0" FontSize="12.5" Click="OnStageJoin" />
+                            <Button x:Name="StageLeave" Content="LEAVE" Style="{StaticResource KeyButton}" Height="44" Padding="24,0" FontSize="12.5" Click="OnLeaveVoice" />
+                            <TextBlock x:Name="VoiceText" Foreground="{StaticResource Cream55}" VerticalAlignment="Center" />
+                            <Button x:Name="ShareButton" Style="{StaticResource KeyButton}" Click="OnShareScreen">
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <Path Style="{StaticResource Glyph}" Stroke="{StaticResource Cream80}" Data="M2 3h12v8H2zM8 11v2m-3 0h6" />
+                                    <TextBlock x:Name="ShareText" Text="STREAM" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- composer: typing line, reply/edit banner, a framed input with depth -->
+                <StackPanel x:Name="ComposerPanel" Grid.Row="1" Spacing="4">
+                    <TextBlock x:Name="TypingText" Height="20" Padding="12,2,0,0" FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{StaticResource Cream55}" />
+                    <Grid x:Name="ComposerBanner" Visibility="Collapsed" ColumnSpacing="8" Padding="12,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="ComposerBannerText" FontSize="12" Foreground="{StaticResource Cream80}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="CANCEL" Style="{StaticResource KeyButton}" Height="26" FontSize="10" Click="OnCancelComposerMode" />
+                    </Grid>
+                    <!-- @mention suggestions -->
+                    <ListView x:Name="MentionList" Visibility="Collapsed" MaxHeight="200" SelectionMode="Single" IsItemClickEnabled="True"
+                              ItemClick="OnMentionClick" Background="{StaticResource Ink2}" BorderThickness="1" BorderBrush="{StaticResource Cream20}" />
+                    <ItemsControl ItemsSource="{x:Bind Store.PendingFiles}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" Spacing="6" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="local:PendingFileVm">
+                                <Button Click="{x:Bind Remove}" Content="{x:Bind Label, Mode=OneWay}" FontSize="12" Padding="8,2" Height="28"
+                                        ToolTipService.ToolTip="Remove" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Grid Background="{StaticResource Key}" BorderThickness="1" BorderBrush="{StaticResource Hair}" MinHeight="48">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="AttachButton" Style="{StaticResource BareIcon}" Padding="14,0,6,0" VerticalAlignment="Stretch"
+                                ToolTipService.ToolTip="Attach files or create a poll">
+                            <Path Style="{StaticResource Glyph}" Stroke="{StaticResource Cream55}" Data="M8 2.5v11M2.5 8h11" />
+                            <Button.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Text="Attach files…" Click="OnAttach" />
+                                    <MenuFlyoutItem Text="Create a poll…" Click="OnCreatePoll" />
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
+                        <TextBox x:Name="Composer" Grid.Column="1" PlaceholderText="Write a message" Paste="OnComposerPaste" FontSize="16"
+                                 BorderThickness="0" Padding="6,13,6,11" AcceptsReturn="False" TextWrapping="Wrap" MaxHeight="200"
+                                 PreviewKeyDown="OnComposerKeyDown" TextChanged="OnComposerChanged" />
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" Margin="0,0,10,0" VerticalAlignment="Center">
+                            <Button x:Name="GifButton" Content="GIF" Height="26" Padding="7,0" FontFamily="{StaticResource MonoSemiFont}" FontSize="11"
+                                    Background="Transparent" BorderBrush="{StaticResource Cream55}" Foreground="{StaticResource Cream80}"
+                                    ToolTipService.ToolTip="Search GIFs" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Grid>
+
+            <!-- side: one strip of joined keys, then the people -->
+            <Grid Grid.Column="2" Grid.RowSpan="2" Margin="0,24,28,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="PeopleKey" Style="{StaticResource IconKey}" ToolTipService.ToolTip="People in this server">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Path Style="{StaticResource Glyph}" Stroke="{StaticResource Cream55}" Data="M6 7a2.3 2.3 0 100-4.6A2.3 2.3 0 006 7zM1.8 13.5c.5-2.5 2.2-4 4.2-4s3.7 1.5 4.2 4M10.5 2.6a2.3 2.3 0 010 4.3M12.2 9.8c1 .6 1.7 1.9 2 3.7" />
+                            <TextBlock x:Name="PeopleCount" FontFamily="{StaticResource MonoFont}" FontSize="12" Foreground="{StaticResource Cream55}" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="ServerMenuButton" Style="{StaticResource IconKey}" Margin="-1,0,0,0" ToolTipService.ToolTip="Server: invite people, settings">
+                        <Path Style="{StaticResource Glyph}" Stroke="{StaticResource Cream55}" Data="M2.5 4.5h7M12.5 4.5h1M2.5 11.5h1M6.5 11.5h7M11 3v3M5 10v3" />
                         <Button.Flyout>
                             <MenuFlyout>
                                 <MenuFlyoutItem Text="Invite people (copy link)" Click="OnInvite" />
@@ -105,311 +435,70 @@
                             </MenuFlyout>
                         </Button.Flyout>
                     </Button>
-                </Grid>
-                <!-- Friends (home): requests first, then friends; click opens the DM -->
-                <Grid x:Name="FriendsPanel" Grid.Row="1" Visibility="Collapsed" RowSpacing="6" Margin="8,0">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <Button Content="Add a friend…" Click="OnAddFriend" HorizontalAlignment="Stretch" />
-                    <ListView Grid.Row="1" ItemsSource="{x:Bind Store.Friends}" SelectionMode="None">
-                        <ListView.ItemTemplate>
-                            <DataTemplate x:DataType="local:FriendVm">
-                                <Grid ColumnSpacing="6" Padding="0,4" Tapped="{x:Bind Open}" Background="Transparent">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="{x:Bind Name, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{x:Bind Detail, Mode=OneWay}" FontSize="12" Opacity="0.65" TextTrimming="CharacterEllipsis" />
-                                    </StackPanel>
-                                    <Button Grid.Column="1" Content="Accept" Click="{x:Bind Accept}" Visibility="{x:Bind AcceptVisibility, Mode=OneWay}" FontSize="11" Padding="6,2" />
-                                    <Button Grid.Column="2" Content="{x:Bind RemoveLabel, Mode=OneWay}" Click="{x:Bind Remove}" FontSize="11" Padding="6,2" />
-                                </Grid>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
-                </Grid>
-                <ListView x:Name="ChannelList" Grid.Row="1" ItemsSource="{x:Bind Store.Channels}"
-                          SelectionMode="Single" SelectionChanged="OnChannelSelected">
-                    <ListView.ItemTemplate>
-                        <DataTemplate x:DataType="local:ChannelVm">
-                            <StackPanel Padding="0,2" Background="Transparent">
-                                <StackPanel.ContextFlyout>
-                                    <MenuFlyout>
-                                        <MenuFlyoutItem Text="Rename…" Click="{x:Bind Rename}" Visibility="{x:Bind OwnerVisibility}" />
-                                        <MenuFlyoutItem Text="Set topic…" Click="{x:Bind EditTopic}" Visibility="{x:Bind OwnerVisibility}" />
-                                        <MenuFlyoutItem Text="Delete channel…" Click="{x:Bind Remove}" Visibility="{x:Bind OwnerVisibility}" />
-                                    </MenuFlyout>
-                                </StackPanel.ContextFlyout>
-                                <TextBlock Text="{x:Bind Label, Mode=OneWay}" Opacity="{x:Bind LabelOpacity, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                                <TextBlock Text="{x:Bind Participants, Mode=OneWay}" Visibility="{x:Bind ParticipantsVisibility, Mode=OneWay}"
-                                           Margin="18,2,0,0" FontSize="12" Opacity="0.8" />
-                            </StackPanel>
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                </ListView>
-                <!-- Voice connection (shown while in a room) -->
-                <StackPanel x:Name="VoicePanel" Grid.Row="2" Visibility="Collapsed" Margin="12,6,12,0" Padding="10" Spacing="8"
-                            CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                    <TextBlock x:Name="VoiceText" FontSize="12" TextWrapping="Wrap" />
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <ToggleButton x:Name="MuteButton" Content="Mute" Click="OnMute" FontSize="12" Padding="8,3" />
-                        <ToggleButton x:Name="DeafenButton" Content="Deafen" Click="OnDeafen" FontSize="12" Padding="8,3" />
-                        <Button Content="Leave" Click="OnLeaveVoice" FontSize="12" Padding="8,3" />
-                    </StackPanel>
-                    <Button x:Name="ShareButton" Content="Share screen" Click="OnShareScreen" FontSize="12" Padding="8,3"
-                            HorizontalAlignment="Stretch" />
-                    <!-- People sharing in this room: Watch opens their stream -->
-                    <StackPanel x:Name="SharersPanel" Spacing="4" />
-                </StackPanel>
-                <Grid Grid.Row="3" Margin="16,10" ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Spacing="2">
-                        <StackPanel.ContextFlyout>
-                            <MenuFlyout>
-                                <MenuFlyoutItem Text="Online" Click="OnStatus" Tag="online" />
-                                <MenuFlyoutItem Text="Do not disturb" Click="OnStatus" Tag="dnd" />
-                                <MenuFlyoutItem Text="Invisible" Click="OnStatus" Tag="invisible" />
-                                <MenuFlyoutSeparator />
-                                <MenuFlyoutItem Text="Set a custom status…" Click="OnCustomStatus" />
-                                <MenuFlyoutItem Text="Clear custom status" Click="OnClearStatus" />
-                                <MenuFlyoutSeparator />
-                                <MenuFlyoutItem Text="Edit profile…" Click="OnEditProfile" />
-                            </MenuFlyout>
-                        </StackPanel.ContextFlyout>
-                        <TextBlock x:Name="MeText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="Right-click to set your status" />
-                        <TextBlock x:Name="ConnText" FontSize="12" Opacity="0.65" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <Button Content="⚙" Click="OnSettings" FontSize="12" Padding="8,3" ToolTipService.ToolTip="Settings" />
-                        <Button Content="Sign out" Click="OnSignOut" FontSize="12" Padding="8,3" />
-                    </StackPanel>
-                </Grid>
-            </Grid>
-
-            <!-- Chat -->
-            <Grid Grid.Column="2">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-                <StackPanel Orientation="Horizontal" Spacing="12" Margin="20,14,20,10">
-                    <TextBlock x:Name="ChannelTitle" FontSize="16" FontWeight="SemiBold" />
-                    <TextBlock x:Name="ChannelTopic" Opacity="0.65" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                    <Button x:Name="BellButton" Content="🔔" FontSize="12" Padding="6,2" ToolTipService.ToolTip="Notifications for this channel">
-                        <Button.Flyout>
-                            <MenuFlyout>
-                                <RadioMenuFlyoutItem x:Name="BellAll" Text="All messages" GroupName="bell" Click="OnBell" Tag="all" />
-                                <RadioMenuFlyoutItem x:Name="BellMentions" Text="Only @mentions" GroupName="bell" Click="OnBell" Tag="mentions" />
-                                <RadioMenuFlyoutItem x:Name="BellNone" Text="Nothing" GroupName="bell" Click="OnBell" Tag="none" />
-                            </MenuFlyout>
-                        </Button.Flyout>
+                    <Button Style="{StaticResource IconKey}" Margin="-1,0,0,0" Click="OnSettings" ToolTipService.ToolTip="Settings">
+                        <Path Style="{StaticResource Glyph}" Stroke="{StaticResource Cream55}" Data="M6.9 1.5h2.2l.4 1.8 1.4.6 1.6-1 1.6 1.6-1 1.6.6 1.4 1.8.4v2.2l-1.8.4-.6 1.4 1 1.6-1.6 1.6-1.6-1-1.4.6-.4 1.8H6.9l-.4-1.8-1.4-.6-1.6 1-1.6-1.6 1-1.6-.6-1.4-1.8-.4V6.9l1.8-.4.6-1.4-1-1.6 1.6-1.6 1.6 1 1.4-.6zM8 10.3a2.3 2.3 0 100-4.6 2.3 2.3 0 000 4.6z" />
                     </Button>
                 </StackPanel>
-
-                <!-- Virtualized. KeepItemsInView: older pages load above without moving
-                     what you're reading; the window follows new messages only at the bottom. -->
-                <ListView x:Name="MessageList" Grid.Row="1" ItemsSource="{x:Bind Store.Messages}"
-                          SelectionMode="None" IsItemClickEnabled="False" Loaded="OnMessageListLoaded">
-                    <ListView.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <ItemsStackPanel ItemsUpdatingScrollMode="KeepItemsInView" VerticalAlignment="Bottom" />
-                        </ItemsPanelTemplate>
-                    </ListView.ItemsPanel>
+                <TextBlock x:Name="OnlineHead" Grid.Row="1" FontFamily="{StaticResource MonoFont}" FontSize="10" CharacterSpacing="160" Foreground="{StaticResource Cream55}" Margin="0,22,0,10" />
+                <ListView Grid.Row="2" ItemsSource="{x:Bind Store.Members}" SelectionMode="None" Margin="-4,0,-12,0">
                     <ListView.ItemContainerStyle>
                         <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
-                            <Setter Property="Padding" Value="20,1" />
+                            <Setter Property="Padding" Value="4,0" />
                             <Setter Property="MinHeight" Value="0" />
                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                         </Style>
                     </ListView.ItemContainerStyle>
                     <ListView.ItemTemplate>
-                        <DataTemplate x:DataType="local:MessageVm">
-                            <StackPanel Padding="{x:Bind RowPadding, Mode=OneWay}" Opacity="{x:Bind Opacity, Mode=OneWay}" Background="Transparent"
-                                        ContextRequested="{x:Bind OnContextRequested}">
-                                <Grid x:Name="DayRow" x:Load="{x:Bind HasDay, Mode=OneWay}" Margin="0,12,0,4" ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="1" Text="{x:Bind DayText, Mode=OneWay}" FontSize="12" Opacity="0.6" />
-                                    <Rectangle Grid.Column="2" Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" VerticalAlignment="Center" />
-                                </Grid>
-                                <Grid x:Name="NewRow" x:Load="{x:Bind NewHere, Mode=OneWay}" Margin="0,8,0,2" ColumnSpacing="8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Rectangle Height="1" Fill="{ThemeResource SystemFillColorCriticalBrush}" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="1" Text="New messages" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-                                </Grid>
-                                <TextBlock x:Name="ReplyRow" x:Load="{x:Bind HasReply, Mode=OneWay}" Text="{x:Bind ReplyPreview, Mode=OneWay}"
-                                           FontSize="12" Opacity="0.6" TextTrimming="CharacterEllipsis" Margin="0,0,0,2" />
-                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="-36,0,0,0" Visibility="{x:Bind HeaderVisibility, Mode=OneWay}"
-                                            Tapped="{x:Bind ShowProfile}" Background="Transparent">
-                                    <PersonPicture Width="28" Height="28" ProfilePicture="{x:Bind Avatar, Mode=OneWay}" DisplayName="{x:Bind Author, Mode=OneWay}" />
-                                    <TextBlock Text="{x:Bind Author, Mode=OneWay}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                    <TextBlock Text="{x:Bind Time}" FontSize="12" Opacity="0.55" VerticalAlignment="Center" />
-                                </StackPanel>
-                                <RichTextBlock local:RichView.Text="{x:Bind Body, Mode=OneWay}" TextWrapping="Wrap" IsTextSelectionEnabled="True"
-                                               Visibility="{x:Bind BodyVisibility, Mode=OneWay}" />
-                                <!-- Attachments: images inline (decoded at display size), files as links -->
-                                <ItemsControl x:Name="MediaRow" x:Load="{x:Bind HasMedia, Mode=OneWay}" ItemsSource="{x:Bind Media}" Margin="0,4,0,0">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="local:AttachmentVm">
-                                            <StackPanel Margin="0,2">
-                                                <Border Visibility="{x:Bind ImageVisibility}" Width="{x:Bind BoxWidth}" Height="{x:Bind BoxHeight}"
-                                                        HorizontalAlignment="Left" CornerRadius="6" Background="{ThemeResource ControlFillColorSecondaryBrush}">
-                                                    <Image Source="{x:Bind Image}" Stretch="UniformToFill" />
-                                                </Border>
-                                                <HyperlinkButton Visibility="{x:Bind FileVisibility}" Content="{x:Bind FileLabel}" NavigateUri="{x:Bind Uri}" Padding="0" />
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                                <!-- Poll: options with vote bars; votes are 1️⃣–5️⃣ reactions. -->
-                                <StackPanel x:Name="PollRow" x:Load="{x:Bind IsPoll, Mode=OneWay}" Spacing="6" MaxWidth="440" HorizontalAlignment="Left"
-                                            Padding="12" CornerRadius="8" Margin="0,4,0,0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                                    <TextBlock Text="{x:Bind Poll.Question, Mode=OneWay, FallbackValue=''}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                    <ItemsControl ItemsSource="{x:Bind PollOptions}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="local:PollOptionVm">
-                                                <Button Click="{x:Bind Toggle}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,2">
-                                                    <Grid ColumnSpacing="12" MinWidth="300">
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="*" />
-                                                            <ColumnDefinition Width="Auto" />
-                                                        </Grid.ColumnDefinitions>
-                                                        <ProgressBar Grid.ColumnSpan="2" Value="{x:Bind Pct, Mode=OneWay}" Maximum="100" VerticalAlignment="Bottom" Opacity="0.6" />
-                                                        <TextBlock Text="{x:Bind Text}" TextWrapping="Wrap" Margin="0,0,0,6" />
-                                                        <TextBlock Grid.Column="1" Text="{x:Bind VotesText, Mode=OneWay}" Opacity="0.7" FontSize="12" Margin="0,0,0,6" />
-                                                    </Grid>
-                                                </Button>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
-                                <!-- Reactions -->
-                                <ItemsControl x:Name="ChipsRow" x:Load="{x:Bind HasChips, Mode=OneWay}" ItemsSource="{x:Bind Chips}" Margin="0,4,0,0">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <StackPanel Orientation="Horizontal" Spacing="6" />
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="local:ReactionVm">
-                                            <Button Click="{x:Bind Toggle}" Content="{x:Bind Label, Mode=OneWay}" Opacity="{x:Bind ChipOpacity, Mode=OneWay}"
-                                                    Padding="8,2" MinHeight="0" CornerRadius="10" FontSize="13" />
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="{x:Bind Edited, Mode=OneWay}" FontSize="11" Opacity="0.5" />
-                                    <TextBlock Text="{x:Bind StateText, Mode=OneWay}" FontSize="11" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-                                </StackPanel>
-                            </StackPanel>
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                </ListView>
-
-                <StackPanel Grid.Row="2" Margin="20,8,20,0" Spacing="4">
-                <Grid x:Name="ComposerBanner" Visibility="Collapsed" ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="ComposerBannerText" FontSize="12" Opacity="0.75" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                    <Button Grid.Column="1" Content="Cancel" Click="OnCancelComposerMode" FontSize="12" Padding="8,2" />
-                </Grid>
-                <!-- @mention suggestions -->
-                <ListView x:Name="MentionList" Visibility="Collapsed" MaxHeight="200" SelectionMode="Single" IsItemClickEnabled="True"
-                          ItemClick="OnMentionClick" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="6" />
-                <ItemsControl ItemsSource="{x:Bind Store.PendingFiles}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <StackPanel Orientation="Horizontal" Spacing="6" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="local:PendingFileVm">
-                            <Button Click="{x:Bind Remove}" Content="{x:Bind Label, Mode=OneWay}" FontSize="12" Padding="8,2"
-                                    ToolTipService.ToolTip="Remove" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-                <Grid ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                <Button x:Name="AttachButton" Content="+" FontSize="16" Padding="10,2" VerticalAlignment="Stretch"
-                        ToolTipService.ToolTip="Attach files or create a poll">
-                    <Button.Flyout>
-                        <MenuFlyout>
-                            <MenuFlyoutItem Text="Attach files…" Click="OnAttach" />
-                            <MenuFlyoutItem Text="Create a poll…" Click="OnCreatePoll" />
-                        </MenuFlyout>
-                    </Button.Flyout>
-                </Button>
-                <TextBox x:Name="Composer" Grid.Column="1" PlaceholderText="Message" Paste="OnComposerPaste"
-                         PreviewKeyDown="OnComposerKeyDown" TextChanged="OnComposerChanged" />
-                <Button x:Name="GifButton" Grid.Column="2" Content="GIF" FontSize="12" Padding="10,2" VerticalAlignment="Stretch"
-                        ToolTipService.ToolTip="Search GIFs" />
-                </Grid>
-                </StackPanel>
-                <TextBlock x:Name="TypingText" Grid.Row="3" Margin="22,4,20,8" FontSize="12" Opacity="0.7" MinHeight="16" />
-            </Grid>
-
-            <!-- People -->
-            <Grid Grid.Column="3" Background="{ThemeResource LayerFillColorDefaultBrush}">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <TextBlock Text="People" Margin="16,16,16,8" FontSize="13" FontWeight="SemiBold" Opacity="0.7" />
-                <ListView Grid.Row="1" ItemsSource="{x:Bind Store.Members}" SelectionMode="None">
-                    <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:MemberVm">
-                            <Grid ColumnSpacing="10" Padding="0,4" Opacity="{x:Bind RowOpacity, Mode=OneWay}" Tapped="{x:Bind ShowProfile}" Background="Transparent">
+                            <Grid ColumnSpacing="10" Padding="0,8" Opacity="{x:Bind RowOpacity, Mode=OneWay}" Tapped="{x:Bind ShowProfile}" Background="Transparent">
                                 <Grid.ContextFlyout>
                                     <MenuFlyout>
                                         <MenuFlyoutItem Text="Remove from server…" Click="{x:Bind Kick}" Visibility="{x:Bind KickVisibility}" />
                                     </MenuFlyout>
                                 </Grid.ContextFlyout>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="28" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <Grid VerticalAlignment="Center">
-                                    <PersonPicture Width="30" Height="30" ProfilePicture="{x:Bind Avatar, Mode=OneWay}" DisplayName="{x:Bind Name, Mode=OneWay}" />
-                                    <Ellipse Width="10" Height="10" Fill="{x:Bind DotBrush, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                             Stroke="{ThemeResource LayerFillColorDefaultBrush}" StrokeThickness="2" />
+                                <Grid Width="28" Height="28" VerticalAlignment="Top">
+                                    <Border Background="{StaticResource Cream10}">
+                                        <TextBlock Text="{x:Bind Initial, Mode=OneWay}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource Cream80}" />
+                                    </Border>
+                                    <Image Source="{x:Bind Avatar, Mode=OneWay}" Stretch="UniformToFill" />
+                                    <Rectangle Width="7" Height="7" Fill="{x:Bind DotBrush, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-2,-2" />
                                 </Grid>
-                                <StackPanel Grid.Column="1">
-                                    <TextBlock Text="{x:Bind Name, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="14" Foreground="{StaticResource Cream}" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Text="{x:Bind Detail, Mode=OneWay}" Visibility="{x:Bind DetailVisibility, Mode=OneWay}"
-                                               FontSize="12" Opacity="0.65" TextTrimming="CharacterEllipsis" />
+                                               FontSize="11.5" FontFamily="{StaticResource TextSemiFont}" Foreground="{StaticResource Cream}" TextWrapping="Wrap" MaxLines="2" />
                                 </StackPanel>
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
             </Grid>
+
+            <!-- foot-r: the light, the room you're live in, latency, clock -->
+            <StackPanel Grid.Column="2" Grid.Row="2" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,28,25">
+                <Rectangle x:Name="StatusLed" Width="8" Height="8" Fill="{StaticResource Cream35}" VerticalAlignment="Center" />
+                <TextBlock x:Name="StatusVoice" FontFamily="{StaticResource MonoFont}" FontSize="10.5" CharacterSpacing="80" Foreground="{StaticResource Cream}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="150" />
+                <TextBlock x:Name="ConnText" FontFamily="{StaticResource MonoFont}" FontSize="10.5" CharacterSpacing="80" Foreground="{StaticResource Cream35}" VerticalAlignment="Center" />
+                <TextBlock x:Name="ClockText" FontFamily="{StaticResource MonoFont}" FontSize="10.5" CharacterSpacing="80" Foreground="{StaticResource Cream35}" VerticalAlignment="Center" />
+            </StackPanel>
         </Grid>
 
-        <InfoBar x:Name="Toast" IsOpen="False" Severity="Informational" IsClosable="True"
-                 HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,12,0,0" MaxWidth="560" />
+        <!-- viewfinder marks on the frame -->
+        <Grid IsHitTestVisible="False" Margin="10">
+            <Path Data="M0,14 L0,0 L14,0" Stroke="{StaticResource Cream35}" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Top" />
+            <Path Data="M0,0 L14,0 L14,14" Stroke="{StaticResource Cream35}" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Top" />
+            <Path Data="M0,0 L0,14 L14,14" Stroke="{StaticResource Cream35}" StrokeThickness="1" HorizontalAlignment="Left" VerticalAlignment="Bottom" />
+            <Path Data="M14,0 L14,14 L0,14" Stroke="{StaticResource Cream35}" StrokeThickness="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" />
+        </Grid>
+
+        <!-- toast: cream on ink, bottom centre -->
+        <Border x:Name="Toast" Visibility="Collapsed" Background="{StaticResource Cream}" Padding="16,8" Margin="0,0,0,24"
+                HorizontalAlignment="Center" VerticalAlignment="Bottom" MaxWidth="560" IsHitTestVisible="False">
+            <TextBlock x:Name="ToastText" Foreground="{StaticResource Ink}" FontSize="14" FontFamily="{StaticResource TextMediumFont}" TextWrapping="Wrap" />
+        </Border>
     </Grid>
 </Window>

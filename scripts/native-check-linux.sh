@@ -11,14 +11,14 @@ trap 'rm -rf "$S"' EXIT
 python3 - "$APP" "$S" <<'PY'
 import re, sys, glob, os
 app, out = sys.argv[1], sys.argv[2]
-stubs = ["using Microsoft.UI.Xaml.Controls;", "using Microsoft.UI.Xaml.Controls.Primitives;", "using Microsoft.UI.Xaml.Shapes;", "using Microsoft.UI.Xaml.Documents;"]
+stubs = ["using Microsoft.UI.Xaml.Controls;", "using Microsoft.UI.Xaml.Controls.Primitives;", "using Microsoft.UI.Xaml.Shapes;", "using Microsoft.UI.Xaml.Documents;", "using Path = Microsoft.UI.Xaml.Shapes.Path;"]
 for xaml in glob.glob(os.path.join(app, "*.xaml")):
     x = open(xaml).read()
     cls = re.search(r'x:Class="([\w.]+)\.(\w+)"', x)
     if not cls: continue
     ns, name = cls.groups()
     root = re.match(r'\s*(?:<\?.*?\?>\s*)?<(\w+)', x, re.S).group(1)
-    fields = re.findall(r'<(\w+)\s[^>]*?x:Name="(\w+)"', x, re.S)
+    fields = [(t.split(":")[-1], n) for t, n in re.findall(r'<([\w:]+)\s[^>]*?x:Name="(\w+)"', x, re.S)]
     stubs.append(f"namespace {ns} {{ partial class {name} {{")
     stubs += [f"    internal {t} {n} = null!;" for t, n in fields]
     stubs.append("    void InitializeComponent() {} } }")
