@@ -284,8 +284,8 @@ public sealed partial class MainWindow : Window
             BellAll.IsChecked = level == "all";
             BellMentions.IsChecked = level == "mentions";
             BellNone.IsChecked = level == "none";
-            BellPath.Data = (Microsoft.UI.Xaml.Media.Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Microsoft.UI.Xaml.Media.Geometry),
-                level == "none" ? "M4 11V7a4 4 0 016.7-3M12 7v4l1.2 1.5H5M6.5 14h3M2 2l12 12" : "M4 11V7a4 4 0 018 0v4l1.2 1.5H2.8zM6.5 14h3");
+            BellPath.Visibility = level == "none" ? Visibility.Collapsed : Visibility.Visible;
+            BellOffPath.Visibility = level == "none" ? Visibility.Visible : Visibility.Collapsed;
         }
         BellButton.Visibility = Store.OpenChannel is null || room ? Visibility.Collapsed : Visibility.Visible;
         Composer.PlaceholderText = Store.OpenChannel is null ? "" : $"Write in {Store.OpenChannel.Name}";

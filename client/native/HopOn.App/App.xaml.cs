@@ -23,11 +23,24 @@ public partial class App : Application
         // Start (and connect) before any UI exists: the socket is usually up and
         // signed in by the time the window paints.
         Core = HopOnCore.Start(Host);
-        InitializeComponent();
-        UnhandledException += (_, e) =>
+        try { InitializeComponent(); }
+        catch (Exception x) { Crash("startup (App.xaml)", x); throw; }
+        UnhandledException += (_, e) => Crash("unhandled", e.Exception);
+    }
+
+    /// <summary>
+    /// Write a UI crash to native-crash.log in the data folder (a XAML error
+    /// otherwise only shows as exit code 0xC000027B, with no message).
+    /// </summary>
+    public static void Crash(string where, Exception x)
+    {
+        try
         {
-            System.Diagnostics.Debug.WriteLine($"unhandled: {e.Exception}");
-        };
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "app.hopon.desktop");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "native-crash.log"), $"{DateTime.Now:O} {where}: {x}\n\n");
+        }
+        catch (Exception) { }
     }
 
     /// <summary>A Windows notification was clicked: (channel id).</summary>
@@ -54,7 +67,8 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        window = new MainWindow();
+        try { window = new MainWindow(); }
+        catch (Exception x) { Crash("startup (MainWindow)", x); throw; }
         window.Activate();
         // Off the startup path: register for notification clicks once the window is up.
         if (!PerfExit) Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().TryEnqueue(

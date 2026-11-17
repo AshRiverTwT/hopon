@@ -16,7 +16,7 @@ using VirtualKey = Windows.System.VirtualKey;
 
 namespace HopOn.App;
 
-public sealed class Dial : Grid
+public sealed partial class Dial : Grid
 {
     const double StepDeg = 11, Radius = 300, ScaleR = Radius - 10, ItemH = 34;
     const int Visible = 6;

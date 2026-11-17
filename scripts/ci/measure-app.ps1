@@ -27,7 +27,11 @@ for ($i = 0; $i -lt 5; $i++) {
     $s = Get-Content $f | ConvertFrom-Json
     $starts += $s
     Write-Host ("startup run {0}: process->paint {1} ms, main->paint {2} ms, main->connected {3}" -f $i, $s.processToPaintMs, $s.mainToPaintMs, $s.mainToConnectedMs)
-  } else { Write-Host "startup run $i wrote no result (exit $($p.ExitCode))" }
+  } else {
+    Write-Host "startup run $i wrote no result (exit $($p.ExitCode))"
+    $crash = Join-Path $env:LOCALAPPDATA "app.hopon.desktop\native-crash.log"
+    if ($i -eq 0 -and (Test-Path $crash)) { Write-Host "--- native-crash.log ---"; Get-Content $crash | Select-Object -First 60 }
+  }
 }
 $starts | ConvertTo-Json | Set-Content (Join-Path $Out "startup.json")
 if ($starts.Count -gt 0) {

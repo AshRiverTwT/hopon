@@ -96,7 +96,10 @@
                 <StackPanel Orientation="Horizontal" Spacing="14">
                     <TextBlock x:Name="ChannelTitle" Style="{StaticResource Display}" FontSize="62" MaxWidth="900" />
                     <Button x:Name="BellButton" Style="{StaticResource BareIcon}" VerticalAlignment="Center" ToolTipService.ToolTip="Notifications for this channel">
-                        <Path x:Name="BellPath" Style="{StaticResource Glyph}" Stroke="{StaticResource Cream80}" Data="M4 11V7a4 4 0 018 0v4l1.2 1.5H2.8zM6.5 14h3" />
+                        <Grid>
+                            <Path x:Name="BellPath" Style="{StaticResource Glyph}" Stroke="{StaticResource Cream80}" Data="M4 11V7a4 4 0 018 0v4l1.2 1.5H2.8zM6.5 14h3" />
+                            <Path x:Name="BellOffPath" Style="{StaticResource Glyph}" Stroke="{StaticResource Cream55}" Visibility="Collapsed" Data="M4 11V7a4 4 0 016.7-3M12 7v4l1.2 1.5H5M6.5 14h3M2 2l12 12" />
+                        </Grid>
                         <Button.Flyout>
                             <MenuFlyout>
                                 <RadioMenuFlyoutItem x:Name="BellAll" Text="All messages" GroupName="bell" Click="OnBell" Tag="all" />
