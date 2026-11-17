@@ -102,6 +102,37 @@ public sealed partial class Store
 
     public bool PrefBool(string key, bool fallback) => ReadBool(prefsJson, key, fallback);
 
+    public string PrefString(string key, string fallback)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(prefsJson);
+            return doc.RootElement.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : fallback;
+        }
+        catch (JsonException) { return fallback; }
+    }
+
+    /// <summary>Stream sound for one sharer, percent (synced pref streamVolumes, like the web client).</summary>
+    public int StreamVolume(string userId)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(prefsJson);
+            return doc.RootElement.TryGetProperty("streamVolumes", out var m) && m.ValueKind == JsonValueKind.Object
+                && m.TryGetProperty(userId, out var v) && v.ValueKind == JsonValueKind.Number ? (int)v.GetDouble() : 100;
+        }
+        catch (JsonException) { return 100; }
+    }
+
+    public Task SaveStreamVolume(string userId, int pct)
+    {
+        JsonObject map;
+        try { map = (JsonNode.Parse(prefsJson) as JsonObject)?["streamVolumes"]?.DeepClone() as JsonObject ?? []; }
+        catch (JsonException) { map = []; }
+        map[userId] = pct;
+        return SavePref("streamVolumes", map);
+    }
+
     /// <summary>"all" | "mentions" | "none" for a channel (synced prefs, default all).</summary>
     public string ChannelLevel(string channelId) => notifyPrefs.Level(channelId);
 
@@ -225,7 +256,7 @@ public sealed partial class Store
     Microsoft.UI.Xaml.Media.ImageSource? AvatarOf(string userId) =>
         users.TryGetValue(userId, out var u) ? avatars.Get(userId, u.AvatarV) : null;
 
-    string NameOf(string userId) =>
+    public string NameOf(string userId) =>
         userId == "0" ? "HopOn" : users.TryGetValue(userId, out var u) ? u.Name : "…";
 
     MessageVm Row(Msg m) => new(m, NameOf(m.AuthorId)) { Avatar = AvatarOf(m.AuthorId), CanDelete = m.AuthorId == Me?.Id || IsOwner };
@@ -411,6 +442,18 @@ public sealed partial class Store
                 changed = true;
                 _ = Try(core.CallAsync("ui_set_context", Context()));
                 break;
+            case MediaPresenceEvent mp when mp.Media.Source == "screen":
+                if (mp.Media.Active) screenShares[mp.Media.UserId] = mp.Media.ChannelId;
+                else screenShares.Remove(mp.Media.UserId);
+                changed = true;
+                ScreenChanged?.Invoke();
+                break;
+            case ScreenEvent se:
+                Screen = se.State;
+                if (se.State.Detail is { Length: > 0 } screenDetail) Toast?.Invoke(screenDetail);
+                changed = true;
+                ScreenChanged?.Invoke();
+                break;
             case OpenChannelEvent o:
                 _ = OpenChannelById(o.ChannelId);
                 break;
@@ -428,6 +471,8 @@ public sealed partial class Store
         voice.Clear();
         foreach (var p in s.Voice) if (p.ChannelId is not null) voice[p.UserId] = p;
         voiceDirty = true;
+        screenShares.Clear();
+        foreach (var m in s.Media) if (m.Active && m.Source == "screen") screenShares[m.UserId] = m.ChannelId;
         foreach (var u in s.Users) users[u.Id] = u;
         if (s.User is not null) users[s.User.Id] = s.User;
         Me = s.User;
@@ -603,6 +648,63 @@ public sealed partial class Store
         try { await core.CallAsync("voice_deafen", new JsonObject { ["deafened"] = deafened }); }
         catch (HopOnException e) { Toast?.Invoke(e.Message); }
     }
+
+    // ---------- screen share (voice::screen in the core) ----------
+
+    /// <summary>Who shares a screen, by user id → voice channel id (media presence).</summary>
+    readonly Dictionary<string, string> screenShares = [];
+    public ScreenState Screen { get; private set; } = new();
+    /// <summary>Sharing / watching / who shares changed (stream windows listen).</summary>
+    public event Action? ScreenChanged;
+
+    /// <summary>Other people sharing in the voice room you're in.</summary>
+    public List<string> SharersInMyRoom() =>
+        MyVoice is { State: not "idle", ChannelId: { } ch }
+            ? [.. screenShares.Where(kv => kv.Value == ch && kv.Key != Me?.Id).Select(kv => kv.Key).OrderBy(NameOf, StringComparer.CurrentCultureIgnoreCase)]
+            : [];
+
+    public bool IsSharing(string userId) => screenShares.ContainsKey(userId);
+    public int ViewerCount(string userId) => Screen.Viewers.TryGetValue(userId, out var v) ? v.Count : 0;
+
+    public async Task<List<ScreenSource>> ScreenSources()
+    {
+        try { return await core.CallAsync("screen_sources", HopOnJson.Default.ListScreenSource); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); return []; }
+    }
+
+    public async Task<bool> StartShare(string sourceId, string quality)
+    {
+        try { await core.CallAsync("screen_share", new JsonObject { ["source"] = sourceId, ["quality"] = quality }); return true; }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); return false; }
+    }
+
+    public async Task StopShare()
+    {
+        try { await core.CallAsync("screen_stop"); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
+    }
+
+    public async Task<bool> Watch(string userId)
+    {
+        try { await core.CallAsync("screen_watch", new JsonObject { ["userId"] = userId }); return true; }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); return false; }
+    }
+
+    public async Task Unwatch(string userId)
+    {
+        try { await core.CallAsync("screen_unwatch", new JsonObject { ["userId"] = userId }); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
+    }
+
+    /// <summary>Stream sound, 0–200 %, remembered per person (like the web client's prefs.streamVolumes).</summary>
+    public async Task SetStreamVolume(string userId, int pct)
+    {
+        try { await core.CallAsync("screen_volume", new JsonObject { ["userId"] = userId, ["volume"] = pct / 100.0 }); }
+        catch (HopOnException e) { Toast?.Invoke(e.Message); }
+    }
+
+    public bool ScreenFrame(string userId, ulong lastSeq, Span<byte> dst, int maxW, int maxH, out int w, out int h, out ulong seq) =>
+        core.ScreenFrame(userId, lastSeq, dst, maxW, maxH, out w, out h, out seq);
 
     // ---------- people column ----------
 

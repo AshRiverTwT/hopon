@@ -420,7 +420,9 @@ export async function startShare(quality: Quality, audio = true) {
         await publisher.localParticipant.publishTrack(t, {
           source: sdk.Track.Source.ScreenShare,
           videoCodec: "h264",
-          backupCodec: false,
+          // The native (WinUI) app's libwebrtc has no H.264 decoder: LiveKit
+          // starts this VP8 copy only while such a viewer is subscribed.
+          backupCodec: { codec: "vp8", encoding: enc },
           simulcast: false,
           screenShareEncoding: enc,
           videoEncoding: enc,

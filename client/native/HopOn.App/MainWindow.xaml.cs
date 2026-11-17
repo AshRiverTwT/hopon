@@ -245,7 +245,10 @@ public sealed partial class MainWindow : Window
             };
             MuteButton.IsChecked = v.Muted;
             DeafenButton.IsChecked = v.Deafened;
+            ShareButton.Content = Store.Screen.Sharing ? "Stop sharing" : "Share screen";
+            ShareButton.IsEnabled = v.State == "connected" || Store.Screen.Sharing;
         }
+        SyncSharers(inVoice);
 
         syncing = true;
         ServerList.SelectedItem = Store.OpenServer;
@@ -619,6 +622,45 @@ public sealed partial class MainWindow : Window
     void OnMute(object sender, RoutedEventArgs e) => _ = Store.SetMuted(MuteButton.IsChecked == true);
     void OnDeafen(object sender, RoutedEventArgs e) => _ = Store.SetDeafened(DeafenButton.IsChecked == true);
     void OnLeaveVoice(object sender, RoutedEventArgs e) => _ = Store.LeaveVoice();
+
+    async void OnShareScreen(object sender, RoutedEventArgs e)
+    {
+        if (Store.Screen.Sharing) { await Store.StopShare(); return; }
+        ShareButton.IsEnabled = false;
+        try { await SharePicker.Show(Content.XamlRoot, Store); }
+        finally { ShareButton.IsEnabled = true; }
+    }
+
+    string sharersShown = "";
+
+    /// <summary>One row per person sharing in your room: name, viewers, Watch / Open.</summary>
+    void SyncSharers(bool inVoice)
+    {
+        var sharers = inVoice ? Store.SharersInMyRoom() : [];
+        if (!inVoice) StreamWindow.CloseAll();
+        var key = string.Join(",", sharers.Select(u => $"{u}:{Store.ViewerCount(u)}:{StreamWindow.IsOpen(u)}:{Store.NameOf(u)}"));
+        if (key == sharersShown) return;
+        sharersShown = key;
+        SharersPanel.Children.Clear();
+        foreach (var u in sharers)
+        {
+            var row = new Grid { ColumnSpacing = 6 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var n = Store.ViewerCount(u);
+            row.Children.Add(new TextBlock
+            {
+                Text = $"🖥 {Store.NameOf(u)}" + (n > 0 ? $" · {n} watching" : ""),
+                FontSize = 12, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+            var watch = new Button { Content = StreamWindow.IsOpen(u) ? "Open" : "Watch", FontSize = 12, Padding = new Thickness(8, 2, 8, 2) };
+            var user = u;
+            watch.Click += (_, _) => { StreamWindow.Open(Store, user); sharersShown = ""; SyncSharers(true); };
+            Grid.SetColumn(watch, 1);
+            row.Children.Add(watch);
+            SharersPanel.Children.Add(row);
+        }
+    }
 
     async void OnAttach(object sender, RoutedEventArgs e)
     {

@@ -146,6 +146,28 @@ public sealed unsafe class HopOnCore
     public Task<T> CallAsync<T>(string name, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> type, JsonObject? args = null)
         => CallAsync(name, args).ContinueWith(t => t.GetAwaiter().GetResult().Deserialize(type)!, TaskContinuationOptions.ExecuteSynchronously);
 
+    /// <summary>
+    /// The newest frame of a screen share you watch, as BGRA fitted inside
+    /// maxW × maxH, into <paramref name="dst"/> (stride w*4; maxW*maxH*4 bytes
+    /// always fit). True when a frame newer than <paramref name="lastSeq"/> was
+    /// written; else w/h hold the stream's own size (0 before the first frame).
+    /// Synchronous and cheap when nothing changed: call it per display refresh.
+    /// </summary>
+    public bool ScreenFrame(string userId, ulong lastSeq, Span<byte> dst, int maxW, int maxH, out int w, out int h, out ulong seq)
+    {
+        var u = Encoding.UTF8.GetBytes(userId);
+        uint ow = 0, oh = 0;
+        ulong os = lastSeq;
+        int rc;
+        fixed (byte* up = u)
+        fixed (byte* dp = dst)
+            rc = NativeMethods.hopon_screen_frame(up, (nuint)u.Length, lastSeq, dp, (nuint)dst.Length, (uint)maxW, (uint)maxH, &ow, &oh, &os);
+        w = (int)ow;
+        h = (int)oh;
+        seq = os;
+        return rc == 1;
+    }
+
     /// <summary>Stop events for a window (it closed).</summary>
     public void Unsubscribe(string label)
     {

@@ -159,6 +159,10 @@
                         <ToggleButton x:Name="DeafenButton" Content="Deafen" Click="OnDeafen" FontSize="12" Padding="8,3" />
                         <Button Content="Leave" Click="OnLeaveVoice" FontSize="12" Padding="8,3" />
                     </StackPanel>
+                    <Button x:Name="ShareButton" Content="Share screen" Click="OnShareScreen" FontSize="12" Padding="8,3"
+                            HorizontalAlignment="Stretch" />
+                    <!-- People sharing in this room: Watch opens their stream -->
+                    <StackPanel x:Name="SharersPanel" Spacing="4" />
                 </StackPanel>
                 <Grid Grid.Row="3" Margin="16,10" ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
