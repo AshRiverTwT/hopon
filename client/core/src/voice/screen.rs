@@ -403,7 +403,7 @@ impl Screen {
                 let c = core.clone();
                 let u = user.clone();
                 let task = crate::rt::spawn(async move {
-                    let mut stream = NativeVideoStream::new(v.rtc_track(), Some(1));
+                    let mut stream = NativeVideoStream::new(v.rtc_track());
                     while let Some(frame) = stream.next().await {
                         *l.frame.lock() = Some(frame);
                         if l.seq.fetch_add(1, Ordering::Relaxed) == 0 {

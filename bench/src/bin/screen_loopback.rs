@@ -18,7 +18,7 @@ use livekit::options::{TrackPublishOptions, VideoCodec, VideoEncoding};
 use livekit::prelude::*;
 use livekit::webrtc::desktop_capturer::{DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions};
 use livekit::webrtc::native::yuv_helper;
-use livekit::webrtc::prelude::{I420Buffer, VideoBuffer, VideoFormatType, VideoFrame, VideoRotation};
+use livekit::webrtc::prelude::{I420Buffer, VideoFormatType, VideoFrame, VideoRotation};
 use livekit::webrtc::stats::RtcStats;
 use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
@@ -222,7 +222,7 @@ async fn main() -> Result<()> {
     .ok_or_else(|| anyhow!("room closed"))?;
     println!("subscribed");
 
-    let mut stream = NativeVideoStream::new(remote.rtc_track(), Some(1));
+    let mut stream = NativeVideoStream::new(remote.rtc_track());
     let t_start = Instant::now();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
     let (mut received, mut first_ms, mut last_wh, mut lat_sum, mut lat_n, mut sample_luma) = (0u64, -1.0f64, (0, 0), 0i64, 0i64, -1.0f64);
