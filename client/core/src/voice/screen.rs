@@ -23,7 +23,7 @@ use livekit::options::{TrackPublishOptions, VideoCodec, VideoEncoding};
 use livekit::prelude::*;
 use livekit::webrtc::desktop_capturer::{DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions};
 use livekit::webrtc::native::yuv_helper;
-use livekit::webrtc::prelude::{BoxVideoFrame, I420Buffer, VideoBuffer, VideoFormatType, VideoFrame, VideoRotation};
+use livekit::webrtc::prelude::{BoxVideoFrame, I420Buffer, VideoFormatType, VideoFrame, VideoRotation};
 use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
 use livekit::webrtc::video_stream::native::NativeVideoStream;
@@ -401,19 +401,18 @@ impl Screen {
                 let Some(latest) = self.latest.lock().get(&user).cloned() else { return };
                 let l = latest.clone();
                 let c = core.clone();
-                let u = user.clone();
                 let task = crate::rt::spawn(async move {
                     let mut stream = NativeVideoStream::new(v.rtc_track());
                     while let Some(frame) = stream.next().await {
                         *l.frame.lock() = Some(frame);
                         if l.seq.fetch_add(1, Ordering::Relaxed) == 0 {
                             // First picture: tell the UI the stream is live.
-                            let _ = &u;
                             c.voice.screen.emit(&c, None).await;
                         }
                     }
                 });
-                if let Some(old) = latest.task.lock().replace(task) {
+                let old = latest.task.lock().replace(task);
+                if let Some(old) = old {
                     old.abort();
                 }
             }
@@ -476,8 +475,8 @@ impl Screen {
     /// Size of the newest frame of a watched stream (0, 0 if none yet).
     pub fn frame_size(&self, user_id: &str) -> (u32, u32) {
         let Some(latest) = self.latest.lock().get(user_id).cloned() else { return (0, 0) };
-        let g = latest.frame.lock();
-        g.as_ref().map(|f| (f.buffer.width(), f.buffer.height())).unwrap_or((0, 0))
+        let size = latest.frame.lock().as_ref().map(|f| (f.buffer.width(), f.buffer.height())).unwrap_or((0, 0));
+        size
     }
 }
 
