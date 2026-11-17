@@ -132,7 +132,7 @@ PC = needs a person on a real PC to check (audio, devices, look and feel).
 | audio devices, echo/noise/gain | built | PC |
 | push-to-talk; in-app shortcuts (channel/unread/server, Ctrl+T, mute, deafen) | built | PC; rebinding and global hotkeys not yet |
 | per-person voice volume | not yet | core: voice_volume |
-| screen share / camera | not yet | decision pending: native vs WebView2 |
+| screen share (share, watch, viewer counts, stream volume) | built, CI spike | core `voice::screen`: libwebrtc DesktopCapturer (WGC/DXGI), VP8 (this libwebrtc has no H.264 decoder on Windows; web shares add a VP8 backup); frames pulled per display refresh at the shown size. Computer sound and camera not yet |
 | in-game overlay | not yet | |
 | games panel | not yet | plan: WebView2 (it shows the games' websites) |
 | close to tray, tray menu | built, CI (compiles) | |
@@ -141,4 +141,4 @@ PC = needs a person on a real PC to check (audio, devices, look and feel).
 | friends, DMs | built | Friends view (👥): requests, accept/decline, DMs |
 | updates (latest.json) | not yet, on purpose | the core's updater installs what latest.json points to, which is the Tauri installer; the native app needs its own manifest + installer first |
 | zoom / scale | not yet | |
-| installer | not yet | CI estimates 21.8 MB (LZMA2) |
+| installer | built, CI | NSIS per-user, ~25 MB; CI installs, starts and uninstalls it |
