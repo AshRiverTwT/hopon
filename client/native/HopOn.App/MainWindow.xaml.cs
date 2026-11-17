@@ -13,6 +13,7 @@ namespace HopOn.App;
 public sealed partial class MainWindow : Window
 {
     public Store Store { get; }
+    readonly Dial ChannelDial;
 
     readonly DispatcherQueue dispatcher;
     readonly DispatcherQueueTimer toastTimer;
@@ -25,6 +26,10 @@ public sealed partial class MainWindow : Window
         dispatcher = DispatcherQueue.GetForCurrentThread();
         Store = new Store(dispatcher, App.Core);
         InitializeComponent();
+        // Built in code (not XAML): a custom control created by the XAML loader
+        // only reports "cannot create instance", hiding the real error.
+        ChannelDial = new Dial();
+        DialHost.Child = ChannelDial;
 
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1200, 780));
         var iconPath = Path.Combine(AppContext.BaseDirectory, "HopOn.ico");

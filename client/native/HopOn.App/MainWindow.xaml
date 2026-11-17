@@ -113,7 +113,7 @@
             </StackPanel>
 
             <!-- dial (servers) or the friends index -->
-            <local:Dial x:Name="ChannelDial" Grid.Row="1" />
+            <Border x:Name="DialHost" Grid.Row="1" />
             <Grid x:Name="FriendsPanel" Grid.Row="1" Visibility="Collapsed" Margin="28,24,16,0" RowSpacing="12">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
