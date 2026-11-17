@@ -56,6 +56,7 @@ jobs:
             target/debug/hopon_ffi.dll
             target/debug/hopon-server.exe
             target/debug/e2e_feed.exe
+            target/debug/screen_loopback.exe
             target/ship/hopon_ffi.dll
           key: rust-bins-${{ hashFiles('Cargo.toml', 'Cargo.lock', '.cargo/**', 'client/core/**', 'client/ffi/src/**', 'client/ffi/build.rs', 'client/ffi/Cargo.toml', 'shared/**', 'server/**', 'bench/**', 'vendor/**') }}
 
@@ -75,6 +76,7 @@ jobs:
         run: |
           cargo build -p hopon-ffi -p hopon-server
           cargo build -p hopon-bench --bin e2e_feed
+          cargo build -p hopon-bench --features voice --bin screen_loopback
 
       - name: Build the release hopon_ffi.dll (what ships with the app)
         if: steps.bins.outputs.cache-hit != 'true'
@@ -96,6 +98,7 @@ jobs:
             target/debug/hopon_ffi.dll
             target/debug/hopon-server.exe
             target/debug/e2e_feed.exe
+            target/debug/screen_loopback.exe
             target/ship/hopon_ffi.dll
           retention-days: 7
 
@@ -106,6 +109,43 @@ jobs:
           dotnet build -c Debug -warnaserror
           dotnet bin\Debug\net10.0\HopOn.Interop.Tests.dll
           if ($LASTEXITCODE -ne 0) { throw "model tests failed" }
+
+  # Screen share through a real LiveKit SFU, headless: capture the runner's
+  # desktop, publish, subscribe from a second participant; per codec, which
+  # encoder/decoder this libwebrtc build uses and what arrives.
+  screen:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-bin
+          path: ${{ runner.temp }}\rust-bin
+
+      - name: Screen share loopback (VP8, H.264)
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\scripts\ci\start-livekit.ps1"
+          $exe = "$env:RUNNER_TEMP\rust-bin\debug\screen_loopback.exe"
+          $env:RUST_LOG = "info,libwebrtc=info"
+          $failed = @()
+          foreach ($run in @(@("vp8", "1920", "1080", "30"), @("vp8", "1280", "720", "60"), @("h264", "1920", "1080", "30"))) {
+            Write-Host "=== $($run -join ' ') ==="
+            $p = Start-Process $exe -ArgumentList "--codec", $run[0], "--width", $run[1], "--height", $run[2], "--fps", $run[3], "--secs", "12", "--secret", "secret" `
+              -NoNewWindow -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\out.txt" -RedirectStandardError "$env:RUNNER_TEMP\err.txt"
+            $p.WaitForExit()
+            $cpu = $p.TotalProcessorTime.TotalSeconds
+            Get-Content "$env:RUNNER_TEMP\out.txt"
+            Get-Content "$env:RUNNER_TEMP\err.txt" | Select-String -Pattern "error|warn|H264|h264|decoder|encoder|capturer|WGC|DXGI" | Select-Object -First 40
+            Write-Host "exit $($p.ExitCode); process CPU $([math]::Round($cpu, 1)) s over ~14 s (both participants, one process)"
+            $line = Get-Content "$env:RUNNER_TEMP\out.txt" | Where-Object { $_ -like "RESULT *" }
+            if ($line) { "| $($run -join ' ') | ``$($line.Substring(7))`` | $([math]::Round($cpu, 1)) s |" >> $env:GITHUB_STEP_SUMMARY }
+            if ($p.ExitCode -ne 0 -and $run[0] -eq "vp8") { $failed += ($run -join ' ') }
+          }
+          if ($failed.Count) { throw "screen loopback failed: $($failed -join ', ')" }
 
   bridge:
     needs: build

@@ -41,3 +41,8 @@ path = "src/bin/smoke.rs"
 name = "voice_loopback"
 path = "src/bin/voice_loopback.rs"
 required-features = ["voice"]
+
+[[bin]]
+name = "screen_loopback"
+path = "src/bin/screen_loopback.rs"
+required-features = ["voice"]
