@@ -15,6 +15,25 @@ if (-not (Test-Path $makensis)) {
   choco install nsis -y --no-progress | Out-Null
 }
 if (-not (Test-Path $makensis)) { throw "makensis not found" }
+# A clean PC may lack the Visual C++ runtime (the runner has it): report any
+# shipped binary that needs a VC++ runtime DLL the folder doesn't carry.
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$vs = & $vswhere -latest -products * -property installationPath
+$dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe | Where-Object { $_.FullName -match "Hostx64\\x64" } | Select-Object -First 1
+if ($dumpbin) {
+  $shipped = (Get-ChildItem $AppDir -Recurse -File).Name | ForEach-Object { $_.ToLowerInvariant() }
+  $missing = @{}
+  foreach ($pe in Get-ChildItem $AppDir -Recurse -File -Include *.exe, *.dll) {
+    $deps = & $dumpbin.FullName /nologo /dependents $pe.FullName | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ -match "^(vcruntime|msvcp|concrt|vccorlib)\S*\.dll$" }
+    foreach ($d in $deps) { if ($shipped -notcontains $d) { $missing[$d] = @($missing[$d]) + $pe.Name } }
+  }
+  if ($missing.Count -eq 0) { Write-Host "VC++ runtime: no shipped binary needs one that isn't included" }
+  else {
+    foreach ($k in $missing.Keys) { Write-Host "VC++ runtime NOT shipped: $k needed by $(($missing[$k] | Where-Object { $_ }) -join ', ')" }
+    if ($env:GITHUB_STEP_SUMMARY) { "| VC++ runtime | **needed, not shipped**: $($missing.Keys -join ', ') |" | Add-Content $env:GITHUB_STEP_SUMMARY }
+  }
+} else { Write-Host "dumpbin not found: VC++ runtime check skipped" }
+
 # Symbols never ship.
 Get-ChildItem $AppDir -Recurse -Filter *.pdb | Remove-Item
 & $makensis -V2 "/DSRCDIR=$AppDir" "/DOUTFILE=$setup" "/DVERSION=$version" "$PSScriptRoot\..\..\client\native\installer\HopOn.nsi"
