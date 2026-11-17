@@ -132,7 +132,7 @@ PC = needs a person on a real PC to check (audio, devices, look and feel).
 | audio devices, echo/noise/gain | built | PC |
 | push-to-talk; in-app shortcuts (channel/unread/server, Ctrl+T, mute, deafen) | built | PC; rebinding and global hotkeys not yet |
 | per-person voice volume | not yet | core: voice_volume |
-| screen share (share, watch, viewer counts, stream volume) | built, CI spike | core `voice::screen`: libwebrtc DesktopCapturer (WGC/DXGI), VP8 (this libwebrtc has no H.264 decoder on Windows; web shares add a VP8 backup); frames pulled per display refresh at the shown size. Computer sound and camera not yet |
+| screen share (share, watch, viewer counts, stream volume) | built, CI spike | core `voice::screen`: libwebrtc DesktopCapturer (WGC/DXGI), H.264 like the web client (OpenH264 encode, FFmpeg decode; CI loopback: 1080p30 and 720p60 at full rate); frames pulled per display refresh at the shown size. Computer sound and camera not yet |
 | in-game overlay | not yet | |
 | games panel | not yet | plan: WebView2 (it shows the games' websites) |
 | close to tray, tray menu | built, CI (compiles) | |

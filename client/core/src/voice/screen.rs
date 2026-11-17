@@ -44,9 +44,10 @@ pub fn quality(name: &str) -> (u32, u32, u32, u64) {
     }
 }
 
-/// The codec native publishers use. The prebuilt libwebrtc has no H.264
-/// decoder on Windows, so native viewers need VP8 (web viewers decode both).
-const CODEC: VideoCodec = VideoCodec::VP8;
+/// The codec native publishers use: H.264, like the web client (viewers in
+/// the webview decode it in hardware). This libwebrtc build encodes it with
+/// OpenH264 and decodes it with FFmpeg (checked in CI: bench screen_loopback).
+const CODEC: VideoCodec = VideoCodec::H264;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
