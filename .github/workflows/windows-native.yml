@@ -178,6 +178,17 @@ jobs:
           scripts\ci\start-server.ps1 -ServerExe "$env:RUNNER_TEMP\rust-bin\debug\hopon-server.exe"
           scripts\ci\measure-app.ps1 -AppDir "$env:RUNNER_TEMP\HopOn" -E2eFeed "$env:RUNNER_TEMP\rust-bin\debug\e2e_feed.exe" -Out "$env:RUNNER_TEMP\results"
 
+      - name: Installer (build, then install / start / uninstall)
+        shell: pwsh
+        run: scripts\ci\installer.ps1 -AppDir "$env:RUNNER_TEMP\HopOn" -OutDir "$env:RUNNER_TEMP\installer"
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: HopOn-native-setup
+          path: ${{ runner.temp }}\installer\*.exe
+          retention-days: 30
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
