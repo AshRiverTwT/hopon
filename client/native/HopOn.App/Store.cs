@@ -53,6 +53,21 @@ public sealed partial class Store
     public View View { get; private set; } = View.Splash;
     public User? Me { get; private set; }
     public string ConnState { get; private set; } = "connecting";
+
+    bool splashGaveUp;
+
+    /// <summary>
+    /// The saved sign-in is taking too long (server unreachable or slow): show
+    /// the login screen, with the connection state, instead of waiting forever.
+    /// A session that arrives later still opens the app. Same 5 s as the web UI.
+    /// </summary>
+    public void GiveUpSplash()
+    {
+        splashGaveUp = true;
+        if (View != View.Splash) return;
+        View = View.Login;
+        Changed?.Invoke();
+    }
     public ServerVm? OpenServer { get; private set; }
     public ChannelVm? OpenChannel { get; private set; }
     /// <summary>The user is at the newest message (set by the window from the scroll position).</summary>
@@ -478,7 +493,7 @@ public sealed partial class Store
         Me = s.User;
         MessageVm.MeId = s.User?.Id;
         MyStatus = s.Status;
-        View = s.User is not null ? View.Shell : s.AuthPending ? View.Splash : View.Login;
+        View = s.User is not null ? View.Shell : s.AuthPending && !splashGaveUp ? View.Splash : View.Login;
         if (s.User is null)
         {
             Servers.Clear();

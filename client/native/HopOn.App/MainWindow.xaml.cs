@@ -45,6 +45,11 @@ public sealed partial class MainWindow : Window
         AppWindow.Changed += OnAppWindowChanged;
 
         Store.Changed += Render;
+        var splashTimer = DispatcherQueue.CreateTimer();
+        splashTimer.Interval = TimeSpan.FromSeconds(5);
+        splashTimer.IsRepeating = false;
+        splashTimer.Tick += (_, _) => Store.GiveUpSplash();
+        splashTimer.Start();
         Store.Toast += ShowToast;
         Store.Appended += ScrollToEnd;
         Store.Painted += MarkPainted;
@@ -193,6 +198,15 @@ public sealed partial class MainWindow : Window
     void Render()
     {
         SplashView.Visibility = Store.View == View.Splash ? Visibility.Visible : Visibility.Collapsed;
+        var conn = Store.ConnState switch
+        {
+            "online" => "",
+            "offline" => "Can't reach the server. Retrying…",
+            "incompatible" => "This server runs a different HopOn version.",
+            _ => "Connecting to the server…",
+        };
+        SplashStatus.Text = conn;
+        LoginConn.Text = conn.Length == 0 ? "" : $"{conn} ({UrlBox.Text})";
         LoginView.Visibility = Store.View == View.Login ? Visibility.Visible : Visibility.Collapsed;
         ShellView.Visibility = Store.View == View.Shell ? Visibility.Visible : Visibility.Collapsed;
         var st = Store.MyStatus;

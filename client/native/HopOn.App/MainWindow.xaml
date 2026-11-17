@@ -12,6 +12,7 @@
         <StackPanel x:Name="SplashView" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="16">
             <TextBlock Text="HopOn" FontSize="34" FontWeight="SemiBold" HorizontalAlignment="Center" />
             <ProgressRing IsActive="True" Width="28" Height="28" />
+            <TextBlock x:Name="SplashStatus" FontSize="12" Opacity="0.7" HorizontalAlignment="Center" />
         </StackPanel>
 
         <!-- Sign in / sign up. -->
@@ -26,6 +27,7 @@
                 <Button x:Name="SignUpButton" Content="Create account" Click="OnSignUp" />
             </StackPanel>
             <TextBlock x:Name="LoginError" TextWrapping="Wrap" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+            <TextBlock x:Name="LoginConn" TextWrapping="Wrap" FontSize="12" Opacity="0.75" />
         </StackPanel>
 
         <!-- Signed in. -->
