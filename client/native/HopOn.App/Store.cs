@@ -336,6 +336,23 @@ public sealed partial class Store
         catch (Exception) { }
     }
 
+    // ---------- friends mode (client/ui/src/components/Friends.tsx) ----------
+
+    readonly HashSet<string> dmUnread = [];
+
+    /// <summary>Your conversations, newest activity first: (other user, DM).</summary>
+    public List<(string UserId, ServerVm Dm)> Dms() =>
+        [.. dmByUser.Select(kv => (kv.Key, kv.Value)).OrderByDescending(d => d.Value.Channels.FirstOrDefault()?.LastId ?? "0", Comparer<string>.Create(MessageMerge.CmpId))];
+
+    public bool DmUnread(ServerVm dm) => dm != OpenServer && dm.Channels.Any(c => dmUnread.Contains(c.Id)
+        || (dm.Reads.TryGetValue(c.Id, out var read) && MessageMerge.CmpId(c.LastId, read) > 0));
+
+    /// <summary>The user a DM is with (null for a server).</summary>
+    public string? DmWith(ServerVm? sv) => sv is null ? null : dmByUser.FirstOrDefault(kv => kv.Value == sv).Key;
+    public bool IsOnline(string userId) => online.Contains(userId) && statuses.GetValueOrDefault(userId)?.Mode != "invisible";
+    public Task RespondFriend(string userId, bool accept) => Do("friend_respond", new JsonObject { ["userId"] = userId, ["accept"] = accept });
+    public Task RemoveFriend(string userId) => Do("friend_remove", new JsonObject { ["userId"] = userId });
+
     public bool IsSaved(string channelId, string messageId) { LoadLocal(); return saved!.Contains((channelId, messageId)); }
     public List<(string Channel, string Message)> SavedMessages() { LoadLocal(); return [.. saved!]; }
     bool ToggleSaved(string channelId, string messageId)
@@ -479,6 +496,11 @@ public sealed partial class Store
                     if (srv.Channels.Any(c => c.Id == ru.ChannelId)) srv.Reads[ru.ChannelId] = ru.LastRead;
                 break;
             case ChannelActivityEvent a:
+                if (a.ChannelId != OpenChannel?.Id && dmByUser.Values.Any(d => d.Channels.Any(c => c.Id == a.ChannelId)))
+                {
+                    dmUnread.Add(a.ChannelId);
+                    changed = true;
+                }
                 if (a.ChannelId != OpenChannel?.Id)
                 {
                     var row = Channels.FirstOrDefault(x => x.Id == a.ChannelId);
@@ -922,6 +944,7 @@ public sealed partial class Store
     {
         if (row.Voice) return; // voice rooms: a later phase
         OpenChannel = row;
+        dmUnread.Remove(row.Id);
         dividerAfter = OpenServer?.Reads.GetValueOrDefault(row.Id);
         row.Unread = false;
         typers.Clear();

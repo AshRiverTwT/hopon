@@ -288,10 +288,32 @@ public sealed partial class MainWindow : Window
             ChannelTitle.Text = Caps(Store.OpenChannel?.Name ?? (home ? "Friends" : ""));
             ChannelTopic.Text = Store.OpenChannel?.Topic ?? "";
         }
+        // friends mode: the home (no DM open) or a DM's header
+        var friendsHome = home && Store.OpenServer is null;
+        if (home && !room)
+        {
+            if (friendsHome)
+            {
+                ServerTitle.Text = "";
+                ChannelTitle.Text = "FRIENDS";
+                ChannelTopic.Text = "";
+            }
+            else if (Store.DmWith(Store.OpenServer) is { } other)
+            {
+                var f = Store.FriendOf(other);
+                ServerTitle.Text = Caps("Direct message" + (f is not null ? $" · @{f.Username}" : ""));
+                ChannelTitle.Text = Caps(Store.NameOf(other));
+                ChannelTopic.Text = "";
+            }
+        }
+        ServerTitle.Visibility = ServerTitle.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        HandleChip.Visibility = friendsHome ? Visibility.Visible : Visibility.Collapsed;
+        HandleChipText.Text = "@" + Store.Username;
+        FriendsHome.Visibility = friendsHome ? Visibility.Visible : Visibility.Collapsed;
         ChannelTopic.Visibility = ChannelTopic.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         FitTitle();
-        MessageList.Visibility = room ? Visibility.Collapsed : Visibility.Visible;
-        ComposerPanel.Visibility = room ? Visibility.Collapsed : Visibility.Visible;
+        MessageList.Visibility = room || friendsHome ? Visibility.Collapsed : Visibility.Visible;
+        ComposerPanel.Visibility = room || friendsHome ? Visibility.Collapsed : Visibility.Visible;
         StagePanel.Visibility = room ? Visibility.Visible : Visibility.Collapsed;
         if (Store.OpenChannel is { } oc && !room)
         {
@@ -328,11 +350,201 @@ public sealed partial class MainWindow : Window
         PeopleKey.Visibility = Store.OpenServer is null || home ? Visibility.Collapsed : Visibility.Visible;
         PeopleCount.Text = Store.OpenServer?.MemberIds.Count.ToString() ?? "";
         ChannelVm.OwnerTools = Store.IsOwner;
-        OnlineHead.Text = $"ONLINE · {Store.Members.Count(m => m.Online)}";
+        OnlineHead.Text = $"ONLINE · {(home ? Store.Friends.Count(f => f.State == "friends" && Store.IsOnline(f.UserId)) : Store.Members.Count(m => m.Online))}";
+        FriendsRail.Visibility = home && games is null ? Visibility.Visible : Visibility.Collapsed;
+        PeopleList.Visibility = !home && games is null ? Visibility.Visible : Visibility.Collapsed;
+        PeopleKey.Visibility = home ? Visibility.Collapsed : PeopleKey.Visibility;
+        if (home) RenderFriends(friendsHome);
 
         RenderStatus();
         RenderStage();
     }
+
+    // ---------- friends mode (port of Friends.tsx) ----------
+
+    string friendsKey = "";
+
+    void RenderFriends(bool homeOpen)
+    {
+        // Rebuild only when something shown changed.
+        var key = string.Join("|", Store.Friends.Select(f => $"{f.UserId}:{f.State}:{f.Name}:{Store.PresenceOf(f.UserId)}:{Store.GameOf(f.UserId)}:{Store.CustomOf(f.UserId)?.Text}"))
+            + "#" + string.Join(",", Store.Dms().Select(d => $"{d.UserId}:{Store.DmUnread(d.Dm)}:{d.Dm == Store.OpenServer}")) + "#" + homeOpen + friendConfirm;
+        if (key == friendsKey) return;
+        friendsKey = key;
+
+        // left: Messages (.dm-nav)
+        DmNav.Children.Clear();
+        var dms = Store.Dms();
+        if (dms.Count > 0)
+            DmNav.Children.Add(new TextBlock { Text = "MESSAGES", FontFamily = Ui.Font("MonoFont"), FontSize = 10.5, CharacterSpacing = 160, Foreground = Ui.Brush("Cream55"), Margin = new Thickness(12, 6, 12, 4) });
+        foreach (var (userId, dm) in dms)
+        {
+            var on = dm == Store.OpenServer;
+            var unread = Store.DmUnread(dm);
+            var row = new Grid { ColumnSpacing = 10, Height = 44, Padding = new Thickness(10, 0, 10, 0), Background = on ? Ui.Brush("Cream10") : null };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(ProfileCard.Avatar(Store.NameOf(userId), Store.AvatarOf(userId), 28, Store.PresenceOf(userId), 9));
+            var nm = new TextBlock
+            {
+                Text = Store.NameOf(userId), FontSize = 15, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
+                Foreground = Ui.Brush(on || unread ? "Cream" : "Cream80"), FontFamily = Ui.Font(unread ? "TextSemiFont" : "TextFont"),
+            };
+            Grid.SetColumn(nm, 1);
+            row.Children.Add(nm);
+            if (unread)
+            {
+                var dot = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = 8, Height = 8, Fill = Ui.Brush("Signal"), VerticalAlignment = VerticalAlignment.Center };
+                Grid.SetColumn(dot, 2);
+                row.Children.Add(dot);
+            }
+            var b = new Button { Content = row, Background = null, BorderThickness = new Thickness(0), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            var u = userId;
+            b.Click += (_, _) => _ = Store.OpenDm(u);
+            DmNav.Children.Add(b);
+        }
+
+        // right: who's online (.rail)
+        FriendsRail.Children.Clear();
+        var online = Store.Friends.Where(f => f.State == "friends" && Store.IsOnline(f.UserId)).OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        if (online.Count == 0) FriendsRail.Children.Add(new TextBlock { Text = "No friends online", FontSize = 13, Foreground = Ui.Brush("Cream55") });
+        foreach (var f in online)
+        {
+            var g = new Grid { ColumnSpacing = 10, Padding = new Thickness(0, 8, 0, 8), Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.Children.Add(ProfileCard.Avatar(f.Name, Store.AvatarOf(f.UserId), 28, Store.PresenceOf(f.UserId), 9));
+            var t = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            t.Children.Add(new TextBlock { Text = f.Name, FontSize = 14, Foreground = Ui.Brush("Cream"), TextTrimming = TextTrimming.CharacterEllipsis });
+            var game = Store.GameOf(f.UserId);
+            var custom = Store.CustomOf(f.UserId);
+            if (game.Length > 0) t.Children.Add(new TextBlock { Text = "Playing " + game, FontSize = 11.5, FontFamily = Ui.Font("TextSemiFont"), Foreground = Ui.Brush("Cream"), TextWrapping = TextWrapping.Wrap });
+            else if (custom is not null) t.Children.Add(new TextBlock { Text = $"{custom.Emoji} {custom.Text}".Trim(), FontSize = 11.5, Foreground = Ui.Brush("Cream55"), TextTrimming = TextTrimming.CharacterEllipsis });
+            Grid.SetColumn(t, 1);
+            g.Children.Add(t);
+            var id = f.UserId;
+            g.Tapped += (_, _) => _ = ProfileCard.Show(g, Store, id, () => OnEditProfile(this, new RoutedEventArgs()));
+            FriendsRail.Children.Add(g);
+        }
+
+        if (!homeOpen) return;
+
+        // middle: add, requests, friends (.friends)
+        FriendsHomeBody.Children.Clear();
+        var add = new Grid { ColumnSpacing = 12, Margin = new Thickness(0, 4, 0, 0) };
+        add.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        add.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var nameBox = new TextBox { PlaceholderText = "Add by username", FontSize = 22, Padding = new Thickness(0, 12, 0, 12), IsSpellCheckEnabled = false };
+        add.Children.Add(nameBox);
+        var addKey = Ui.Key("ADD", solid: true);
+        addKey.IsEnabled = false;
+        addKey.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(addKey, 1);
+        add.Children.Add(addKey);
+        nameBox.TextChanged += (_, _) => addKey.IsEnabled = nameBox.Text.Trim().Length > 0;
+        async Task Send()
+        {
+            var n = nameBox.Text.Trim().TrimStart('@');
+            if (n.Length == 0) return;
+            addKey.IsEnabled = false;
+            addKey.Content = "ADDING…";
+            await Store.AddFriend(n);
+            addKey.Content = "ADD";
+            nameBox.Text = "";
+            var f = Store.Friends.FirstOrDefault(x => string.Equals(x.Username, n, StringComparison.OrdinalIgnoreCase));
+            ShowToast(f?.State == "friends" ? $"You and {f.Name} are friends now" : $"Friend request sent to {n}");
+        }
+        nameBox.KeyDown += (_, k) => { if (k.Key == VirtualKey.Enter) { k.Handled = true; _ = Send(); } };
+        addKey.Click += (_, _) => _ = Send();
+        FriendsHomeBody.Children.Add(add);
+
+        TextBlock Head(string t) => new() { Text = t, FontFamily = Ui.Font("MonoFont"), FontSize = 10.5, CharacterSpacing = 160, Foreground = Ui.Brush("Cream55"), Margin = new Thickness(4, 0, 4, 2) };
+        Grid PersonRow(FriendVm f, bool off)
+        {
+            var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(4, 14, 4, 14), BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = Ui.Brush("Cream10") };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var name = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+            var av = ProfileCard.Avatar(f.Name, Store.AvatarOf(f.UserId), 40, f.State == "friends" ? Store.PresenceOf(f.UserId) : "offline", 9);
+            var id = f.UserId;
+            av.Tapped += (_, _) => _ = ProfileCard.Show(av, Store, id, () => OnEditProfile(this, new RoutedEventArgs()));
+            name.Children.Add(av);
+            var label = new TextBlock { Text = f.Name, FontSize = 24, Foreground = Ui.Brush(off ? "Cream35" : "Cream80"), VerticalAlignment = VerticalAlignment.Center };
+            label.Tapped += (_, _) => _ = ProfileCard.Show(label, Store, id, () => OnEditProfile(this, new RoutedEventArgs()));
+            name.Children.Add(label);
+            var game = Store.GameOf(f.UserId);
+            var custom = Store.CustomOf(f.UserId);
+            if (f.State != "friends" && !string.Equals(f.Username, f.Name, StringComparison.OrdinalIgnoreCase))
+                name.Children.Add(new TextBlock { Text = "@" + f.Username, FontSize = 13, Foreground = Ui.Brush("Cream55"), VerticalAlignment = VerticalAlignment.Center });
+            else if (f.State == "friends" && game.Length > 0)
+                name.Children.Add(new TextBlock { Text = "Playing " + game, FontSize = 13, FontFamily = Ui.Font("TextSemiFont"), Foreground = Ui.Brush("Cream"), VerticalAlignment = VerticalAlignment.Center });
+            else if (f.State == "friends" && custom is not null)
+                name.Children.Add(new TextBlock { Text = $"{custom.Emoji} {custom.Text}".Trim(), FontSize = 13, Foreground = Ui.Brush("Cream55"), VerticalAlignment = VerticalAlignment.Center });
+            g.Children.Add(name);
+            var meta = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(meta, 1);
+            g.Children.Add(meta);
+            HyperlinkButton Link(string t, Action a) { var l = new HyperlinkButton { Content = t, Style = (Style)Application.Current.Resources["Link"] }; l.Click += (_, _) => a(); return l; }
+            switch (f.State)
+            {
+                case "incoming":
+                {
+                    var accept = Ui.Key("ACCEPT", solid: true);
+                    accept.Click += (_, _) => _ = Store.RespondFriend(id, true);
+                    var decline = Ui.Key("DECLINE");
+                    decline.Background = null;
+                    decline.BorderBrush = Ui.Brush("Transparent");
+                    decline.Click += (_, _) => _ = Store.RespondFriend(id, false);
+                    meta.Children.Add(accept);
+                    meta.Children.Add(decline);
+                    break;
+                }
+                case "outgoing":
+                    meta.Children.Add(new TextBlock { Text = "Pending", FontSize = 13, Foreground = Ui.Brush("Cream55"), VerticalAlignment = VerticalAlignment.Center });
+                    meta.Children.Add(Link("Cancel", () => _ = Store.RemoveFriend(id)));
+                    break;
+                default:
+                {
+                    var msg = Ui.Key("MESSAGE");
+                    msg.Click += (_, _) => _ = Store.OpenDm(id);
+                    meta.Children.Add(msg);
+                    if (friendConfirm == id)
+                    {
+                        var yes = Link($"Remove {f.Name}?", () => { friendConfirm = null; _ = Store.RemoveFriend(id); });
+                        yes.Foreground = Ui.Brush("White");
+                        meta.Children.Add(yes);
+                        meta.Children.Add(Link("Keep", () => { friendConfirm = null; friendsKey = ""; Render(); }));
+                    }
+                    else meta.Children.Add(Link("Remove", () => { friendConfirm = id; friendsKey = ""; Render(); }));
+                    break;
+                }
+            }
+            return g;
+        }
+        var requests = Store.Friends.Where(f => f.State != "friends").OrderBy(f => f.State == "incoming" ? 0 : 1).ToList();
+        if (requests.Count > 0)
+        {
+            var sec = new StackPanel();
+            sec.Children.Add(Head("REQUESTS"));
+            var list = new StackPanel { BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Ui.Brush("Cream10") };
+            foreach (var f in requests) list.Children.Add(PersonRow(f, false));
+            sec.Children.Add(list);
+            FriendsHomeBody.Children.Add(sec);
+        }
+        var friends = Store.Friends.Where(f => f.State == "friends").OrderBy(f => Store.IsOnline(f.UserId) ? 0 : 1).ThenBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        {
+            var sec = new StackPanel();
+            sec.Children.Add(Head($"FRIENDS · {friends.Count}"));
+            var list = new StackPanel { BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Ui.Brush("Cream10") };
+            if (friends.Count == 0) list.Children.Add(new TextBlock { Text = "No friends yet", Foreground = Ui.Brush("Cream55"), Margin = new Thickness(4, 18, 4, 18) });
+            foreach (var f in friends) list.Children.Add(PersonRow(f, !Store.IsOnline(f.UserId)));
+            sec.Children.Add(list);
+            FriendsHomeBody.Children.Add(sec);
+        }
+    }
+
+    string? friendConfirm;
 
     /// <summary>Mic / Sound key: a lit LED when on; transparent with a hollow LED when off.</summary>
     static void Toggle(Button b, Microsoft.UI.Xaml.Shapes.Rectangle led, TextBlock label, bool on, string text)
