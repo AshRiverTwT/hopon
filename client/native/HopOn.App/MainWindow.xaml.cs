@@ -239,8 +239,8 @@ public sealed partial class MainWindow : Window
 
         // nav: Friends | Servers
         var home = Store.HomeMode;
-        FriendsTab.Style = (Style)Application.Current.Resources[home ? "SolidKeyButton" : "KeyButton"];
-        ServersTab.Style = (Style)Application.Current.Resources[home ? "KeyButton" : "SolidKeyButton"];
+        Ui.SetKey(FriendsTab, home);
+        Ui.SetKey(ServersTab, !home);
         FriendsTab.Height = ServersTab.Height = 36;
         var requests = Store.Friends.Count(f => f.State == "incoming");
         FriendsBadge.Visibility = requests > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -254,7 +254,7 @@ public sealed partial class MainWindow : Window
         MeText.Text = Store.Me?.Name ?? "";
         MeInitial.Text = Store.Me?.Name is { Length: > 0 } n ? n[..1].ToUpperInvariant() : "";
         MeAvatar.Source = Store.Me is { } me ? Store.AvatarOf(me.Id) : null;
-        MeDot.Fill = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[st?.Mode is "dnd" ? "Signal" : st?.Mode is "invisible" or "idle" ? "Cream35" : "Cream"];
+        MeDot.Fill = Ui.Brush(st?.Mode is "dnd" ? "Signal" : st?.Mode is "invisible" or "idle" ? "Cream35" : "Cream");
         ToolTipService.SetToolTip(MeButton, st is { Text.Length: > 0 } ? $"{st.Emoji} {st.Text}".Trim() : "Your status");
         var v = Store.MyVoice;
         var muted = v?.Muted ?? false;
@@ -315,12 +315,11 @@ public sealed partial class MainWindow : Window
     /// <summary>Mic / Sound key: a lit LED when on; transparent with a hollow LED when off.</summary>
     static void Toggle(Button b, Microsoft.UI.Xaml.Shapes.Rectangle led, TextBlock label, bool on, string text)
     {
-        var res = Application.Current.Resources;
         label.Text = text;
-        b.Background = on ? (Microsoft.UI.Xaml.Media.Brush)res["Key"] : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        label.Foreground = (Microsoft.UI.Xaml.Media.Brush)res[on ? "Cream80" : "Cream35"];
-        led.Fill = on ? (Microsoft.UI.Xaml.Media.Brush)res["Signal"] : null;
-        led.Stroke = on ? null : (Microsoft.UI.Xaml.Media.Brush)res["Cream35"];
+        b.Background = on ? Ui.Brush("Key") : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        label.Foreground = Ui.Brush(on ? "Cream80" : "Cream35");
+        led.Fill = on ? Ui.Brush("Signal") : null;
+        led.Stroke = on ? null : Ui.Brush("Cream35");
         led.StrokeThickness = 1;
     }
 
@@ -347,11 +346,10 @@ public sealed partial class MainWindow : Window
     /// <summary>Bottom right: the light, the room you're live in, latency, clock.</summary>
     void RenderStatus()
     {
-        var res = Application.Current.Resources;
         var v = Store.MyVoice;
         var inVoice = v is not null && v.State != "idle";
         var online = Store.ConnState == "online";
-        StatusLed.Fill = (Microsoft.UI.Xaml.Media.Brush)res[!online ? "White" : inVoice ? "Signal" : "Cream35"];
+        StatusLed.Fill = Ui.Brush(!online ? "White" : inVoice ? "Signal" : "Cream35");
         if (inVoice)
         {
             var roomName = Store.Channels.FirstOrDefault(c => c.Id == v!.ChannelId)?.Name ?? "voice";
@@ -373,42 +371,41 @@ public sealed partial class MainWindow : Window
     void RenderStage()
     {
         if (stage is null) return;
-        var res = Application.Current.Resources;
         var v = Store.MyVoice;
         var joined = v is not null && v.State != "idle" && v.ChannelId == stage.Id;
         var connected = joined && v!.State == "connected";
         StagePeople.Children.Clear();
         var people = Store.VoiceMembers(stage.Id);
         if (people.Count == 0)
-            StagePeople.Children.Add(new TextBlock { Text = "Nobody is here yet.", FontSize = 17, Foreground = (Microsoft.UI.Xaml.Media.Brush)res["Cream55"], Margin = new Thickness(0, 14, 0, 0) });
+            StagePeople.Children.Add(new TextBlock { Text = "Nobody is here yet.", FontSize = 17, Foreground = Ui.Brush("Cream55"), Margin = new Thickness(0, 14, 0, 0) });
         foreach (var p in people.OrderBy(p => Store.NameOf(p.UserId), StringComparer.CurrentCultureIgnoreCase))
         {
-            var row = new Grid { ColumnSpacing = 16, Padding = new Thickness(4, 14, 4, 14), BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = (Microsoft.UI.Xaml.Media.Brush)res["Cream10"] };
+            var row = new Grid { ColumnSpacing = 16, Padding = new Thickness(4, 14, 4, 14), BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = Ui.Brush("Cream10") };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var name = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
             var speaking = Store.IsSpeaking(p.UserId);
             var av = new Grid { Width = 40, Height = 40 };
-            av.Children.Add(new Border { Background = (Microsoft.UI.Xaml.Media.Brush)res["Cream10"], BorderThickness = new Thickness(speaking ? 2 : 0), BorderBrush = (Microsoft.UI.Xaml.Media.Brush)res["Signal"],
+            av.Children.Add(new Border { Background = Ui.Brush("Cream10"), BorderThickness = new Thickness(speaking ? 2 : 0), BorderBrush = Ui.Brush("Signal"),
                 Child = new TextBlock { Text = Store.NameOf(p.UserId)[..1].ToUpperInvariant(), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } });
             if (Store.AvatarOf(p.UserId) is { } img) av.Children.Add(new Image { Source = img, Stretch = Microsoft.UI.Xaml.Media.Stretch.UniformToFill, Margin = new Thickness(speaking ? 2 : 0) });
             name.Children.Add(av);
-            name.Children.Add(new TextBlock { Text = Store.NameOf(p.UserId), FontSize = 28, VerticalAlignment = VerticalAlignment.Center, Foreground = (Microsoft.UI.Xaml.Media.Brush)res[speaking ? "Cream" : "Cream80"] });
-            if (speaking) name.Children.Add(new Microsoft.UI.Xaml.Shapes.Rectangle { Width = 8, Height = 8, Fill = (Microsoft.UI.Xaml.Media.Brush)res["Signal"], VerticalAlignment = VerticalAlignment.Center });
+            name.Children.Add(new TextBlock { Text = Store.NameOf(p.UserId), FontSize = 28, VerticalAlignment = VerticalAlignment.Center, Foreground = Ui.Brush(speaking ? "Cream" : "Cream80") });
+            if (speaking) name.Children.Add(new Microsoft.UI.Xaml.Shapes.Rectangle { Width = 8, Height = 8, Fill = Ui.Brush("Signal"), VerticalAlignment = VerticalAlignment.Center });
             if (Store.IsSharing(p.UserId))
-                name.Children.Add(new Border { Background = (Microsoft.UI.Xaml.Media.Brush)res["Signal"], Padding = new Thickness(5, 1, 5, 1), VerticalAlignment = VerticalAlignment.Center,
-                    Child = new TextBlock { Text = "LIVE", FontSize = 11, FontFamily = (Microsoft.UI.Xaml.Media.FontFamily)res["MonoSemiFont"], Foreground = (Microsoft.UI.Xaml.Media.Brush)res["Ink"] } });
+                name.Children.Add(new Border { Background = Ui.Brush("Signal"), Padding = new Thickness(5, 1, 5, 1), VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock { Text = "LIVE", FontSize = 11, FontFamily = Ui.Font("MonoSemiFont"), Foreground = Ui.Brush("Ink") } });
             row.Children.Add(name);
             var meta = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
             if (connected && p.UserId != Store.Me?.Id && Store.IsSharing(p.UserId))
             {
                 var user = p.UserId;
-                var watch = new Button { Content = StreamWindow.IsOpen(user) ? "OPEN" : "WATCH", Style = (Style)res["KeyButton"] };
+                var watch = Ui.Key(StreamWindow.IsOpen(user) ? "OPEN" : "WATCH");
                 watch.Click += (_, _) => { StreamWindow.Open(Store, user); RenderStage(); };
                 meta.Children.Add(watch);
             }
             var flags = string.Join(" · ", new[] { p.Muted ? "Mic off" : null, p.Deafened ? "Sound off" : null }.Where(x => x is not null));
-            if (flags.Length > 0) meta.Children.Add(new TextBlock { Text = flags, FontSize = 13, Foreground = (Microsoft.UI.Xaml.Media.Brush)res["Cream55"], VerticalAlignment = VerticalAlignment.Center });
+            if (flags.Length > 0) meta.Children.Add(new TextBlock { Text = flags, FontSize = 13, Foreground = Ui.Brush("Cream55"), VerticalAlignment = VerticalAlignment.Center });
             Grid.SetColumn(meta, 1);
             row.Children.Add(meta);
             StagePeople.Children.Add(row);

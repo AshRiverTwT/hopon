@@ -59,7 +59,9 @@ public sealed partial class Dial : Grid
         Children.Add(dots);
         scale.RenderTransform = scaleTurn;
         canvas.Children.Add(scale);
-        monoText.Style = (Style)Application.Current.Resources["Display"];
+        monoText.FontFamily = Ui.Font("DisplayFont");
+        monoText.Foreground = Ui.Brush("Cream");
+        monoText.TextLineBounds = TextLineBounds.Tight;
         monoText.FontSize = 44;
         monoText.TextTrimming = TextTrimming.None;
         monogram.Content = monoText;
@@ -70,7 +72,7 @@ public sealed partial class Dial : Grid
         };
         ToolTipService.SetToolTip(monogram, "Switch server");
         canvas.Children.Add(monogram);
-        readout.FontFamily = (FontFamily)Application.Current.Resources["MonoFont"];
+        readout.FontFamily = Ui.Font("MonoFont");
         canvas.Children.Add(readout);
         Children.Add(canvas);
         SizeChanged += (_, _) => Layout();
@@ -145,7 +147,7 @@ public sealed partial class Dial : Grid
         for (var i = 0; i < servers.Count; i++)
         {
             var index = i;
-            var t = new TextBlock { Style = (Style)Application.Current.Resources["Display"], FontSize = 44, TextTrimming = TextTrimming.None };
+            var t = Ui.Display(44);
             var b = new Button
             {
                 Content = t, Background = null, BorderThickness = new Thickness(0), Padding = new Thickness(0), IsTabStop = false,
@@ -165,9 +167,9 @@ public sealed partial class Dial : Grid
         var h = ActualHeight;
         if (w <= 0 || h <= 0) return;
         var cy = h / 2;
-        var cream = (Brush)Application.Current.Resources["Cream"];
-        var cream55 = (Brush)Application.Current.Resources["Cream55"];
-        var cream35 = (Brush)Application.Current.Resources["Cream35"];
+        var cream = Ui.Brush("Cream");
+        var cream55 = Ui.Brush("Cream55");
+        var cream35 = Ui.Brush("Cream35");
         var gutter = 28.0;
 
         // monogram (measured, so any initials fit) and the geometry from it
@@ -186,9 +188,9 @@ public sealed partial class Dial : Grid
 
         // scale: arcs and ticks, turned so the selected tick points right
         scale.Children.Clear();
-        var hair = (Brush)Application.Current.Resources["Hair"];
-        var cream20 = (Brush)Application.Current.Resources["Cream20"];
-        var signal = (Brush)Application.Current.Resources["Signal"];
+        var hair = Ui.Brush("Hair");
+        var cream20 = Ui.Brush("Cream20");
+        var signal = Ui.Brush("Signal");
         scale.Children.Add(Circle(ScaleR, hair, null));
         scale.Children.Add(Circle(ScaleR - 26, cream20, [1, 6]));
         for (var i = 0; i < items.Count; i++)
@@ -239,7 +241,7 @@ public sealed partial class Dial : Grid
             b.Visibility = Math.Abs(off) > Visible ? Visibility.Collapsed : Visibility.Visible;
             b.MaxWidth = maxW;
             var cursor = off == 0;
-            b.Background = cursor ? (Brush)Application.Current.Resources["Key"] : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            b.Background = cursor ? Ui.Brush("Key") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             b.BorderBrush = cursor ? cream20 : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
             b.Content = ItemContent(it, cursor, cream, cream55, cream35, signal);
         }
@@ -264,7 +266,7 @@ public sealed partial class Dial : Grid
     object ItemContent(Item it, bool cursor, Brush cream, Brush cream55, Brush cream35, Brush signal)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var fg = cursor ? (Brush)Application.Current.Resources["White"] : it.Channel is null ? cream35 : cream55;
+        var fg = cursor ? Ui.Brush("White") : it.Channel is null ? cream35 : cream55;
         if (it.Channel is { Voice: true })
             row.Children.Add(VoiceGlyph(fg));
         row.Children.Add(new TextBlock
@@ -276,12 +278,12 @@ public sealed partial class Dial : Grid
         {
             var (count, live, mentions) = info(c);
             if (c.Voice && count > 0)
-                row.Children.Add(new TextBlock { Text = count.ToString(), FontSize = 12, Foreground = cream55, VerticalAlignment = VerticalAlignment.Center, FontFamily = (FontFamily)Application.Current.Resources["MonoFont"] });
+                row.Children.Add(new TextBlock { Text = count.ToString(), FontSize = 12, Foreground = cream55, VerticalAlignment = VerticalAlignment.Center, FontFamily = Ui.Font("MonoFont") });
             if (mentions > 0)
                 row.Children.Add(new Border
                 {
                     Background = signal, Padding = new Thickness(4, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center,
-                    Child = new TextBlock { Text = "@" + mentions, FontSize = 11, Foreground = (Brush)Application.Current.Resources["Ink"], FontFamily = (FontFamily)Application.Current.Resources["MonoSemiFont"] },
+                    Child = new TextBlock { Text = "@" + mentions, FontSize = 11, Foreground = Ui.Brush("Ink"), FontFamily = Ui.Font("MonoSemiFont") },
                 });
             else if (live)
                 row.Children.Add(new Rectangle { Width = 8, Height = 8, Fill = signal, VerticalAlignment = VerticalAlignment.Center });
