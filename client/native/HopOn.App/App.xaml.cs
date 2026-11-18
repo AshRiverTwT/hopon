@@ -25,7 +25,13 @@ public partial class App : Application
         Core = HopOnCore.Start(Host);
         try { InitializeComponent(); }
         catch (Exception x) { Crash("startup (App.xaml)", x); throw; }
-        UnhandledException += (_, e) => Crash("unhandled", e.Exception);
+        UnhandledException += (_, e) =>
+        {
+            // Log it, and keep the app running: one failing animation or row
+            // shouldn't close HopOn (the log says what to fix).
+            Crash("unhandled", e.Exception);
+            e.Handled = true;
+        };
     }
 
     /// <summary>

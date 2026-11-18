@@ -7,7 +7,6 @@
 using System.Numerics;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Hosting;
 
 namespace HopOn.App;
 
@@ -82,7 +81,9 @@ public static class Motion
 
     static void Start(UIElement e, string prop, Vector3 from, Vector3 to, double ms, double delayMs, (float, float, float, float) c)
     {
-        var compositor = ElementCompositionPreview.GetElementVisual(e).Compositor;
+        // Not ElementCompositionPreview.GetElementVisual(e): Windows refuses that on
+        // an element whose facade properties (CenterPoint, Translation…) are in use.
+        var compositor = Microsoft.UI.Xaml.Media.CompositionTarget.GetCompositorForCurrentThread();
         var ease = compositor.CreateCubicBezierEasingFunction(new Vector2(c.Item1, c.Item2), new Vector2(c.Item3, c.Item4));
         CompositionAnimation anim;
         if (prop is "Translation" or "Scale")
