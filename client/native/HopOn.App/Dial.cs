@@ -57,7 +57,6 @@ public sealed partial class Dial : Grid
         TabFocusNavigation = KeyboardNavigationMode.Once;
         dots.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/dots-dial.png"));
         Children.Add(dots);
-        scale.RotationTransition = new ScalarTransition { Duration = MoveTime };
         canvas.Children.Add(scale);
         monoText.FontFamily = Ui.Font("DisplayFont");
         monoText.Foreground = Ui.Brush("Cream");
@@ -121,9 +120,13 @@ public sealed partial class Dial : Grid
         return s.Length == 0 ? "—" : s.Length > 3 ? s[..3] : s;
     }
 
+    /// <summary>Keys created by the last rebuild (a new server's channels): they fade in, nearest first.</summary>
+    readonly HashSet<UIElement> fresh = [];
+
     void BuildItems()
     {
-        foreach (var b in itemButtons) canvas.Children.Remove(b);
+        foreach (var b in itemButtons) { canvas.Children.Remove(b); Motion.Drop(b); }
+        fresh.Clear();
         itemButtons.Clear();
         for (var i = 0; i < items.Count; i++)
         {
@@ -137,6 +140,7 @@ public sealed partial class Dial : Grid
                 CenterPoint = new Vector3(0, (float)ItemH / 2, 0),
             };
             b.Click += (_, _) => { pos = index; Layout(); Activate(index, true); };
+            fresh.Add(b);
             itemButtons.Add(b);
             canvas.Children.Add(b);
         }
@@ -144,7 +148,7 @@ public sealed partial class Dial : Grid
 
     void BuildRail()
     {
-        foreach (var b in railButtons) canvas.Children.Remove(b);
+        foreach (var b in railButtons) { canvas.Children.Remove(b); Motion.Drop(b); railPlaced.Remove(b); }
         railButtons.Clear();
         for (var i = 0; i < servers.Count; i++)
         {
@@ -223,8 +227,8 @@ public sealed partial class Dial : Grid
         }
         Canvas.SetLeft(scale, centerX);
         Canvas.SetTop(scale, cy);
-        if (instant) Instant(scale, () => scale.Rotation = (float)(-pos * StepDeg));
-        else scale.Rotation = (float)(-pos * StepDeg);
+        // .dial-scale: transform .28s cubic-bezier(.2,.7,.2,1)
+        Motion.To(scale, "Rotation", (float)(-pos * StepDeg), instant ? 0 : 280, Motion.Dial);
 
         // readout: 01/08 TXT
         var it0 = pos < items.Count ? items[pos] : null;
@@ -247,7 +251,23 @@ public sealed partial class Dial : Grid
             var x = centerX + Radius * Math.Cos(r);
             var y = Radius * Math.Sin(r);
             var hidden = Math.Abs(off) > Visible;
-            Place(b, new Vector3((float)x, (float)(cy + y - ItemH / 2), 0), (float)theta, hidden ? 0 : Math.Max(0, 1 - Math.Abs(off) * 0.17), MoveTime, instant);
+            // .dial-item: transform .28s and opacity .28s, cubic-bezier(.2,.7,.2,1);
+            // a new server's channels fade in over .5s, 40 ms apart by distance (dial-in).
+            var at = new Vector3((float)x, (float)(cy + y - ItemH / 2), 0);
+            var opacity = hidden ? 0f : (float)Math.Max(0, 1 - Math.Abs(off) * 0.17);
+            b.CenterPoint = new Vector3(0, (float)ItemH / 2, 0);
+            if (fresh.Remove(b))
+            {
+                Motion.To(b, "Translation", at, 0, Motion.Dial);
+                Motion.To(b, "Rotation", (float)theta, 0, Motion.Dial);
+                Motion.To(b, "Opacity", opacity, 500, Motion.Dial, delayMs: Math.Min(5, Math.Abs(off)) * 40, from: 0);
+            }
+            else
+            {
+                Motion.To(b, "Translation", at, instant ? 0 : 280, Motion.Dial);
+                Motion.To(b, "Rotation", (float)theta, instant ? 0 : 280, Motion.Dial);
+                Motion.To(b, "Opacity", opacity, 280, Motion.Dial);
+            }
             b.IsHitTestVisible = !hidden;
             b.MaxWidth = maxW;
             var cursor = off == 0;
@@ -268,15 +288,17 @@ public sealed partial class Dial : Grid
             b.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             var bh = b.DesiredSize.Height;
             b.CenterPoint = new Vector3(0, (float)bh / 2, 0);
-            b.ScaleTransition ??= new Vector3Transition { Duration = Rail };
+            // .server-rail: transform .42s cubic-bezier(.2,.8,.2,1), opacity .42s ease
             var sc = (float)(Math.Abs(off) > 3 ? 0.2 : RailScale[k]);
-            if (instant || b.TranslationTransition is null) Instant(b, () => b.Scale = new Vector3(sc, sc, 1)); else b.Scale = new Vector3(sc, sc, 1);
-            Place(b, new Vector3((float)gutter, (float)(cy - bh / 2 + Math.Sign(off) * (Math.Abs(off) > 3 ? 240 : RailY[k])), 0), 0,
-                gone ? 0 : RailOpacity[k], Rail, instant);
+            var first = !railPlaced.Contains(b);
+            railPlaced.Add(b);
+            var dur = instant || first ? 0 : 420;
+            Motion.To(b, "Scale", new Vector3(sc, sc, 1), dur, Motion.Rail);
+            Motion.To(b, "Translation", new Vector3((float)gutter, (float)(cy - bh / 2 + Math.Sign(off) * (Math.Abs(off) > 3 ? 240 : RailY[k])), 0), dur, Motion.Rail);
+            Motion.To(b, "Opacity", gone ? 0f : (float)RailOpacity[k], first ? 0 : 420, Motion.Ease);
         }
     }
 
-    static readonly TimeSpan MoveTime = TimeSpan.FromMilliseconds(280), Rail = TimeSpan.FromMilliseconds(420), Mono = TimeSpan.FromMilliseconds(480);
     double lastCy;
     int lastSpos;
 
@@ -288,66 +310,16 @@ public sealed partial class Dial : Grid
         catch (ArgumentException) { return ActualHeight / 2; }
     }
 
-    /// <summary>
-    /// Move an element (composition translation / rotation / opacity, animated
-    /// like the web's CSS transitions). Its first placement is instant (it fades
-    /// in); instant also skips the animation when the whole dial moved.
-    /// </summary>
-    static void Place(UIElement e, Vector3 at, float rotation, double opacity, TimeSpan duration, bool instant)
-    {
-        if (e.TranslationTransition is null)
-        {
-            e.Translation = at;
-            e.Rotation = rotation;
-            e.Opacity = 0;
-            e.TranslationTransition = new Vector3Transition { Duration = duration };
-            e.RotationTransition = new ScalarTransition { Duration = duration };
-            e.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(500) };
-            e.Opacity = opacity; // a new server's channels fade into place
-            return;
-        }
-        if (instant)
-        {
-            Instant(e, () => { e.Translation = at; e.Rotation = rotation; });
-            e.Opacity = opacity;
-            return;
-        }
-        e.Translation = at;
-        e.Rotation = rotation;
-        e.Opacity = opacity;
-    }
-
-    /// <summary>Apply a change without its transitions, then restore them.</summary>
-    static void Instant(UIElement e, Action set)
-    {
-        var (t, r, sc) = (e.TranslationTransition, e.RotationTransition, e.ScaleTransition);
-        e.TranslationTransition = null;
-        e.RotationTransition = null;
-        e.ScaleTransition = null;
-        set();
-        e.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-        {
-            e.TranslationTransition = t;
-            e.RotationTransition = r;
-            e.ScaleTransition = sc;
-        });
-    }
-
     /// <summary>The monogram's new initials rise (or drop) into place: .mono-txt from-below / from-above.</summary>
     void SlideIn(TextBlock t, int dir)
     {
-        t.TranslationTransition = null;
-        t.OpacityTransition = null;
-        t.Translation = new Vector3(0, (float)(dir * 0.7 * Math.Max(30, t.ActualHeight)), 0);
-        t.Opacity = 0;
-        t.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-        {
-            t.TranslationTransition = new Vector3Transition { Duration = Mono };
-            t.OpacityTransition = new ScalarTransition { Duration = Mono };
-            t.Translation = Vector3.Zero;
-            t.Opacity = 1;
-        });
+        // .mono-txt: from translateY(±70%) and transparent, .48s cubic-bezier(.2,.8,.2,1)
+        var h = (float)Math.Max(30, t.ActualHeight);
+        Motion.To(t, "Translation", Vector3.Zero, 480, Motion.Rail, from: new Vector3(0, dir * 0.7f * h, 0));
+        Motion.To(t, "Opacity", 1f, 480, Motion.Rail, from: 0f);
     }
+
+    readonly HashSet<UIElement> railPlaced = [];
 
     object ItemContent(Item it, bool cursor, Brush cream, Brush cream55, Brush cream35, Brush signal)
     {

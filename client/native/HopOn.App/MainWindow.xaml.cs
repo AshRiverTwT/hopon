@@ -843,11 +843,33 @@ public sealed partial class MainWindow : Window
             games = null;
             OnlineHead.Visibility = PeopleList.Visibility = Visibility.Visible;
         }
-        RailColumn.Width = new GridLength(open ? Math.Clamp(Root.ActualWidth * 0.30, 340, 440) : 230);
+        SlideRail(open ? Math.Clamp(Root.ActualWidth * 0.30, 340, 440) : 230);
+        // .side-bar > .people { margin-right: auto }: with the wide column the people key stands apart.
+        PeopleKey.Margin = new Thickness(0, 0, open ? Math.Clamp(Root.ActualWidth * 0.30, 340, 440) - 270 : 0, 0);
         GamesKey.Background = open ? Ui.Brush("Cream") : Ui.Brush("Key");
         GamesKey.BorderBrush = open ? Ui.Brush("Cream") : Ui.Brush("Hair");
         GamesText.Foreground = GamesGlyph.Stroke = open ? Ui.Brush("Ink") : Ui.Brush("Cream55");
     }
+
+    /// <summary>
+    /// The right column widens / narrows like the web's grid-template-columns
+    /// transition (.3s cubic-bezier(.2,.7,.2,1)): the chat slides left as the games open.
+    /// </summary>
+    void SlideRail(double to)
+    {
+        var from = RailColumn.ActualWidth > 0 ? RailColumn.ActualWidth : RailColumn.Width.Value;
+        var start = Environment.TickCount64;
+        if (railTween is not null) CompositionTarget.Rendering -= railTween;
+        railTween = (_, _) =>
+        {
+            var t = Math.Min(1, (Environment.TickCount64 - start) / 300.0);
+            RailColumn.Width = new GridLength(from + (to - from) * Motion.Bezier(Motion.Dial, t));
+            if (t >= 1) { CompositionTarget.Rendering -= railTween; railTween = null; }
+        };
+        CompositionTarget.Rendering += railTween;
+    }
+
+    EventHandler<object>? railTween;
 
     SettingsSheet? settings;
 
