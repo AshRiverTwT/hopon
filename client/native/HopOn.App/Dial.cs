@@ -11,6 +11,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
+using System.Numerics;
 using Windows.Foundation;
 using VirtualKey = Windows.System.VirtualKey;
 
@@ -34,7 +35,6 @@ public sealed partial class Dial : Grid
 
     readonly Canvas canvas = new();
     readonly Canvas scale = new();
-    readonly RotateTransform scaleTurn = new();
     readonly Image dots = new() { Stretch = Stretch.None, HorizontalAlignment = HorizontalAlignment.Left, IsHitTestVisible = false };
     readonly Button monogram = new() { Background = null, BorderThickness = new Thickness(0), Padding = new Thickness(0) };
     readonly TextBlock monoText = new() { FontSize = 44 };
@@ -57,7 +57,7 @@ public sealed partial class Dial : Grid
         TabFocusNavigation = KeyboardNavigationMode.Once;
         dots.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/dots-dial.png"));
         Children.Add(dots);
-        scale.RenderTransform = scaleTurn;
+        scale.RotationTransition = new ScalarTransition { Duration = MoveTime };
         canvas.Children.Add(scale);
         monoText.FontFamily = Ui.Font("DisplayFont");
         monoText.Foreground = Ui.Brush("Cream");
@@ -76,6 +76,8 @@ public sealed partial class Dial : Grid
         canvas.Children.Add(readout);
         Children.Add(canvas);
         SizeChanged += (_, _) => Layout();
+        // The header above changes height between views: re-centre on the window.
+        LayoutUpdated += (_, _) => { if (Math.Abs(WindowCentre() - lastCy) > 0.5) Layout(); };
         PointerWheelChanged += OnWheel;
         KeyDown += OnKey;
         settle.Tick += (_, _) => { settle.Stop(); Activate(pos, false); };
@@ -132,7 +134,7 @@ public sealed partial class Dial : Grid
                 Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(1),
                 BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 FontSize = 15, IsTabStop = false,
-                RenderTransform = new CompositeTransform { CenterX = 0, CenterY = ItemH / 2 },
+                CenterPoint = new Vector3(0, (float)ItemH / 2, 0),
             };
             b.Click += (_, _) => { pos = index; Layout(); Activate(index, true); };
             itemButtons.Add(b);
@@ -151,7 +153,6 @@ public sealed partial class Dial : Grid
             var b = new Button
             {
                 Content = t, Background = null, BorderThickness = new Thickness(0), Padding = new Thickness(0), IsTabStop = false,
-                RenderTransform = new CompositeTransform(), RenderTransformOrigin = new Point(0, 0.5),
             };
             ToolTipService.SetToolTip(b, servers[i].Name);
             b.Click += (_, _) => GoServer(index, true);
@@ -166,14 +167,25 @@ public sealed partial class Dial : Grid
         var w = ActualWidth;
         var h = ActualHeight;
         if (w <= 0 || h <= 0) return;
-        var cy = h / 2;
+        // Centred on the window, not on this row (like the web's --dial-y): the
+        // monogram and the selected key never move when you switch channels.
+        var cy = Math.Clamp(WindowCentre(), 80, Math.Max(80, h - 80));
+        var instant = Math.Abs(cy - lastCy) > 0.5 && lastCy > 0; // the row moved: follow it, don't animate
+        lastCy = cy;
         var cream = Ui.Brush("Cream");
         var cream55 = Ui.Brush("Cream55");
         var cream35 = Ui.Brush("Cream35");
         var gutter = 28.0;
 
         // monogram (measured, so any initials fit) and the geometry from it
-        monoText.Text = spos < servers.Count ? Initials(servers[spos].Name) : currentServer is null ? "" : Initials(currentServer.Name);
+        var mono = spos < servers.Count ? Initials(servers[spos].Name) : currentServer is null ? "" : Initials(currentServer.Name);
+        if (mono != monoText.Text)
+        {
+            var first = monoText.Text.Length == 0;
+            monoText.Text = mono;
+            if (!first) SlideIn(monoText, spos >= lastSpos ? 1 : -1);
+        }
+        lastSpos = spos;
         monogram.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         var monoW = monogram.DesiredSize.Width;
         Canvas.SetLeft(monogram, gutter);
@@ -211,7 +223,8 @@ public sealed partial class Dial : Grid
         }
         Canvas.SetLeft(scale, centerX);
         Canvas.SetTop(scale, cy);
-        scaleTurn.Angle = -pos * StepDeg;
+        if (instant) Instant(scale, () => scale.Rotation = (float)(-pos * StepDeg));
+        else scale.Rotation = (float)(-pos * StepDeg);
 
         // readout: 01/08 TXT
         var it0 = pos < items.Count ? items[pos] : null;
@@ -233,12 +246,9 @@ public sealed partial class Dial : Grid
             var r = theta * Math.PI / 180;
             var x = centerX + Radius * Math.Cos(r);
             var y = Radius * Math.Sin(r);
-            var ct = (CompositeTransform)b.RenderTransform;
-            ct.TranslateX = x;
-            ct.TranslateY = cy + y - ItemH / 2;
-            ct.Rotation = theta;
-            b.Opacity = Math.Max(0, 1 - Math.Abs(off) * 0.17);
-            b.Visibility = Math.Abs(off) > Visible ? Visibility.Collapsed : Visibility.Visible;
+            var hidden = Math.Abs(off) > Visible;
+            Place(b, new Vector3((float)x, (float)(cy + y - ItemH / 2), 0), (float)theta, hidden ? 0 : Math.Max(0, 1 - Math.Abs(off) * 0.17), MoveTime, instant);
+            b.IsHitTestVisible = !hidden;
             b.MaxWidth = maxW;
             var cursor = off == 0;
             b.Background = cursor ? Ui.Brush("Key") : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
@@ -253,14 +263,90 @@ public sealed partial class Dial : Grid
             var k = Math.Min(3, Math.Abs(off));
             var b = railButtons[i];
             ((TextBlock)b.Content).Text = Initials(servers[i].Name);
-            b.Visibility = off == 0 || Math.Abs(off) > 3 ? Visibility.Collapsed : Visibility.Visible;
-            b.Opacity = RailOpacity[k];
+            var gone = off == 0 || Math.Abs(off) > 3;
+            b.IsHitTestVisible = !gone;
             b.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            var ct = (CompositeTransform)b.RenderTransform;
-            ct.ScaleX = ct.ScaleY = RailScale[k];
-            Canvas.SetLeft(b, gutter);
-            Canvas.SetTop(b, cy - b.DesiredSize.Height / 2 + Math.Sign(off) * RailY[k]);
+            var bh = b.DesiredSize.Height;
+            b.CenterPoint = new Vector3(0, (float)bh / 2, 0);
+            b.ScaleTransition ??= new Vector3Transition { Duration = Rail };
+            var sc = (float)(Math.Abs(off) > 3 ? 0.2 : RailScale[k]);
+            if (instant || b.TranslationTransition is null) Instant(b, () => b.Scale = new Vector3(sc, sc, 1)); else b.Scale = new Vector3(sc, sc, 1);
+            Place(b, new Vector3((float)gutter, (float)(cy - bh / 2 + Math.Sign(off) * (Math.Abs(off) > 3 ? 240 : RailY[k])), 0), 0,
+                gone ? 0 : RailOpacity[k], Rail, instant);
         }
+    }
+
+    static readonly TimeSpan MoveTime = TimeSpan.FromMilliseconds(280), Rail = TimeSpan.FromMilliseconds(420), Mono = TimeSpan.FromMilliseconds(480);
+    double lastCy;
+    int lastSpos;
+
+    /// <summary>The window's vertical centre, in this control's coordinates.</summary>
+    double WindowCentre()
+    {
+        if (XamlRoot?.Content is not FrameworkElement root || root.ActualHeight <= 0) return ActualHeight / 2;
+        try { return root.ActualHeight / 2 - TransformToVisual(root).TransformPoint(new Point(0, 0)).Y; }
+        catch (ArgumentException) { return ActualHeight / 2; }
+    }
+
+    /// <summary>
+    /// Move an element (composition translation / rotation / opacity, animated
+    /// like the web's CSS transitions). Its first placement is instant (it fades
+    /// in); instant also skips the animation when the whole dial moved.
+    /// </summary>
+    static void Place(UIElement e, Vector3 at, float rotation, double opacity, TimeSpan duration, bool instant)
+    {
+        if (e.TranslationTransition is null)
+        {
+            e.Translation = at;
+            e.Rotation = rotation;
+            e.Opacity = 0;
+            e.TranslationTransition = new Vector3Transition { Duration = duration };
+            e.RotationTransition = new ScalarTransition { Duration = duration };
+            e.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(500) };
+            e.Opacity = opacity; // a new server's channels fade into place
+            return;
+        }
+        if (instant)
+        {
+            Instant(e, () => { e.Translation = at; e.Rotation = rotation; });
+            e.Opacity = opacity;
+            return;
+        }
+        e.Translation = at;
+        e.Rotation = rotation;
+        e.Opacity = opacity;
+    }
+
+    /// <summary>Apply a change without its transitions, then restore them.</summary>
+    static void Instant(UIElement e, Action set)
+    {
+        var (t, r, sc) = (e.TranslationTransition, e.RotationTransition, e.ScaleTransition);
+        e.TranslationTransition = null;
+        e.RotationTransition = null;
+        e.ScaleTransition = null;
+        set();
+        e.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            e.TranslationTransition = t;
+            e.RotationTransition = r;
+            e.ScaleTransition = sc;
+        });
+    }
+
+    /// <summary>The monogram's new initials rise (or drop) into place: .mono-txt from-below / from-above.</summary>
+    void SlideIn(TextBlock t, int dir)
+    {
+        t.TranslationTransition = null;
+        t.OpacityTransition = null;
+        t.Translation = new Vector3(0, (float)(dir * 0.7 * Math.Max(30, t.ActualHeight)), 0);
+        t.Opacity = 0;
+        t.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            t.TranslationTransition = new Vector3Transition { Duration = Mono };
+            t.OpacityTransition = new ScalarTransition { Duration = Mono };
+            t.Translation = Vector3.Zero;
+            t.Opacity = 1;
+        });
     }
 
     object ItemContent(Item it, bool cursor, Brush cream, Brush cream55, Brush cream35, Brush signal)
