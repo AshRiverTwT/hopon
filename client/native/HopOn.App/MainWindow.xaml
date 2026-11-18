@@ -328,7 +328,7 @@
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" Visibility="{x:Bind FootVisibility, Mode=OneWay}">
                                         <TextBlock Text="{x:Bind Edited, Mode=OneWay}" FontSize="12" Foreground="{StaticResource Cream35}" />
                                         <TextBlock Text="{x:Bind StateText, Mode=OneWay}" FontSize="12" Foreground="{StaticResource White}" />
                                     </StackPanel>

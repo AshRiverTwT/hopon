@@ -334,7 +334,7 @@ public sealed partial class MessageVm : Observable, IMessageItem
     Microsoft.UI.Xaml.Media.Brush? authorBrush;
     /// <summary>The author's profile colour (white when none), set by the store.</summary>
     public Microsoft.UI.Xaml.Media.Brush? AuthorBrush { get => authorBrush; set => Set(ref authorBrush, value); }
-    public byte State { get => state; private set { Set(ref state, value); Raise(nameof(Opacity)); Raise(nameof(StateText)); } }
+    public byte State { get => state; private set { Set(ref state, value); Raise(nameof(Opacity)); Raise(nameof(StateText)); Raise(nameof(FootVisibility)); } }
     public bool Header { get => header; set { Set(ref header, value); Raise(nameof(HeaderVisibility)); Raise(nameof(RowPadding)); } }
 
     /// <summary>The text (attachments render below it).</summary>
@@ -343,6 +343,8 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public string Edited => editedAt is null ? "" : "(edited)";
     public double Opacity => State == 0 ? 0.55 : 1.0;
     public string StateText => State == 3 ? "Not sent" : "";
+    /// <summary>The "(edited) · Not sent" line takes no room when empty.</summary>
+    public Visibility FootVisibility => editedAt is null && State != 3 ? Visibility.Collapsed : Visibility.Visible;
     public Visibility HeaderVisibility => Header ? Visibility.Visible : Visibility.Collapsed;
     Microsoft.UI.Xaml.Media.ImageSource? avatar;
     /// <summary>Profile picture (null: initials).</summary>
@@ -367,6 +369,7 @@ public sealed partial class MessageVm : Observable, IMessageItem
         Attachments = m.Attachments;
         editedAt = m.EditedAt;
         Raise(nameof(Edited));
+        Raise(nameof(FootVisibility));
         Raise(nameof(Body));
         SetContentDerived(m.Content, m.Reactions);
         SyncMedia();
@@ -385,6 +388,7 @@ public sealed partial class MessageVm : Observable, IMessageItem
         SetContentDerived(newContent, reactions);
         editedAt = at;
         Raise(nameof(Edited));
+        Raise(nameof(FootVisibility));
     }
 
     public void Failed() => State = 3;
