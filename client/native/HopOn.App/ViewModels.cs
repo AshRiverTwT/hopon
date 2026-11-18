@@ -155,7 +155,12 @@ public sealed partial class ReactionVm : Observable
     public required MessageVm Message { get; init; }
     public required string Emoji { get; init; }
     public int Count { get => count; set { Set(ref count, value); Raise(nameof(Label)); } }
-    public bool Mine { get => mine; set { Set(ref mine, value); Raise(nameof(ChipOpacity)); } }
+    public bool Mine { get => mine; set { Set(ref mine, value); Raise(nameof(ChipOpacity)); Raise(nameof(ChipBrush)); Raise(nameof(ChipBorder)); } }
+    // .chip / .chip.mine
+    static readonly Microsoft.UI.Xaml.Media.SolidColorBrush MineFill = new(Microsoft.UI.ColorHelper.FromArgb(18, 255, 255, 255));
+    static readonly Microsoft.UI.Xaml.Media.SolidColorBrush MineEdge = new(Microsoft.UI.ColorHelper.FromArgb(31, 255, 255, 255));
+    public Microsoft.UI.Xaml.Media.Brush ChipBrush => Mine ? MineFill : Ui.Brush("Cream10");
+    public Microsoft.UI.Xaml.Media.Brush ChipBorder => Mine ? MineEdge : Ui.Brush("Transparent");
     public string Label => $"{Emoji} {Count}";
     public double ChipOpacity => Mine ? 1.0 : 0.7;
     public void Toggle() => MessageVm.ToggleReaction?.Invoke(Message, Emoji, !Mine);
@@ -171,9 +176,21 @@ public sealed partial class PollOptionVm : Observable
     public required int Index { get; init; }
     public required string Text { get; init; }
     public int Votes { get => votes; set { Set(ref votes, value); Raise(nameof(VotesText)); } }
-    public double Pct { get => pct; set => Set(ref pct, value); }
-    public bool Mine { get => mine; set { Set(ref mine, value); Raise(nameof(VotesText)); } }
+    public double Pct { get => pct; set { Set(ref pct, value); Raise(nameof(BarWidth)); Raise(nameof(RestWidth)); Raise(nameof(PctText)); } }
+    public bool Mine { get => mine; set { Set(ref mine, value); Raise(nameof(VotesText)); Raise(nameof(BarBrush)); Raise(nameof(CheckFill)); Raise(nameof(CheckStroke)); Raise(nameof(LabelBrush)); } }
     public string VotesText => (Mine ? "✓ " : "") + (Votes == 1 ? "1 vote" : $"{Votes} votes");
+    // .poll-opt: a bar filled by its share (lead brighter), a check square, "%" and the count.
+    public bool Lead { get => lead; set { Set(ref lead, value); Raise(nameof(BarBrush)); } }
+    bool lead;
+    public string Voters { get => voters; set => Set(ref voters, value); }
+    string voters = "No votes yet";
+    public GridLength BarWidth => new(Math.Max(0.0001, Pct), GridUnitType.Star);
+    public GridLength RestWidth => new(Math.Max(0.0001, 100 - Pct), GridUnitType.Star);
+    public string PctText => $"{Math.Round(Pct)}%";
+    public Microsoft.UI.Xaml.Media.Brush BarBrush => Ui.Brush(Mine ? "Cream10" : Lead ? "Cream20" : "Cream10");
+    public Microsoft.UI.Xaml.Media.Brush CheckFill => Mine ? Ui.Brush("White") : Ui.Brush("Transparent");
+    public Microsoft.UI.Xaml.Media.Brush CheckStroke => Mine ? Ui.Brush("White") : Ui.Brush("Cream35");
+    public Microsoft.UI.Xaml.Media.Brush LabelBrush => Ui.Brush(Mine ? "Cream" : "Cream80");
     public void Toggle() => MessageVm.ToggleReaction?.Invoke(Message, Polls.Emoji[Index], !Mine);
 }
 
@@ -220,6 +237,56 @@ public sealed partial class MessageVm : Observable, IMessageItem
     public void BeginEdit() => Act?.Invoke(this, "edit");
     public void Delete() => Act?.Invoke(this, "delete");
 
+    // ---------- hover actions (Reply · React · Save · Edit · Delete) and inline edit ----------
+
+    bool hovered, editing, saved;
+    string editText = "";
+    /// <summary>The pointer is over the row (actions show; row lights up).</summary>
+    public bool Hovered { get => hovered; set { Set(ref hovered, value); Raise(nameof(ActionsVisibility)); Raise(nameof(RowBrush)); } }
+    public bool IsEditing { get => editing; set { Set(ref editing, value); Raise(nameof(ActionsVisibility)); Raise(nameof(NotEditingVisibility)); } }
+    public string EditText { get => editText; set => Set(ref editText, value); }
+    public bool Saved { get => saved; set { Set(ref saved, value); Raise(nameof(SaveLabel)); } }
+    public string SaveLabel => Saved ? "Saved" : "Save";
+    /// <summary>Real (sent) messages only: pending copies get no actions.</summary>
+    public Visibility ActionsVisibility => Hovered && !IsEditing && !MessageMerge.IsPending(Id) ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility NotEditingVisibility => IsEditing ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility EditVisibility => IsMine && !MessageMerge.IsPending(Id) ? Visibility.Visible : Visibility.Collapsed;
+    static readonly Microsoft.UI.Xaml.Media.SolidColorBrush HoverBrush = new(Microsoft.UI.ColorHelper.FromArgb(6, 255, 255, 255));
+    static readonly Microsoft.UI.Xaml.Media.SolidColorBrush NoBrush = new(Microsoft.UI.Colors.Transparent);
+    public Microsoft.UI.Xaml.Media.Brush RowBrush => Hovered || IsEditing ? HoverBrush : NoBrush;
+    public void OnEnter(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e) => Hovered = true;
+    public void OnExit(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e) { if (!pickerOpen) Hovered = false; }
+    bool pickerOpen;
+    /// <summary>(message, anchor): open the emoji picker for a reaction (set by the window).</summary>
+    public static Action<MessageVm, FrameworkElement>? ReactAction { get; set; }
+    public void ReactClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe) return;
+        pickerOpen = true;
+        ReactAction?.Invoke(this, fe);
+    }
+    /// <summary>The reaction picker closed.</summary>
+    public void PickerClosed() { pickerOpen = false; Hovered = false; }
+    public bool HasMine(string emoji) => Has(emoji);
+    public void SaveClick() => Act?.Invoke(this, "save");
+    public void OnEditKey(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (sender is not Microsoft.UI.Xaml.Controls.TextBox box) return;
+        if (e.Key == Windows.System.VirtualKey.Escape) { e.Handled = true; Act?.Invoke(this, "cancel-edit"); }
+        else if (e.Key == Windows.System.VirtualKey.Enter && !Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
+        {
+            e.Handled = true;
+            EditText = box.Text;
+            Act?.Invoke(this, "save-edit");
+        }
+    }
+    public void OnEditLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Microsoft.UI.Xaml.Controls.TextBox box) return;
+        box.Focus(FocusState.Programmatic);
+        box.SelectionStart = box.Text.Length;
+    }
+
     string? replyTo;
     string replyPreview = "";
     public string? ReplyTo => replyTo;
@@ -231,6 +298,10 @@ public sealed partial class MessageVm : Observable, IMessageItem
     List<Reaction> reactions = [];
     public ObservableCollection<ReactionVm> Chips { get; } = [];
     public Poll? Poll { get; private set; }
+    string pollFoot = "0 votes";
+    public string PollFoot { get => pollFoot; private set => Set(ref pollFoot, value); }
+    /// <summary>User id → name (set by the store), for poll voter lists.</summary>
+    public static Func<string, string>? NameOf { get; set; }
     public ObservableCollection<PollOptionVm> PollOptions { get; } = [];
     public Visibility PollVisibility => Poll is null ? Visibility.Collapsed : Visibility.Visible;
     public Visibility BodyVisibility => Poll is null && Content.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -277,12 +348,17 @@ public sealed partial class MessageVm : Observable, IMessageItem
         {
             var votes = PollOptions.Select(o => reactions.FirstOrDefault(r => r.Emoji == Polls.Emoji[o.Index])?.Users ?? []).ToList();
             var total = votes.Sum(v => v.Count);
+            var max = votes.Count == 0 ? 0 : votes.Max(v => v.Count);
             for (var i = 0; i < PollOptions.Count; i++)
             {
                 PollOptions[i].Votes = votes[i].Count;
                 PollOptions[i].Pct = total == 0 ? 0 : 100.0 * votes[i].Count / total;
                 PollOptions[i].Mine = MeId is not null && votes[i].Contains(MeId);
+                PollOptions[i].Lead = total > 0 && votes[i].Count == max;
+                PollOptions[i].Voters = votes[i].Count == 0 ? "No votes yet" : string.Join(", ", votes[i].Select(u => NameOf?.Invoke(u) ?? u));
             }
+            var voters = votes.SelectMany(v => v).Distinct().Count();
+            PollFoot = voters == 1 ? "1 vote" : $"{voters} votes";
         }
         Raise(nameof(ChipsVisibility));
         Raise(nameof(HasChips));

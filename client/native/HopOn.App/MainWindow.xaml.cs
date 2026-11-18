@@ -101,6 +101,9 @@ public sealed partial class MainWindow : Window
             if (GifButton.Flyout is null) { GifButton.Flyout = GifFlyout.Create(Store, NowMs); GifButton.Flyout.ShowAt(GifButton); }
         };
         MessageVm.ContextMenuAction = ShowMessageMenu;
+        // React (hover action): the emoji picker above the link; picking toggles that reaction.
+        MessageVm.ReactAction = (m, anchor) => EmojiPicker.Show(anchor, Store,
+            (emoji, _) => MessageVm.ToggleReaction?.Invoke(m, emoji, !m.HasMine(emoji)), m.PickerClosed);
         AddShortcuts();
         MessageVm.ShowProfileAction = (userId, anchor) => _ = ProfileCard.Show(anchor, Store, userId, () => OnEditProfile(this, new RoutedEventArgs()));
         ChannelVm.Act = (c, what) => _ = ChannelAction(c, what);
@@ -996,32 +999,119 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    async void OnCreatePoll(object sender, RoutedEventArgs e)
+    Grid? overlaySheet;
+
+    /// <summary>Show a full-window sheet (search, polls, server settings…) over everything but the toast.</summary>
+    void ShowSheet(Grid sheet)
     {
-        var question = new TextBox { Header = "Question", MaxLength = 200, MinWidth = 340 };
-        var panel = new StackPanel { Spacing = 8 };
-        panel.Children.Add(question);
+        CloseSheet();
+        overlaySheet = sheet;
+        Root.Children.Insert(Root.Children.IndexOf(Toast), sheet);
+    }
+
+    void CloseSheet()
+    {
+        if (overlaySheet is null) return;
+        Root.Children.Remove(overlaySheet);
+        overlaySheet = null;
+        Composer.Focus(FocusState.Programmatic);
+    }
+
+    /// <summary>New poll (the web's PollSheet): question, 2–5 options, Post poll.</summary>
+    void OnCreatePoll(object sender, RoutedEventArgs e)
+    {
+        if (Store.OpenChannel is null) return;
+        var (sheet, body) = Sheet.Create("New poll", CloseSheet);
+        var question = new TextBox { PlaceholderText = "Ask a question", MaxLength = 200, FontSize = 22, Padding = new Thickness(0, 12, 0, 12), MaxWidth = 860, HorizontalAlignment = HorizontalAlignment.Stretch };
+        body.Children.Add(question);
+        var list = new StackPanel { Spacing = 4, MaxWidth = 620, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 22, 0, 6) };
+        body.Children.Add(list);
+        var add = new HyperlinkButton { Content = "+ Add an option", Foreground = Ui.Brush("Cream55"), Padding = new Thickness(0), Margin = new Thickness(32, 10, 0, 0) };
+        body.Children.Add(add);
+        var post = Ui.Key("POST POLL", solid: true);
+        post.Height = 44;
+        post.Padding = new Thickness(24, 0, 24, 0);
+        post.FontSize = 12.5;
+        post.HorizontalAlignment = HorizontalAlignment.Right;
+        post.Margin = new Thickness(0, 40, 0, 0);
+        body.Children.Add(post);
         var options = new List<TextBox>();
-        for (var i = 0; i < 5; i++)
+        List<string> Filled() => [.. options.Select(o => o.Text.Trim()).Where(t => t.Length > 0)];
+        bool Ready() => question.Text.Trim().Length > 0 && Filled().Count >= 2;
+        void Refresh()
         {
-            var o = new TextBox { PlaceholderText = i < 2 ? $"Option {i + 1}" : $"Option {i + 1} (optional)", MaxLength = 80 };
-            options.Add(o);
-            panel.Children.Add(o);
+            post.IsEnabled = Ready();
+            add.Visibility = options.Count < 5 ? Visibility.Visible : Visibility.Collapsed;
         }
-        var dialog = new ContentDialog
+        void Post()
         {
-            XamlRoot = Content.XamlRoot, Title = "Create a poll", Content = panel,
-            PrimaryButtonText = "Post", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Primary,
-        };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-        var q = question.Text.Trim();
-        var opts = options.Select(o => o.Text.Trim()).Where(t => t.Length > 0).ToList();
-        if (q.Length == 0 || opts.Count < 2)
-        {
-            ShowToast("A poll needs a question and at least two options");
-            return;
+            if (!Ready()) return;
+            Store.Send(Polls.Encode(new Poll(question.Text.Trim(), Filled())), NowMs());
+            CloseSheet();
         }
-        Store.Send(Polls.Encode(new Poll(q, opts)), NowMs());
+        void Rebuild(int focus = -1)
+        {
+            var texts = options.Select(o => o.Text).ToList();
+            list.Children.Clear();
+            options.Clear();
+            for (var i = 0; i < texts.Count; i++)
+            {
+                var index = i;
+                var row = new Grid { ColumnSpacing = 14 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var n = new TextBlock { Text = (i + 1).ToString(), FontFamily = Ui.Font("CondensedMediumFont"), FontSize = 18, Foreground = Ui.Brush("Cream35"), VerticalAlignment = VerticalAlignment.Center };
+                row.Children.Add(n);
+                var box = new TextBox { Text = texts[i], PlaceholderText = $"Option {i + 1}", MaxLength = 80, FontSize = 18, Padding = new Thickness(0, 10, 0, 10) };
+                box.GotFocus += (_, _) => n.Foreground = Ui.Brush("White");
+                box.LostFocus += (_, _) => n.Foreground = Ui.Brush("Cream35");
+                box.TextChanged += (_, _) => Refresh();
+                box.KeyDown += (_, k) =>
+                {
+                    if (k.Key != Windows.System.VirtualKey.Enter) return;
+                    k.Handled = true;
+                    if (index == options.Count - 1 && options.Count < 5 && box.Text.Trim().Length > 0) { options.Add(new TextBox()); Rebuild(index + 1); }
+                    else if (Ready()) Post();
+                    else if (index + 1 < options.Count) options[index + 1].Focus(FocusState.Programmatic);
+                };
+                Grid.SetColumn(box, 1);
+                row.Children.Add(box);
+                if (texts.Count > 2)
+                {
+                    var x = new Button { Content = "×", Style = (Style)Application.Current.Resources["BareIcon"], FontSize = 18 };
+                    ToolTipService.SetToolTip(x, "Remove option");
+                    x.Click += (_, _) => { options.RemoveAt(index); Rebuild(); };
+                    Grid.SetColumn(x, 2);
+                    row.Children.Add(x);
+                }
+                options.Add(box);
+                list.Children.Add(row);
+            }
+            if (focus >= 0 && focus < options.Count) options[focus].Loaded += (_, _) => options[focus].Focus(FocusState.Programmatic);
+            Refresh();
+        }
+        options.Add(new TextBox());
+        options.Add(new TextBox());
+        Rebuild();
+        question.TextChanged += (_, _) => Refresh();
+        question.KeyDown += (_, k) => { if (k.Key == Windows.System.VirtualKey.Enter) { k.Handled = true; options[0].Focus(FocusState.Programmatic); } };
+        add.Click += (_, _) => { if (options.Count < 5) { options.Add(new TextBox()); Rebuild(options.Count - 1); } };
+        post.Click += (_, _) => Post();
+        question.Loaded += (_, _) => question.Focus(FocusState.Programmatic);
+        ShowSheet(sheet);
+    }
+
+    /// <summary>The composer's emoji button: insert at the caret (Shift keeps the picker open).</summary>
+    void OnEmoji(object sender, RoutedEventArgs e)
+    {
+        EmojiPicker.Show(EmojiButton, Store, (emoji, _) =>
+        {
+            var at = Composer.SelectionStart;
+            Composer.Text = Composer.Text.Insert(at, emoji);
+            Composer.SelectionStart = at + emoji.Length;
+            Composer.Focus(FocusState.Programmatic);
+        });
     }
 
     async Task AddStorageFile(Windows.Storage.StorageFile f)

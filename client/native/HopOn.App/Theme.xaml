@@ -30,9 +30,9 @@
     <SolidColorBrush x:Key="White" Color="#FFFFFF" />
 
     <!-- type -->
-    <FontFamily x:Key="TextFont">ms-appx:///Fonts/HopOnText-Regular.ttf#HopOn Text</FontFamily>
-    <FontFamily x:Key="TextMediumFont">ms-appx:///Fonts/HopOnText-Medium.ttf#HopOn Text</FontFamily>
-    <FontFamily x:Key="TextSemiFont">ms-appx:///Fonts/HopOnText-SemiBold.ttf#HopOn Text</FontFamily>
+    <FontFamily x:Key="TextFont">ms-appx:///Fonts/HopOnText-Regular.ttf#HopOn Text, ms-appx:///Fonts/Twemoji.ttf#Twemoji Mozilla</FontFamily>
+    <FontFamily x:Key="TextMediumFont">ms-appx:///Fonts/HopOnText-Medium.ttf#HopOn Text, ms-appx:///Fonts/Twemoji.ttf#Twemoji Mozilla</FontFamily>
+    <FontFamily x:Key="TextSemiFont">ms-appx:///Fonts/HopOnText-SemiBold.ttf#HopOn Text, ms-appx:///Fonts/Twemoji.ttf#Twemoji Mozilla</FontFamily>
     <FontFamily x:Key="MonoFont">ms-appx:///Fonts/HopOnMono-Regular.ttf#HopOn Mono</FontFamily>
     <FontFamily x:Key="MonoMediumFont">ms-appx:///Fonts/HopOnMono-Medium.ttf#HopOn Mono</FontFamily>
     <FontFamily x:Key="MonoSemiFont">ms-appx:///Fonts/HopOnMono-SemiBold.ttf#HopOn Mono</FontFamily>
@@ -40,7 +40,7 @@
     <FontFamily x:Key="CondensedFont">ms-appx:///Fonts/HopOnCondensed-Regular.ttf#HopOn Condensed</FontFamily>
 
     <!-- stock controls: default font, square corners, flat dark surfaces -->
-    <FontFamily x:Key="ContentControlThemeFontFamily">ms-appx:///Fonts/HopOnText-Regular.ttf#HopOn Text</FontFamily>
+    <FontFamily x:Key="ContentControlThemeFontFamily">ms-appx:///Fonts/HopOnText-Regular.ttf#HopOn Text, ms-appx:///Fonts/Twemoji.ttf#Twemoji Mozilla</FontFamily>
     <CornerRadius x:Key="ControlCornerRadius">0</CornerRadius>
     <CornerRadius x:Key="OverlayCornerRadius">0</CornerRadius>
     <SolidColorBrush x:Key="ApplicationPageBackgroundThemeBrush" Color="#0B0B0C" />
@@ -103,6 +103,14 @@
     <SolidColorBrush x:Key="TextControlHeaderForeground" Color="#8CEDEDEE" />
     <SolidColorBrush x:Key="TextControlSelectionHighlightColor" Color="#EDEDEE" />
     <SolidColorBrush x:Key="TextControlButtonForeground" Color="#8CEDEDEE" />
+
+    <!-- links: cream-55, cream on hover, no underline or fill -->
+    <SolidColorBrush x:Key="HyperlinkButtonForeground" Color="#8CEDEDEE" />
+    <SolidColorBrush x:Key="HyperlinkButtonForegroundPointerOver" Color="#EDEDEE" />
+    <SolidColorBrush x:Key="HyperlinkButtonForegroundPressed" Color="#EDEDEE" />
+    <SolidColorBrush x:Key="HyperlinkButtonBackground" Color="Transparent" />
+    <SolidColorBrush x:Key="HyperlinkButtonBackgroundPointerOver" Color="Transparent" />
+    <SolidColorBrush x:Key="HyperlinkButtonBackgroundPressed" Color="Transparent" />
 
     <!-- list rows: a key-coloured hover, no selection pill -->
     <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="#0DEDEDEE" />

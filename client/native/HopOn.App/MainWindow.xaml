@@ -215,8 +215,8 @@
                     </ListView.ItemContainerStyle>
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:MessageVm">
-                            <Grid Padding="{x:Bind RowPadding, Mode=OneWay}" Opacity="{x:Bind Opacity, Mode=OneWay}" Background="Transparent"
-                                  ContextRequested="{x:Bind OnContextRequested}">
+                            <Grid Padding="{x:Bind RowPadding, Mode=OneWay}" Opacity="{x:Bind Opacity, Mode=OneWay}" Background="{x:Bind RowBrush, Mode=OneWay}"
+                                  ContextRequested="{x:Bind OnContextRequested}" PointerEntered="{x:Bind OnEnter}" PointerExited="{x:Bind OnExit}">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="52" />
                                     <ColumnDefinition Width="*" />
@@ -261,8 +261,14 @@
                                                    FontFamily="{StaticResource MonoSemiFont}" FontSize="11.5" CharacterSpacing="120" VerticalAlignment="Center" />
                                         <TextBlock Text="{x:Bind Time}" FontFamily="{StaticResource MonoFont}" FontSize="10.5" CharacterSpacing="60" Foreground="{StaticResource Cream35}" VerticalAlignment="Center" />
                                     </StackPanel>
-                                    <RichTextBlock local:RichView.Text="{x:Bind Body, Mode=OneWay}" TextWrapping="Wrap" IsTextSelectionEnabled="True"
-                                                   FontSize="16" LineHeight="24" Foreground="{StaticResource Cream}" Visibility="{x:Bind BodyVisibility, Mode=OneWay}" />
+                                    <Grid Visibility="{x:Bind NotEditingVisibility, Mode=OneWay}">
+                                        <RichTextBlock local:RichView.Text="{x:Bind Body, Mode=OneWay}" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                                                       FontSize="16" LineHeight="24" Foreground="{StaticResource Cream}" Visibility="{x:Bind BodyVisibility, Mode=OneWay}" />
+                                    </Grid>
+                                    <!-- inline edit (textarea.edit): Enter saves, Esc cancels -->
+                                    <TextBox x:Name="EditBox" x:Load="{x:Bind IsEditing, Mode=OneWay}" Text="{x:Bind EditText, Mode=OneWay}" FontSize="16"
+                                             AcceptsReturn="True" TextWrapping="Wrap" Padding="0,4,0,4" MinHeight="0" BorderBrush="{StaticResource Cream}"
+                                             KeyDown="{x:Bind OnEditKey}" Loaded="{x:Bind OnEditLoaded}" />
                                     <!-- Attachments: images inline (decoded at display size), files as a framed row -->
                                     <ItemsControl x:Name="MediaRow" x:Load="{x:Bind HasMedia, Mode=OneWay}" ItemsSource="{x:Bind Media}" Margin="0,6,0,0">
                                         <ItemsControl.ItemTemplate>
@@ -292,27 +298,45 @@
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
                                     <!-- Poll: options with vote bars; votes are 1️⃣–5️⃣ reactions. -->
-                                    <StackPanel x:Name="PollRow" x:Load="{x:Bind IsPoll, Mode=OneWay}" Spacing="6" MaxWidth="440" HorizontalAlignment="Left"
-                                                Padding="14" Margin="0,6,0,0" Background="{StaticResource Key}" BorderThickness="1" BorderBrush="{StaticResource Hair}">
-                                        <TextBlock Text="POLL" FontFamily="{StaticResource MonoFont}" FontSize="10.5" CharacterSpacing="160" Foreground="{StaticResource Cream55}" />
-                                        <TextBlock Text="{x:Bind Poll.Question, Mode=OneWay, FallbackValue=''}" FontSize="17" TextWrapping="Wrap" />
+                                    <StackPanel x:Name="PollRow" x:Load="{x:Bind IsPoll, Mode=OneWay}" MaxWidth="460" HorizontalAlignment="Left"
+                                                Padding="14,14,14,12" Margin="0,4,0,0" Background="{StaticResource Cream05}">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <Path Style="{StaticResource Glyph}" Stroke="{StaticResource White}" Data="M3 13.5V8M8 13.5V3M13 13.5V6M1.5 13.5h13" />
+                                            <TextBlock Text="POLL" FontFamily="{StaticResource MonoFont}" FontSize="11" CharacterSpacing="80" Foreground="{StaticResource Cream55}" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <TextBlock Text="{x:Bind Poll.Question, Mode=OneWay, FallbackValue=''}" FontSize="18" FontFamily="{StaticResource TextMediumFont}" LineHeight="23"
+                                                   TextWrapping="Wrap" Margin="0,6,0,12" />
                                         <ItemsControl ItemsSource="{x:Bind PollOptions}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate x:DataType="local:PollOptionVm">
-                                                    <Button Click="{x:Bind Toggle}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,2" Padding="10,6">
-                                                        <Grid ColumnSpacing="12" MinWidth="300">
+                                                    <Button Click="{x:Bind Toggle}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,0,0,6" Padding="0"
+                                                            MinHeight="38" Background="Transparent" BorderThickness="0" ToolTipService.ToolTip="{x:Bind Voters, Mode=OneWay}">
+                                                        <Grid MinHeight="38">
                                                             <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="*" />
-                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="{x:Bind BarWidth, Mode=OneWay}" />
+                                                                <ColumnDefinition Width="{x:Bind RestWidth, Mode=OneWay}" />
                                                             </Grid.ColumnDefinitions>
-                                                            <ProgressBar Grid.ColumnSpan="2" Value="{x:Bind Pct, Mode=OneWay}" Maximum="100" VerticalAlignment="Bottom" Opacity="0.6" />
-                                                            <TextBlock Text="{x:Bind Text}" TextWrapping="Wrap" Margin="0,0,0,6" />
-                                                            <TextBlock Grid.Column="1" Text="{x:Bind VotesText, Mode=OneWay}" Foreground="{StaticResource Cream55}" FontFamily="{StaticResource MonoFont}" FontSize="11" Margin="0,0,0,6" />
+                                                            <Border Background="{x:Bind BarBrush, Mode=OneWay}" />
+                                                            <Grid Grid.ColumnSpan="2" Padding="12,0" ColumnSpacing="12">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                                                                    <Border Width="14" Height="14" Background="{x:Bind CheckFill, Mode=OneWay}" BorderBrush="{x:Bind CheckStroke, Mode=OneWay}" BorderThickness="1.5" />
+                                                                    <TextBlock Text="{x:Bind Text}" FontSize="14" Foreground="{x:Bind LabelBrush, Mode=OneWay}" TextWrapping="Wrap" />
+                                                                </StackPanel>
+                                                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                                                                    <TextBlock Text="{x:Bind PctText, Mode=OneWay}" FontSize="13" FontFamily="{StaticResource TextSemiFont}" Foreground="{StaticResource Cream}" />
+                                                                    <TextBlock Text="{x:Bind Votes, Mode=OneWay}" FontSize="13" Foreground="{StaticResource Cream55}" />
+                                                                </StackPanel>
+                                                            </Grid>
                                                         </Grid>
                                                     </Button>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
+                                        <TextBlock Text="{x:Bind PollFoot, Mode=OneWay}" FontFamily="{StaticResource MonoFont}" FontSize="12" Foreground="{StaticResource Cream35}" Margin="0,4,0,0" />
                                     </StackPanel>
                                     <!-- Reactions -->
                                     <ItemsControl x:Name="ChipsRow" x:Load="{x:Bind HasChips, Mode=OneWay}" ItemsSource="{x:Bind Chips}" Margin="0,6,0,0">
@@ -323,8 +347,13 @@
                                         </ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="local:ReactionVm">
-                                                <Button Click="{x:Bind Toggle}" Content="{x:Bind Label, Mode=OneWay}" Opacity="{x:Bind ChipOpacity, Mode=OneWay}"
-                                                        Padding="8,1" MinHeight="0" Height="26" FontSize="13" />
+                                                <Button Click="{x:Bind Toggle}" Padding="9,0" MinHeight="0" Height="26" FontSize="13"
+                                                        Background="{x:Bind ChipBrush, Mode=OneWay}" BorderBrush="{x:Bind ChipBorder, Mode=OneWay}" BorderThickness="1">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <TextBlock Text="{x:Bind Emoji}" FontSize="15" VerticalAlignment="Center" />
+                                                        <TextBlock Text="{x:Bind Count, Mode=OneWay}" Foreground="{StaticResource Cream80}" VerticalAlignment="Center" />
+                                                    </StackPanel>
+                                                </Button>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
@@ -332,6 +361,15 @@
                                         <TextBlock Text="{x:Bind Edited, Mode=OneWay}" FontSize="12" Foreground="{StaticResource Cream35}" />
                                         <TextBlock Text="{x:Bind StateText, Mode=OneWay}" FontSize="12" Foreground="{StaticResource White}" />
                                     </StackPanel>
+                                </StackPanel>
+                                <!-- hover actions (.actions): Reply · React · Save · Edit · Delete -->
+                                <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="14" Margin="0,0,12,4"
+                                            HorizontalAlignment="Right" VerticalAlignment="Bottom" Visibility="{x:Bind ActionsVisibility, Mode=OneWay}">
+                                    <HyperlinkButton Content="Reply" Style="{StaticResource Link}" Click="{x:Bind Reply}" />
+                                    <HyperlinkButton Content="React" Style="{StaticResource Link}" Click="{x:Bind ReactClick}" />
+                                    <HyperlinkButton Content="{x:Bind SaveLabel, Mode=OneWay}" Style="{StaticResource Link}" Click="{x:Bind SaveClick}" />
+                                    <HyperlinkButton Content="Edit" Style="{StaticResource Link}" Click="{x:Bind BeginEdit}" Visibility="{x:Bind EditVisibility}" />
+                                    <HyperlinkButton Content="Delete" Style="{StaticResource Link}" Click="{x:Bind Delete}" Visibility="{x:Bind DeleteVisibility}" />
                                 </StackPanel>
                             </Grid>
                         </DataTemplate>
@@ -390,23 +428,23 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <Button x:Name="AttachButton" Style="{StaticResource BareIcon}" Padding="14,0,6,0" VerticalAlignment="Stretch"
-                                ToolTipService.ToolTip="Attach files or create a poll">
+                        <Button x:Name="AttachButton" Style="{StaticResource BareIcon}" Width="32" Height="32" Padding="0" Margin="6,0,0,0" VerticalAlignment="Center"
+                                Click="OnAttach" ToolTipService.ToolTip="Attach files">
                             <Path Style="{StaticResource Glyph}" Stroke="{StaticResource Cream55}" Data="M8 2.5v11M2.5 8h11" />
-                            <Button.Flyout>
-                                <MenuFlyout>
-                                    <MenuFlyoutItem Text="Attach files…" Click="OnAttach" />
-                                    <MenuFlyoutItem Text="Create a poll…" Click="OnCreatePoll" />
-                                </MenuFlyout>
-                            </Button.Flyout>
                         </Button>
                         <TextBox x:Name="Composer" Grid.Column="1" PlaceholderText="Write a message" Paste="OnComposerPaste" FontSize="16"
                                  BorderThickness="0" Padding="6,13,6,11" AcceptsReturn="False" TextWrapping="Wrap" MaxHeight="200"
                                  PreviewKeyDown="OnComposerKeyDown" TextChanged="OnComposerChanged" />
                         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" Margin="0,0,10,0" VerticalAlignment="Center">
-                            <Button x:Name="GifButton" Content="GIF" Height="26" Padding="7,0" FontFamily="{StaticResource MonoSemiFont}" FontSize="11"
-                                    Background="Transparent" BorderBrush="{StaticResource Cream55}" Foreground="{StaticResource Cream80}"
+                            <Button x:Name="PollButton" Style="{StaticResource BareIcon}" Width="32" Height="32" Padding="0" Click="OnCreatePoll" ToolTipService.ToolTip="New poll">
+                                <Path Style="{StaticResource Glyph}" Stroke="{StaticResource Cream55}" Data="M3 13.5V8M8 13.5V3M13 13.5V6M1.5 13.5h13" />
+                            </Button>
+                            <Button x:Name="GifButton" Content="GIF" Height="24" Padding="6,0" MinWidth="0" FontFamily="{StaticResource MonoSemiFont}" FontSize="11"
+                                    Background="Transparent" BorderBrush="{StaticResource Cream55}" Foreground="{StaticResource Cream55}" BorderThickness="1"
                                     ToolTipService.ToolTip="Search GIFs" />
+                            <Button x:Name="EmojiButton" Style="{StaticResource BareIcon}" Width="32" Height="32" Padding="0" Click="OnEmoji" ToolTipService.ToolTip="Insert emoji">
+                                <Path Style="{StaticResource Glyph}" Stroke="{StaticResource Cream55}" Data="M8 14.5a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM5.3 9.5c.7 1 1.6 1.5 2.7 1.5s2-.5 2.7-1.5M6 6.3v.2M10 6.3v.2" />
+                            </Button>
                         </StackPanel>
                     </Grid>
                 </StackPanel>

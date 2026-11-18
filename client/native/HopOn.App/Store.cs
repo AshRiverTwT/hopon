@@ -222,6 +222,7 @@ public sealed partial class Store
         this.ui = ui;
         this.core = core;
         RichView.NameOf = NameOf;
+        MessageVm.NameOf = NameOf;
         FriendVm.Act = (f, what) =>
         {
             switch (what)
@@ -246,7 +247,23 @@ public sealed partial class Store
             switch (what)
             {
                 case "reply": Replying = m; Editing = null; ComposerModeChanged?.Invoke(); break;
-                case "edit" when m.IsMine && !MessageMerge.IsPending(m.Id): Editing = m; Replying = null; ComposerModeChanged?.Invoke(); break;
+                case "edit" when m.IsMine && !MessageMerge.IsPending(m.Id):
+                    // Inline, like the web: one message at a time.
+                    foreach (var other in Messages) if (other.IsEditing) other.IsEditing = false;
+                    m.EditText = Editable(m.Content);
+                    m.IsEditing = true;
+                    break;
+                case "cancel-edit": m.IsEditing = false; break;
+                case "save-edit":
+                {
+                    m.IsEditing = false;
+                    var v = m.EditText.Trim();
+                    if (v.Length > 0 && v != Editable(m.Content)) _ = SaveEdit(m, Rich.EncodeMentions(v, MentionCandidates()));
+                    break;
+                }
+                case "save" when OpenChannel is { } ch:
+                    m.Saved = ToggleSaved(ch.Id, m.Id);
+                    break;
                 case "delete" when (m.IsMine || IsOwner) && !MessageMerge.IsPending(m.Id): _ = DeleteMessage(m); break;
             }
         };
@@ -280,7 +297,71 @@ public sealed partial class Store
     public string NameOf(string userId) =>
         userId == "0" ? "HopOn" : users.TryGetValue(userId, out var u) ? u.Name : "…";
 
-    MessageVm Row(Msg m) => new(m, NameOf(m.AuthorId)) { Avatar = AvatarOf(m.AuthorId), AuthorBrush = AccentBrush(m.AuthorId), CanDelete = m.AuthorId == Me?.Id || IsOwner };
+    MessageVm Row(Msg m) => new(m, NameOf(m.AuthorId))
+    {
+        Avatar = AvatarOf(m.AuthorId), AuthorBrush = AccentBrush(m.AuthorId), CanDelete = m.AuthorId == Me?.Id || IsOwner,
+        Saved = OpenChannel is { } ch && IsSaved(ch.Id, m.Id),
+    };
+
+    // ---------- saved messages and favourite channels (per PC, like the web's localStorage) ----------
+
+    static readonly string LocalFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "app.hopon.desktop", "native-local.json");
+    List<(string Channel, string Message)>? saved;
+    List<string>? favorites;
+
+    void LoadLocal()
+    {
+        if (saved is not null) return;
+        saved = [];
+        favorites = [];
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(LocalFile));
+            if (doc.RootElement.TryGetProperty("saved", out var sv))
+                foreach (var x in sv.EnumerateArray()) saved.Add((x.GetProperty("channelId").GetString()!, x.GetProperty("messageId").GetString()!));
+            if (doc.RootElement.TryGetProperty("favorites", out var fv))
+                foreach (var x in fv.EnumerateArray()) favorites.Add(x.GetString()!);
+        }
+        catch (Exception) { }
+    }
+
+    void SaveLocal()
+    {
+        var o = new JsonObject
+        {
+            ["saved"] = new JsonArray([.. saved!.Select(x => (JsonNode)new JsonObject { ["channelId"] = x.Channel, ["messageId"] = x.Message })]),
+            ["favorites"] = new JsonArray([.. favorites!.Select(x => (JsonNode)JsonValue.Create(x))]),
+        };
+        try { Directory.CreateDirectory(Path.GetDirectoryName(LocalFile)!); File.WriteAllText(LocalFile, o.ToJsonString()); }
+        catch (Exception) { }
+    }
+
+    public bool IsSaved(string channelId, string messageId) { LoadLocal(); return saved!.Contains((channelId, messageId)); }
+    public List<(string Channel, string Message)> SavedMessages() { LoadLocal(); return [.. saved!]; }
+    bool ToggleSaved(string channelId, string messageId)
+    {
+        LoadLocal();
+        var now = !saved!.Remove((channelId, messageId));
+        if (now) saved.Add((channelId, messageId));
+        SaveLocal();
+        return now;
+    }
+    public bool IsFavorite(string channelId) { LoadLocal(); return favorites!.Contains(channelId); }
+    public void ToggleFavorite(string channelId)
+    {
+        LoadLocal();
+        if (!favorites!.Remove(channelId)) favorites.Add(channelId);
+        SaveLocal();
+        Changed?.Invoke();
+    }
+
+    /// <summary>The channel a message lives in, and that channel's server (for saved messages).</summary>
+    public (ServerVm Server, Channel Channel)? ChannelById(string channelId)
+    {
+        foreach (var sv in Servers) if (sv.Channels.FirstOrDefault(c => c.Id == channelId) is { } c) return (sv, c);
+        foreach (var dm in dmByUser.Values) if (dm.Channels.FirstOrDefault(c => c.Id == channelId) is { } c) return (dm, c);
+        return null;
+    }
 
     /// <summary>Profile colours (index 0 = none), same as client/ui/src/profile.ts ACCENTS.</summary>
     static readonly uint[] Accents = [0, 0xff1b50, 0xff7a4d, 0xf2b84b, 0xb8d65a, 0x4fd1a5, 0x5ab4f0, 0xa58cf5, 0xf283c4];

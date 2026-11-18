@@ -63,6 +63,14 @@
                 <Setter Property="Padding" Value="6" />
                 <Setter Property="Foreground" Value="{StaticResource Cream80}" />
             </Style>
+            <!-- .link: quiet text button -->
+            <Style x:Key="Link" TargetType="HyperlinkButton">
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Foreground" Value="{StaticResource Cream55}" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+            </Style>
             <!-- 16×16 stroked icon, 1.5 px, from icons.tsx -->
             <Style x:Key="Glyph" TargetType="Path">
                 <Setter Property="Width" Value="16" />

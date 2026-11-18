@@ -24,9 +24,9 @@ public static class Ui
 
     static readonly Dictionary<string, string> FontFiles = new()
     {
-        ["TextFont"] = "HopOnText-Regular.ttf#HopOn Text",
-        ["TextMediumFont"] = "HopOnText-Medium.ttf#HopOn Text",
-        ["TextSemiFont"] = "HopOnText-SemiBold.ttf#HopOn Text",
+        ["TextFont"] = "HopOnText-Regular.ttf#HopOn Text, ms-appx:///Fonts/Twemoji.ttf#Twemoji Mozilla",
+        ["TextMediumFont"] = "HopOnText-Medium.ttf#HopOn Text, ms-appx:///Fonts/Twemoji.ttf#Twemoji Mozilla",
+        ["TextSemiFont"] = "HopOnText-SemiBold.ttf#HopOn Text, ms-appx:///Fonts/Twemoji.ttf#Twemoji Mozilla",
         ["MonoFont"] = "HopOnMono-Regular.ttf#HopOn Mono",
         ["MonoMediumFont"] = "HopOnMono-Medium.ttf#HopOn Mono",
         ["MonoSemiFont"] = "HopOnMono-SemiBold.ttf#HopOn Mono",
