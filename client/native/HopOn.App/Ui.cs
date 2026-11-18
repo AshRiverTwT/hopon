@@ -32,6 +32,8 @@ public static class Ui
         ["MonoSemiFont"] = "HopOnMono-SemiBold.ttf#HopOn Mono",
         ["DisplayFont"] = "HopOnDisplay-Black.ttf#HopOn Display",
         ["CondensedFont"] = "HopOnCondensed-Regular.ttf#HopOn Condensed",
+        ["CondensedLightFont"] = "HopOnCondensed-Light.ttf#HopOn Condensed",
+        ["CondensedMediumFont"] = "HopOnCondensed-Medium.ttf#HopOn Condensed",
     };
 
     public static SolidColorBrush Brush(string key)

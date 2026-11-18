@@ -580,8 +580,25 @@ public sealed partial class MainWindow : Window
         return await dialog.ShowAsync() == ContentDialogResult.Primary && box.Text.Trim().Length > 0 ? box.Text.Trim() : null;
     }
 
-    void OnEditProfile(object sender, RoutedEventArgs e) =>
-        _ = ProfileDialog.Show(Content.XamlRoot, WinRT.Interop.WindowNative.GetWindowHandle(this), Store);
+    Grid? profileSheet;
+
+    /// <summary>Edit profile: a full-window sheet like the web's ProfileEditor.</summary>
+    async void OnEditProfile(object sender, RoutedEventArgs e)
+    {
+        if (profileSheet is not null) return;
+        CloseSettings();
+        var sheet = await ProfileSheet.Create(Store, WinRT.Interop.WindowNative.GetWindowHandle(this), CloseProfileSheet, ShowToast);
+        if (sheet is null || profileSheet is not null) return;
+        profileSheet = sheet;
+        Root.Children.Insert(Root.Children.IndexOf(Toast), sheet);
+    }
+
+    void CloseProfileSheet()
+    {
+        if (profileSheet is null) return;
+        Root.Children.Remove(profileSheet);
+        profileSheet = null;
+    }
 
     void OnHome(object sender, RoutedEventArgs e)
     {
@@ -783,7 +800,23 @@ public sealed partial class MainWindow : Window
             await Store.SetStatus(Store.MyStatus?.Mode ?? "online", emoji.Text.Trim(), text.Text.Trim());
     }
 
-    void OnSettings(object sender, RoutedEventArgs e) => _ = SettingsDialog.Show(Content.XamlRoot, Store);
+    SettingsSheet? settings;
+
+    /// <summary>Settings: a full-window sheet over everything (like the web's .sheet).</summary>
+    void OnSettings(object sender, RoutedEventArgs e)
+    {
+        if (settings is not null) return;
+        settings = new SettingsSheet(Store, CloseSettings, () => OnEditProfile(this, new RoutedEventArgs()));
+        // Under the toast, so messages still show over the sheet.
+        Root.Children.Insert(Root.Children.IndexOf(Toast), settings);
+    }
+
+    void CloseSettings()
+    {
+        if (settings is null) return;
+        Root.Children.Remove(settings);
+        settings = null;
+    }
 
     async void OnSignOut(object sender, RoutedEventArgs e)
     {

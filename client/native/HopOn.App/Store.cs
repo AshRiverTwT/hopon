@@ -118,6 +118,10 @@ public sealed partial class Store
     }
 
     public bool PrefBool(string key, bool fallback) => ReadBool(prefsJson, key, fallback);
+    /// <summary>Your login name (@username).</summary>
+    public string Username { get; private set; } = "";
+    /// <summary>The synced prefs document (JSON), as last saved or received.</summary>
+    public string PrefsJson => prefsJson;
 
     public string PrefString(string key, string fallback)
     {
@@ -513,6 +517,7 @@ public sealed partial class Store
         foreach (var u in s.Users) users[u.Id] = u;
         if (s.User is not null) users[s.User.Id] = s.User;
         Me = s.User;
+        Username = s.Username;
         MessageVm.MeId = s.User?.Id;
         MyStatus = s.Status;
         View = s.User is not null ? View.Shell : s.AuthPending && !splashGaveUp ? View.Splash : View.Login;
