@@ -482,6 +482,12 @@ pub fn games_select(core: &Arc<Core>, game: String, server_id: String) -> Res<St
     Ok(crate::games::url_for(g))
 }
 
+/// The script a game webview runs in every frame: it reports shared results
+/// by setting `document.title` to `HOPON_RESULT:<encoded>` (native shell).
+pub fn games_hook() -> Res<&'static str> {
+    Ok(crate::games::HOOK)
+}
+
 /// The game panel closed.
 pub fn games_deselect(core: &Arc<Core>) -> Res<()> {
     *core.games.game.lock() = None;
@@ -696,6 +702,7 @@ pub async fn call(core: &Arc<Core>, name: &str, args_json: Value, blob: Option<V
         sync games_deselect(),
         sync games_result(encoded: String),
         free games_open_external(game: String),
+        free games_hook(),
         free open_url(url: String),
         async update_check(),
         async update_install(),
@@ -719,7 +726,7 @@ pub const COMMANDS: &[&str] = &[
     "voice_mute", "voice_deafen", "voice_ptt", "voice_volume", "screen_grant", "media_presence",
     "screen_sources", "screen_share", "screen_stop", "screen_watch", "screen_unwatch", "screen_volume",
     "audio_processing", "audio_devices", "audio_set_device", "games_server", "games_select",
-    "games_deselect", "games_result", "games_open_external", "open_url", "update_check",
+    "games_deselect", "games_result", "games_open_external", "games_hook", "open_url", "update_check",
     "update_install", "overlay_context", "perf_painted", "perf_stats", "perf_reset",
 ];
 

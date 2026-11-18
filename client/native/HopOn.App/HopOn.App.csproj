@@ -31,6 +31,8 @@
     <!-- Only the WinUI component (and what it needs): the Microsoft.WindowsAppSDK
          metapackage would also pull in AI, ML, Widgets and Search. -->
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.6.4" />
+    <!-- The games panel's browser (WinUI's WebView2 control needs the CoreWebView2 projection). -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3719.77" />
   </ItemGroup>
 
   <ItemGroup>

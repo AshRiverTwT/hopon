@@ -56,7 +56,14 @@ public sealed partial class MainWindow : Window
         ChannelDial.NewChannel += OnDialNewChannel;
         ChannelDial.ServerPicked += sv => { stage = null; if (sv != Store.OpenServer) _ = Store.SelectServer(sv); };
         ChannelDial.MonogramClicked += OnMonogram;
-        Root.SizeChanged += (_, _) => FitTitle();
+        Root.SizeChanged += (_, _) =>
+        {
+            FitTitle();
+            if (games is null) return;
+            // Games beside the chat need room: close them when the window gets narrow.
+            if (Root.ActualWidth < 980) { SetGames(false); ShowToast("Games closed: the window is too narrow for games and chat side by side"); }
+            else RailColumn.Width = new GridLength(Math.Clamp(Root.ActualWidth * 0.30, 340, 440));
+        };
         // The status corner's clock: once a minute, on the minute.
         var clock = DispatcherQueue.CreateTimer();
         clock.Interval = TimeSpan.FromSeconds(60.05 - DateTime.Now.Second - DateTime.Now.Millisecond / 1000.0);
@@ -297,6 +304,14 @@ public sealed partial class MainWindow : Window
         Composer.IsEnabled = Store.OpenChannel is not null;
         AttachButton.IsEnabled = Store.OpenChannel is not null;
         GifButton.IsEnabled = Store.OpenChannel is not null;
+
+        // games: close on Friends; results follow the server you look at
+        if (games is not null)
+        {
+            if (home || Store.OpenServer is null) SetGames(false);
+            else if (Store.OpenServer.Id != gamesServer) { gamesServer = Store.OpenServer.Id; games.ServerChanged(gamesServer); }
+        }
+        GamesKey.Visibility = Store.OpenServer is null || home ? Visibility.Collapsed : Visibility.Visible;
 
         // side: toolbar strip, people
         ServerMenuButton.Visibility = Store.OpenServer is null || home ? Visibility.Collapsed : Visibility.Visible;
@@ -798,6 +813,40 @@ public sealed partial class MainWindow : Window
         };
         if (await dialog.ShowAsync() == ContentDialogResult.Primary)
             await Store.SetStatus(Store.MyStatus?.Mode ?? "online", emoji.Text.Trim(), text.Text.Trim());
+    }
+
+    GamesPanel? games;
+    string? gamesServer;
+
+    /// <summary>Games beside the chat: the right column widens (clamp(340px, 30vw, 440px)).</summary>
+    void OnGames(object sender, RoutedEventArgs e) => SetGames(games is null);
+
+    void SetGames(bool open)
+    {
+        if (open == (games is not null)) return;
+        if (open)
+        {
+            if (Store.OpenServer is null || Store.HomeMode) return;
+            if (Root.ActualWidth < 980) { ShowToast("Make the window wider (or maximize it) to play games beside the chat"); return; }
+            games = new GamesPanel(Store, () => SetGames(false));
+            gamesServer = Store.OpenServer.Id;
+            Grid.SetRow(games, 1);
+            Grid.SetRowSpan(games, 2);
+            games.Margin = new Thickness(0, 12, 0, 0);
+            SidePanel.Children.Add(games);
+            OnlineHead.Visibility = PeopleList.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            games!.Shutdown();
+            SidePanel.Children.Remove(games);
+            games = null;
+            OnlineHead.Visibility = PeopleList.Visibility = Visibility.Visible;
+        }
+        RailColumn.Width = new GridLength(open ? Math.Clamp(Root.ActualWidth * 0.30, 340, 440) : 230);
+        GamesKey.Background = open ? Ui.Brush("Cream") : Ui.Brush("Key");
+        GamesKey.BorderBrush = open ? Ui.Brush("Cream") : Ui.Brush("Hair");
+        GamesText.Foreground = GamesGlyph.Stroke = open ? Ui.Brush("Ink") : Ui.Brush("Cream55");
     }
 
     SettingsSheet? settings;

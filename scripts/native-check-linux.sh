@@ -25,6 +25,7 @@ for xaml in glob.glob(os.path.join(app, "*.xaml")):
 open(os.path.join(out, "Stubs.cs"), "w").write("\n".join(stubs))
 cs = "\n".join(f'    <Compile Include="{f}" />' for f in sorted(glob.glob(os.path.join(app, "*.cs"))))
 pkg = re.search(r'Include="Microsoft.WindowsAppSDK.WinUI" Version="([^"]+)"', open(os.path.join(app, "HopOn.App.csproj")).read()).group(1)
+wv = re.search(r'Include="Microsoft.Web.WebView2" Version="([^"]+)"', open(os.path.join(app, "HopOn.App.csproj")).read()).group(1)
 open(os.path.join(out, "Check.csproj"), "w").write(f"""<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
@@ -40,6 +41,8 @@ open(os.path.join(out, "Check.csproj"), "w").write(f"""<Project Sdk="Microsoft.N
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="{pkg}" ExcludeAssets="build;buildTransitive" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="{wv}" ExcludeAssets="build;buildTransitive" />
+    <Reference Include="{os.path.expanduser('~')}/.nuget/packages/microsoft.web.webview2/{wv}/lib_manual/net8.0-windows10.0.17763.0/Microsoft.Web.WebView2.Core.Projection.dll" />
     <ProjectReference Include="{app}/../HopOn.Interop/HopOn.Interop.csproj" />
     <Compile Include="Stubs.cs" />
 {cs}

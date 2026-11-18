@@ -412,8 +412,8 @@
                 </StackPanel>
             </Grid>
 
-            <!-- side: one strip of joined keys, then the people -->
-            <Grid Grid.Column="2" Grid.RowSpan="2" Margin="0,24,28,0">
+            <!-- side: one strip of joined keys, then the people (or the games) -->
+            <Grid x:Name="SidePanel" Grid.Column="2" Grid.RowSpan="2" Margin="0,24,28,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -424,6 +424,12 @@
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <Path Style="{StaticResource Glyph}" Stroke="{StaticResource Cream55}" Data="M6 7a2.3 2.3 0 100-4.6A2.3 2.3 0 006 7zM1.8 13.5c.5-2.5 2.2-4 4.2-4s3.7 1.5 4.2 4M10.5 2.6a2.3 2.3 0 010 4.3M12.2 9.8c1 .6 1.7 1.9 2 3.7" />
                             <TextBlock x:Name="PeopleCount" FontFamily="{StaticResource MonoFont}" FontSize="12" Foreground="{StaticResource Cream55}" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="GamesKey" Style="{StaticResource IconKey}" Margin="-1,0,0,0" Padding="10,0" Click="OnGames">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <Path x:Name="GamesGlyph" Style="{StaticResource Glyph}" Stroke="{StaticResource Cream55}" Data="M4.5 4.5h7a3 3 0 013 3v1.5a2.5 2.5 0 01-4.3 1.7L9.5 10h-3l-.7.7A2.5 2.5 0 011.5 9V7.5a3 3 0 013-3zM5 6.5v2.5M3.8 7.8h2.4M10.5 7.3v.1M11.8 8.6v.1" />
+                            <TextBlock x:Name="GamesText" Text="GAMES" FontFamily="{StaticResource MonoSemiFont}" FontSize="10.5" CharacterSpacing="100" VerticalAlignment="Center" Foreground="{StaticResource Cream55}" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="ServerMenuButton" Style="{StaticResource IconKey}" Margin="-1,0,0,0" ToolTipService.ToolTip="Server: invite people, settings">
@@ -443,7 +449,7 @@
                     </Button>
                 </StackPanel>
                 <TextBlock x:Name="OnlineHead" Grid.Row="1" FontFamily="{StaticResource MonoFont}" FontSize="10" CharacterSpacing="160" Foreground="{StaticResource Cream55}" Margin="0,22,0,10" />
-                <ListView Grid.Row="2" ItemsSource="{x:Bind Store.Members}" SelectionMode="None" Margin="-4,0,-12,0">
+                <ListView x:Name="PeopleList" Grid.Row="2" ItemsSource="{x:Bind Store.Members}" SelectionMode="None" Margin="-4,0,-12,0">
                     <ListView.ItemContainerStyle>
                         <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
                             <Setter Property="Padding" Value="4,0" />
