@@ -303,6 +303,13 @@ public sealed partial class MainWindow : Window
             BellOffPath.Visibility = level == "none" ? Visibility.Visible : Visibility.Collapsed;
         }
         BellButton.Visibility = Store.OpenChannel is null || room ? Visibility.Collapsed : Visibility.Visible;
+        StarButton.Visibility = SearchButton.Visibility = SavedButton.Visibility = BellButton.Visibility;
+        if (Store.OpenChannel is { } fav)
+        {
+            var on = Store.IsFavorite(fav.Id);
+            StarFill.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+            ToolTipService.SetToolTip(StarButton, on ? "Favorite channel (click to remove)" : "Favorite channel");
+        }
         Composer.PlaceholderText = Store.OpenChannel is null ? "" : $"Write in {Store.OpenChannel.Name}";
         Composer.IsEnabled = Store.OpenChannel is not null;
         AttachButton.IsEnabled = Store.OpenChannel is not null;
@@ -1015,6 +1022,114 @@ public sealed partial class MainWindow : Window
         Root.Children.Remove(overlaySheet);
         overlaySheet = null;
         Composer.Focus(FocusState.Programmatic);
+    }
+
+    void OnFavorite(object sender, RoutedEventArgs e)
+    {
+        if (Store.OpenChannel is { } ch) Store.ToggleFavorite(ch.Id);
+    }
+
+    /// <summary>An index row (.index-row): a big name and a quiet meta line, hairline under it.</summary>
+    static Button IndexRow(string name, string meta, Action? click)
+    {
+        var g = new Grid { ColumnSpacing = 16, Padding = new Thickness(4, 14, 4, 14) };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        g.Children.Add(new TextBlock { Text = name, FontSize = 28, Foreground = Ui.Brush("Cream80"), TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 420, VerticalAlignment = VerticalAlignment.Center });
+        var m = new TextBlock { Text = meta, FontSize = 13, Foreground = Ui.Brush("Cream55"), TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(m, 1);
+        g.Children.Add(m);
+        var b = new Button
+        {
+            Content = g, Background = null, BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = Ui.Brush("Cream10"), Padding = new Thickness(0),
+            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, IsEnabled = click is not null,
+        };
+        if (click is not null) b.Click += (_, _) => click();
+        return b;
+    }
+
+    /// <summary>Scroll a loaded message into view and flash it.</summary>
+    void JumpTo(string messageId)
+    {
+        var m = Store.Messages.FirstOrDefault(x => x.Id == messageId);
+        if (m is null) { ShowToast("That message isn't loaded"); return; }
+        MessageList.ScrollIntoView(m, ScrollIntoViewAlignment.Leading);
+        m.Hovered = true;
+        var t = DispatcherQueue.CreateTimer();
+        t.Interval = TimeSpan.FromSeconds(1.2);
+        t.IsRepeating = false;
+        t.Tick += (_, _) => m.Hovered = false;
+        t.Start();
+    }
+
+    /// <summary>Search this channel (the web's SearchSheet): loaded messages, newest first; older pages on request.</summary>
+    void OnSearch(object sender, RoutedEventArgs e)
+    {
+        if (Store.OpenChannel is null) return;
+        var (sheet, body) = Sheet.Create("Search this channel", CloseSheet);
+        var box = new TextBox { PlaceholderText = "Search loaded messages", FontSize = 22, Padding = new Thickness(0, 12, 0, 12), MaxWidth = 860, HorizontalAlignment = HorizontalAlignment.Stretch, MinWidth = 600 };
+        body.Children.Add(box);
+        var list = new StackPanel { MaxWidth = 860, HorizontalAlignment = HorizontalAlignment.Stretch };
+        body.Children.Add(list);
+        var older = Ui.Key("SEARCH OLDER MESSAGES");
+        older.Margin = new Thickness(0, 16, 0, 0);
+        body.Children.Add(older);
+        void Run()
+        {
+            list.Children.Clear();
+            var q = box.Text.Trim();
+            older.Visibility = q.Length > 0 && Store.HasOlder && Store.Messages.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            if (q.Length == 0)
+            {
+                list.Children.Add(new TextBlock { Text = "Enter a word or phrase to search this channel.", Foreground = Ui.Brush("Cream55"), FontSize = 15, Margin = new Thickness(0, 10, 0, 0) });
+                return;
+            }
+            var hits = Store.Messages.Where(m => m.Content.Contains(q, StringComparison.CurrentCultureIgnoreCase)).TakeLast(100).Reverse().ToList();
+            if (hits.Count == 0) list.Children.Add(new TextBlock { Text = "No loaded messages match.", Foreground = Ui.Brush("Cream55"), FontSize = 15, Margin = new Thickness(0, 10, 0, 0) });
+            foreach (var m in hits)
+            {
+                var id = m.Id;
+                list.Children.Add(IndexRow(m.Author, Store.Editable(m.Content), () => { CloseSheet(); JumpTo(id); }));
+            }
+        }
+        box.TextChanged += (_, _) => Run();
+        older.Click += async (_, _) =>
+        {
+            older.IsEnabled = false;
+            older.Content = "SEARCHING OLDER MESSAGES…";
+            for (var page = 0; page < 8 && Store.HasOlder; page++) await Store.LoadOlder();
+            older.Content = "SEARCH OLDER MESSAGES";
+            older.IsEnabled = true;
+            Run();
+        };
+        box.Loaded += (_, _) => box.Focus(FocusState.Programmatic);
+        Run();
+        ShowSheet(sheet);
+    }
+
+    /// <summary>Saved messages (the web's BookmarksSheet): channel, author · text; click opens it.</summary>
+    void OnSaved(object sender, RoutedEventArgs e)
+    {
+        var (sheet, body) = Sheet.Create("Saved messages", CloseSheet);
+        var list = new StackPanel { MaxWidth = 860, HorizontalAlignment = HorizontalAlignment.Stretch, MinWidth = 600, BorderThickness = new Thickness(0, 1, 0, 0), BorderBrush = Ui.Brush("Cream10") };
+        body.Children.Add(list);
+        var items = Store.SavedMessages();
+        if (items.Count == 0) list.Children.Add(new TextBlock { Text = "Saved messages will appear here.", Foreground = Ui.Brush("Cream55"), FontSize = 15, Margin = new Thickness(0, 14, 0, 0) });
+        foreach (var (channelId, messageId) in items)
+        {
+            var at = Store.ChannelById(channelId);
+            var loaded = Store.OpenChannel?.Id == channelId ? Store.Messages.FirstOrDefault(m => m.Id == messageId) : null;
+            var meta = loaded is not null ? $"{loaded.Author} · {Store.Editable(loaded.Content)}" : "Open its channel to view this message";
+            list.Children.Add(IndexRow(at?.Channel.Name ?? "Channel unavailable", meta, at is null ? null : async () =>
+            {
+                CloseSheet();
+                stage = null;
+                if (at.Value.Server != Store.OpenServer) await Store.SelectServer(at.Value.Server);
+                if (Store.OpenChannel?.Id != channelId) await Store.OpenChannelById(channelId);
+                JumpTo(messageId);
+            }));
+        }
+        ShowSheet(sheet);
     }
 
     /// <summary>New poll (the web's PollSheet): question, 2–5 options, Post poll.</summary>
