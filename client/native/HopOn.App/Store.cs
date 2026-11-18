@@ -1040,6 +1040,46 @@ public sealed partial class Store
         }
     }
 
+    // ---------- profile card (client/ui/src/profile.ts) ----------
+
+    /// <summary>"online" | "idle" | "dnd" | "invisible" (you only) | "offline".</summary>
+    public string PresenceOf(string userId)
+    {
+        if (userId == Me?.Id)
+        {
+            if (ConnState != "online") return "offline";
+            return MyStatus?.Mode is "invisible" or "dnd" or "idle" ? MyStatus.Mode : "online";
+        }
+        if (!online.Contains(userId)) return "offline";
+        return statuses.GetValueOrDefault(userId)?.Mode switch { "dnd" => "dnd", "idle" => "idle", "invisible" => "offline", _ => "online" };
+    }
+
+    /// <summary>Custom status (emoji + text) if set and not expired.</summary>
+    public Status? CustomOf(string userId)
+    {
+        var st = userId == Me?.Id ? MyStatus : online.Contains(userId) ? statuses.GetValueOrDefault(userId) : null;
+        if (st is null || (st.Text.Length == 0 && st.Emoji.Length == 0)) return null;
+        if (st.Until > 0 && st.Until <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) return null;
+        return st;
+    }
+
+    public string GameOf(string userId) => activities.GetValueOrDefault(userId) ?? "";
+
+    /// <summary>The voice room someone is in ("" = none).</summary>
+    public string VoiceRoomOf(string userId)
+    {
+        var ch = userId == Me?.Id ? (MyVoice is { State: not "idle" } v ? v.ChannelId : null) : voice.GetValueOrDefault(userId)?.ChannelId;
+        if (ch is null) return "";
+        foreach (var sv in Servers) if (sv.Channels.FirstOrDefault(c => c.Id == ch) is { } c) return c.Name;
+        return "";
+    }
+
+    public bool InMyRoom(string userId) => userId != Me?.Id && MyVoice is { State: not "idle", ChannelId: { } ch } && voice.GetValueOrDefault(userId)?.ChannelId == ch;
+    public FriendVm? FriendOf(string userId) => Friends.FirstOrDefault(f => f.UserId == userId);
+    public Task AcceptFriend(string userId) => Do("friend_respond", new JsonObject { ["userId"] = userId, ["accept"] = true });
+    public Task<Microsoft.UI.Xaml.Media.Imaging.BitmapImage?> BannerOf(string userId, uint v) => avatars.Banner(userId, v);
+    public Task SetVoiceVolume(string userId, double volume) => Do("voice_volume", new JsonObject { ["userId"] = userId, ["volume"] = volume });
+
     /// <summary>Stored text → editable text ("&lt;@id&gt;" → "@name").</summary>
     public string Editable(string content) => Rich.DecodeMentions(content, NameOf);
 
