@@ -482,17 +482,8 @@
                             <TextBlock x:Name="GamesText" Text="GAMES" FontFamily="{StaticResource MonoSemiFont}" FontSize="10.5" CharacterSpacing="100" VerticalAlignment="Center" Foreground="{StaticResource Cream55}" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="ServerMenuButton" Style="{StaticResource IconKey}" Margin="-1,0,0,0" ToolTipService.ToolTip="Server: invite people, settings">
+                    <Button x:Name="ServerMenuButton" Style="{StaticResource IconKey}" Margin="-1,0,0,0" Click="OnServerSettings" ToolTipService.ToolTip="Server: invite people, settings">
                         <Path Style="{StaticResource Glyph}" Stroke="{StaticResource Cream55}" Data="M2.5 4.5h7M12.5 4.5h1M2.5 11.5h1M6.5 11.5h7M11 3v3M5 10v3" />
-                        <Button.Flyout>
-                            <MenuFlyout>
-                                <MenuFlyoutItem Text="Invite people (copy link)" Click="OnInvite" />
-                                <MenuFlyoutItem x:Name="CreateChannelItem" Text="Create a channel…" Click="OnCreateChannel" />
-                                <MenuFlyoutItem x:Name="ServerSettingsItem" Text="Server settings…" Click="OnServerSettings" />
-                                <MenuFlyoutSeparator />
-                                <MenuFlyoutItem x:Name="LeaveServerItem" Text="Leave server" Click="OnLeaveServer" />
-                            </MenuFlyout>
-                        </Button.Flyout>
                     </Button>
                     <Button Style="{StaticResource IconKey}" Margin="-1,0,0,0" Click="OnSettings" ToolTipService.ToolTip="Settings">
                         <Path Style="{StaticResource Glyph}" Stroke="{StaticResource Cream55}" Data="M6.9 1.5h2.2l.4 1.8 1.4.6 1.6-1 1.6 1.6-1 1.6.6 1.4 1.8.4v2.2l-1.8.4-.6 1.4 1 1.6-1.6 1.6-1.6-1-1.4.6-.4 1.8H6.9l-.4-1.8-1.4-.6-1.6 1-1.6-1.6 1-1.6-.6-1.4-1.8-.4V6.9l1.8-.4.6-1.4-1-1.6 1.6-1.6 1.6 1 1.4-.6zM8 10.3a2.3 2.3 0 100-4.6 2.3 2.3 0 000 4.6z" />

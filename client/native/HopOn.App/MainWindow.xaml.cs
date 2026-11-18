@@ -327,10 +327,7 @@ public sealed partial class MainWindow : Window
         ServerMenuButton.Visibility = Store.OpenServer is null || home ? Visibility.Collapsed : Visibility.Visible;
         PeopleKey.Visibility = Store.OpenServer is null || home ? Visibility.Collapsed : Visibility.Visible;
         PeopleCount.Text = Store.OpenServer?.MemberIds.Count.ToString() ?? "";
-        CreateChannelItem.Visibility = Store.IsOwner ? Visibility.Visible : Visibility.Collapsed;
-        ServerSettingsItem.Visibility = Store.IsOwner ? Visibility.Visible : Visibility.Collapsed;
         ChannelVm.OwnerTools = Store.IsOwner;
-        LeaveServerItem.Visibility = Store.IsOwner ? Visibility.Collapsed : Visibility.Visible;
         OnlineHead.Text = $"ONLINE · {Store.Members.Count(m => m.Online)}";
 
         RenderStatus();
@@ -770,28 +767,202 @@ public sealed partial class MainWindow : Window
         if (await Confirm($"Remove {name}?", "They can come back with a new invite.", "Remove")) await Store.KickMember(userId);
     }
 
-    async void OnServerSettings(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// Server settings (the web's ServerSettingsSheet): invite link; owners get name,
+    /// channels (click to rename / set topic / delete), people (remove), delete;
+    /// members get Leave. Destructive actions ask you to type the name back.
+    /// </summary>
+    void OnServerSettings(object sender, RoutedEventArgs e)
     {
         if (Store.OpenServer is not { } sv) return;
-        var name = new TextBox { Header = "Server name", Text = sv.Name, MinWidth = 320 };
-        var revoke = new Button { Content = "Revoke all invite links" };
-        var delete = new Button { Content = "Delete server…" };
-        var panel = new StackPanel { Spacing = 12 };
-        panel.Children.Add(name);
-        panel.Children.Add(revoke);
-        panel.Children.Add(delete);
-        var dialog = new ContentDialog
+        var (sheet, body) = Sheet.Create(sv.Name, CloseSheet);
+        var rows = new StackPanel { MaxWidth = 860, MinWidth = 640, HorizontalAlignment = HorizontalAlignment.Left };
+        body.Children.Add(rows);
+        var owner = Store.IsOwner;
+        TextBlock Small(string t) => new() { Text = t, FontFamily = Ui.Font("MonoFont"), FontSize = 11, CharacterSpacing = 60, Foreground = Ui.Brush("Cream55"), VerticalAlignment = VerticalAlignment.Center };
+        HyperlinkButton Link(string t, bool danger = false) => new() { Content = t, Style = (Style)Application.Current.Resources["Link"], Foreground = Ui.Brush(danger ? "White" : "Cream55") };
+
+        // "Type the name to confirm": a link that opens an inline confirm row.
+        FrameworkElement Confirm(string name, string action, Func<Task> go, string? note = null)
         {
-            XamlRoot = Content.XamlRoot, Title = "Server settings", Content = panel,
-            PrimaryButtonText = "Save", CloseButtonText = "Close", DefaultButton = ContentDialogButton.Primary,
-        };
-        var deleteAsked = false;
-        revoke.Click += async (_, _) => { await Store.RevokeInvites(); ShowToast("Invite links revoked"); };
-        delete.Click += (_, _) => { deleteAsked = true; dialog.Hide(); };
-        var r = await dialog.ShowAsync();
-        if (r == ContentDialogResult.Primary && name.Text.Trim() is { Length: > 0 } n && n != sv.Name) await Store.RenameServer(n);
-        if (deleteAsked && await Confirm($"Delete {sv.Name}?", "Every channel and message is deleted for everyone. This can't be undone.", "Delete server", sv.Name))
-            await Store.DeleteServer();
+            var host = new StackPanel { Spacing = 10 };
+            void Closed()
+            {
+                host.Children.Clear();
+                var l = Link(action, danger: true);
+                l.Click += (_, _) => Open();
+                host.Children.Add(l);
+            }
+            void Open()
+            {
+                host.Children.Clear();
+                if (note is not null) host.Children.Add(new TextBlock { Text = note, FontSize = 13, Foreground = Ui.Brush("Cream55"), TextWrapping = TextWrapping.Wrap });
+                var hint = new TextBlock { FontSize = 13, Foreground = Ui.Brush("Cream55") };
+                hint.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = "Type " });
+                hint.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = name, FontFamily = Ui.Font("TextSemiFont"), Foreground = Ui.Brush("Cream") });
+                hint.Inlines.Add(new Microsoft.UI.Xaml.Documents.Run { Text = " to confirm" });
+                host.Children.Add(hint);
+                var box = new TextBox { MinWidth = 320, HorizontalAlignment = HorizontalAlignment.Left };
+                host.Children.Add(box);
+                var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+                var ok = Ui.Key(action.ToUpperInvariant(), solid: true);
+                ok.IsEnabled = false;
+                var cancel = Link("Cancel");
+                line.Children.Add(ok);
+                line.Children.Add(cancel);
+                host.Children.Add(line);
+                async Task Go()
+                {
+                    ok.IsEnabled = false;
+                    await go();
+                    Closed();
+                }
+                box.TextChanged += (_, _) => ok.IsEnabled = box.Text == name;
+                box.KeyDown += (_, k) => { if (k.Key == VirtualKey.Enter && box.Text == name) _ = Go(); };
+                ok.Click += (_, _) => _ = Go();
+                cancel.Click += (_, _) => Closed();
+                box.Loaded += (_, _) => box.Focus(FocusState.Programmatic);
+            }
+            Closed();
+            return host;
+        }
+
+        // A line input that shows Save once changed (Enter saves too).
+        FrameworkElement Editable(string value, string placeholder, int max, Func<string, Task> save, bool big = false)
+        {
+            var g = new Grid { ColumnSpacing = 12 };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var box = new TextBox { Text = value, PlaceholderText = placeholder, MaxLength = max, FontSize = big ? 22 : 16, Padding = new Thickness(0, big ? 12 : 10, 0, big ? 12 : 10) };
+            g.Children.Add(box);
+            var key = Ui.Key("SAVE", solid: true);
+            key.Visibility = Visibility.Collapsed;
+            key.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(key, 1);
+            g.Children.Add(key);
+            var current = value;
+            async Task Save()
+            {
+                var v = box.Text.Trim();
+                if (v == current) return;
+                await save(v);
+                current = v;
+                key.Visibility = Visibility.Collapsed;
+            }
+            box.TextChanged += (_, _) => key.Visibility = box.Text.Trim() != current ? Visibility.Visible : Visibility.Collapsed;
+            box.KeyDown += (_, k) => { if (k.Key == VirtualKey.Enter) _ = Save(); };
+            key.Click += (_, _) => _ = Save();
+            return g;
+        }
+
+        // invite
+        {
+            var col = new StackPanel { Spacing = 10 };
+            var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+            var make = Ui.Key("CREATE INVITE LINK", solid: true);
+            line.Children.Add(make);
+            col.Children.Add(line);
+            var foot = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+            foot.Children.Add(Small("Links work for 7 days."));
+            if (owner)
+            {
+                var revoke = Link("Revoke all links");
+                revoke.Click += async (_, _) => { await Store.RevokeInvites(); ShowToast("All invite links revoked"); };
+                foot.Children.Add(revoke);
+            }
+            col.Children.Add(foot);
+            make.Click += async (_, _) =>
+            {
+                if (await Store.CreateInvite() is not { } link) return;
+                line.Children.Clear();
+                var box = new TextBox { Text = link, IsReadOnly = true, MinWidth = 380 };
+                box.GotFocus += (_, _) => box.SelectAll();
+                var copy = Ui.Key("COPY", solid: true);
+                copy.Click += (_, _) =>
+                {
+                    var data = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                    data.SetText(link);
+                    Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data);
+                    ShowToast("Copied");
+                };
+                line.Children.Add(box);
+                line.Children.Add(copy);
+            };
+            rows.Children.Add(Sheet.Row("Invite", col, first: true));
+        }
+
+        if (!owner)
+        {
+            rows.Children.Add(Sheet.Row("Leave", Confirm(sv.Name, "Leave server", async () => { await Store.LeaveServer(); CloseSheet(); })));
+            ShowSheet(sheet);
+            return;
+        }
+
+        rows.Children.Add(Sheet.Row("Name", Editable(sv.Name, "", 64, n => Store.RenameServer(n), big: true)));
+
+        // channels: compact lines; click one to edit it
+        var chans = new StackPanel();
+        string? openChannel = null;
+        void BuildChannels()
+        {
+            chans.Children.Clear();
+            foreach (var c in sv.Channels.Where(c => !c.Voice).Concat(sv.Channels.Where(c => c.Voice)))
+            {
+                var item = new StackPanel { BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = Ui.Brush("Cream10") };
+                var lineGrid = new Grid { ColumnSpacing = 12, Padding = new Thickness(4, 10, 0, 10) };
+                lineGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
+                lineGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                lineGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                lineGrid.Children.Add(new TextBlock { Text = c.Voice ? "ılı" : "#", FontSize = 13, Foreground = Ui.Brush("Cream35"), VerticalAlignment = VerticalAlignment.Center });
+                var nm = new TextBlock { Text = c.Name, FontSize = 17, Foreground = Ui.Brush("Cream80"), VerticalAlignment = VerticalAlignment.Center };
+                Grid.SetColumn(nm, 1);
+                lineGrid.Children.Add(nm);
+                var meta = new TextBlock { Text = c.Voice ? "Voice" : c.Topic, FontFamily = Ui.Font("MonoFont"), FontSize = 12, Foreground = Ui.Brush("Cream35"), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+                Grid.SetColumn(meta, 2);
+                lineGrid.Children.Add(meta);
+                var head = new Button { Content = lineGrid, Background = null, BorderThickness = new Thickness(0), Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+                var id = c.Id;
+                head.Click += (_, _) => { openChannel = openChannel == id ? null : id; BuildChannels(); };
+                item.Children.Add(head);
+                if (openChannel == c.Id)
+                {
+                    var edit = new StackPanel { Spacing = 10, Padding = new Thickness(32, 4, 0, 16) };
+                    edit.Children.Add(Editable(c.Name, "", 64, n => Store.UpdateChannel(id, n, null)));
+                    if (!c.Voice) edit.Children.Add(Editable(c.Topic, "Topic", 256, t => Store.UpdateChannel(id, null, t)));
+                    edit.Children.Add(Confirm(c.Name, "Delete channel", () => Store.DeleteChannel(id), $"Deletes it and all of its messages{(c.Voice ? " and ends the call" : "")}."));
+                    item.Children.Add(edit);
+                }
+                chans.Children.Add(item);
+            }
+        }
+        BuildChannels();
+        rows.Children.Add(Sheet.Row("Channels", chans));
+
+        // people
+        var people = new StackPanel();
+        var ownerId = Store.OwnerOf(sv.Id);
+        foreach (var id in sv.MemberIds.OrderBy(x => x != ownerId).ThenBy(x => Store.NameOf(x), StringComparer.CurrentCultureIgnoreCase))
+        {
+            var g = new Grid { ColumnSpacing = 12, Padding = new Thickness(0, 8, 0, 8), BorderThickness = new Thickness(0, 0, 0, 1), BorderBrush = Ui.Brush("Cream10") };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.Children.Add(ProfileCard.Avatar(Store.NameOf(id), Store.AvatarOf(id), 26, "offline", 0));
+            var nm = new TextBlock { Text = Store.NameOf(id), FontSize = 17, Foreground = Ui.Brush("Cream80"), VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(nm, 1);
+            g.Children.Add(nm);
+            var userId = id;
+            FrameworkElement meta = id == ownerId ? Small("Owner") : Confirm(Store.NameOf(id), "Remove", () => Store.KickMember(userId));
+            meta.HorizontalAlignment = HorizontalAlignment.Right;
+            Grid.SetColumn(meta, 2);
+            g.Children.Add(meta);
+            people.Children.Add(g);
+        }
+        rows.Children.Add(Sheet.Row($"People · {sv.MemberIds.Count}", people));
+
+        rows.Children.Add(Sheet.Row("Delete", Confirm(sv.Name, "Delete server", async () => { await Store.DeleteServer(); CloseSheet(); },
+            "Every channel and message, for everyone. Can't be undone.")));
+        ShowSheet(sheet);
     }
 
     async void OnBell(object sender, RoutedEventArgs e)

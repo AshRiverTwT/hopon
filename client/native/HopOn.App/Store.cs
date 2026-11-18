@@ -1063,6 +1063,7 @@ public sealed partial class Store
 
     // ---------- servers ----------
 
+    public string? OwnerOf(string serverId) => ownerOf.GetValueOrDefault(serverId);
     public bool IsOwner => OpenServer is not null && Me is not null && ownerOf.GetValueOrDefault(OpenServer.Id) == Me.Id;
     readonly Dictionary<string, string> ownerOf = [];
 
