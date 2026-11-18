@@ -12,7 +12,7 @@ constraint, and every stage is instrumented.
 
 ```
 client/      core/ (Rust core, no UI toolkit: net, state, cache, voice, PTT; all commands in api.rs) + src-tauri/ (Tauri 2 shell: windows, tray, commands) + ui/ (SolidJS; `pnpm dev` → /preview.html for a mocked design preview)
-             ffi/ + native/: C ABI and C# bridge for the WinUI 3 port in progress (see client/native/README.md)
+             ffi/ + native/: C ABI and the native WinUI 3 app (preview; see client/native/README.md)
 server/      Axum + Tokio + SQLx chat server
 shared/      wire protocol (MessagePack), snowflake IDs, clock sync, HDR histograms
 bench/       msg_rtt, voice_loopback, e2e_feed, smoke, voice_grant_check

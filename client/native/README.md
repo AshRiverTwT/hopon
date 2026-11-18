@@ -1,7 +1,15 @@
-# Native shell (WinUI 3) — bridge layer
+# Native shell (WinUI 3)
 
 Work in progress: the port of the client UI from Tauri/WebView2 to native
-WinUI 3. The Rust core is shared; only the UI changes.
+WinUI 3. The Rust core is shared; only the UI changes. The goal is the web
+build 1:1 — same layout, type, colours, motion and features — without the
+webview: faster start, less RAM, no browser engine in the process.
+
+**Get it**: every green run of `windows-native` on this branch uploads the
+`HopOn-native-setup` artifact (`HopOn-native-<version>-setup.exe`, ~25 MB,
+NSIS, per-user, no admin). It installs next to the Tauri app, shares its data
+folder (sign-in, cache, prefs), and is unsigned for now (SmartScreen: More
+info → Run anyway).
 
 ```
 client/core/   hopon-core: connection, state, cache, voice; no UI toolkit.
@@ -15,8 +23,40 @@ client/native/
   HopOn.Interop.Tests/ models vs Rust fixtures, merge rules, Rich vs rich.ts.
   HopOn.BridgeCheck/   end-to-end check: C# → hopon_ffi → a real server.
   HopOn.App/           the WinUI 3 app (Windows App SDK, unpackaged, self-contained).
+  installer/           HopOn.nsi (built and tested by scripts/ci/installer.ps1).
   fixtures/            events.json (from Rust), rich.json (from rich.ts).
 ```
+
+## The look (ported from client/ui)
+
+The web UI's design is reproduced, not approximated with stock controls:
+
+- **Theme** (`Theme.xaml`, `Ui.cs`): the `styles.css` palette (ink, cream at
+  80/55/35/20/10/5 %, the `#ff5b1f` signal), square corners, hairlines; WinUI's
+  own theme resources are overridden so dialogs, menus and text boxes match.
+  Code-built UI takes brushes and fonts from `Ui.cs`, not
+  `Application.Resources` (under Native AOT, casting a looked-up resource can
+  throw `InvalidCastException`).
+- **Type** (`Fonts/`): static TTF instances of the web's variable fonts —
+  Archivo Expanded Black (titles), Archivo Condensed 300/400/500 (settings,
+  games tabs), Geist 400/500/600, Geist Mono 400/500/600 — renamed per the OFL,
+  plus Twemoji (COLRv0) as the emoji fallback, so emoji look like the web.
+  Regenerate with fontTools' `instancer` from `client/ui/src/fonts`.
+- **Motion** (`Motion.cs`): CSS-like transitions on composition properties,
+  from the current on-screen value, with the web's cubic-beziers and timings
+  (dial 280 ms `(.2,.7,.2,1)`, server rail 420 ms and monogram 480 ms
+  `(.2,.8,.2,1)`, staggered fade-in of a new server's channels).
+
+| web component | native |
+|---|---|
+| frame, corners, status line, Mic/Sound keys | `MainWindow.xaml` |
+| `Dial.tsx` (rotary channel dial, server rail, readout) | `Dial.cs` |
+| `ProfileCard.tsx`, `ProfileEditor.tsx` | `ProfileCard.cs`, `ProfileSheet.cs` |
+| `Settings.tsx` (the cascade) | `SettingsSheet.cs` |
+| `EmojiPicker.tsx` + `emoji.ts` | `EmojiPicker.cs` + generated `EmojiData.cs` |
+| `GamesPanel.tsx` | `GamesPanel.cs` (WebView2, the core's share hook) |
+| `Friends.tsx`, `Sheets.tsx` (search, saved), `ServerSettings.tsx`, `Polls.tsx` | `MainWindow.xaml.cs` + `Sheet` in `ProfileSheet.cs` |
+| `screen.ts` (stream window) | `ScreenShare.cs` |
 
 ## Keeping the two shells in step
 
@@ -49,6 +89,12 @@ client/native/
 Window-level features stay in each shell: zoom, fullscreen, tray,
 notifications, the overlay window, the games webview.
 
+The native-only commands: `screen_sources`, `screen_share`, `screen_stop`,
+`screen_watch`, `screen_unwatch`, `screen_volume` (screen sharing runs in the
+core here; the Tauri build does it in the webview), `games_hook` (the script a
+game webview runs), and `hopon_screen_frame` in the C ABI (pull the newest
+decoded frame of a watched stream as BGRA, at the size shown).
+
 ## Checks
 
 Linux (what CI can run; needs the dev server from `scripts/dev-up.sh`):
@@ -75,12 +121,20 @@ WinUI reference assemblies: `scripts/native-check-linux.sh`.
 
 - **bridge**: builds `hopon_ffi.dll` (with voice), the server and `e2e_feed`;
   model tests; the bridge check against a server on the runner (JIT and AOT).
+- **screen**: `screen_loopback` (bench) captures the runner's desktop,
+  publishes it through a LiveKit dev server and subscribes from a second
+  participant, for VP8 and H.264: frames, fps, encoder/decoder, CPU.
 - **app**: builds and publishes the WinUI app (Native AOT), then
   `scripts/ci/measure-app.ps1`: startup (`--perf-exit`, 5 runs), remote message
   → painted latency (`e2e_feed`, 200 messages), idle CPU and RAM, size (also
   LZMA-compressed, like an installer) and a screenshot. Results are in the
   run's summary and the `native-app-results` artifact; the app itself is the
-  `HopOn-native-preview` artifact.
+  `HopOn-native-preview` artifact. Then `scripts/ci/installer.ps1` builds the
+  NSIS installer, checks every shipped binary's VC++ runtime imports, installs
+  it silently, starts the installed app, uninstalls it and checks nothing is
+  left; the installer is the `HopOn-native-setup` artifact.
+- A UI crash at startup writes `native-crash.log` in the data folder (a XAML
+  error otherwise only shows as exit code `0xC000027B`); CI prints it.
 
 ## Measurements (windows-latest CI runner, 2026-11-16)
 
@@ -106,6 +160,19 @@ Where the size goes (uncompressed, 92.7 MB): the core DLL (libwebrtc) 27.2 MB,
 WinUI/Windows App SDK runtime ~50 MB (`Microsoft.ui.xaml.dll` 14.5 MB, Controls
 7.1 MB, composition DLLs ~9 MB), `HopOn.exe` (Native AOT) 7.4 MB.
 
+## Latest run (2026-11-18, with the full HopOn look)
+
+| item | native WinUI | target |
+|---|---|---|
+| process start → first frame, 5 runs | median 191 ms, worst 515 ms | < 1 s |
+| remote message → painted, 200 msgs at 20/s | p50 20 ms, p95 37 ms | < 100 ms LAN p95 |
+| idle CPU, 30 s | 0.05 % of all cores | < 1 % |
+| idle RAM | 115 MB private, 184 MB working set | < 200 MB |
+| installer | 25.5 MB | < 30 MB |
+| screen share loopback (CI) | 1080p30: 29.9 fps, 720p60: 59 fps, no drops; H.264 OpenH264 → FFmpeg | |
+
+RAM rose from ~83 MB with the custom fonts, the dial and the richer rows.
+
 ## Parity with the Tauri app (README feature list)
 
 Built = in the WinUI app; CI = compiled and run on Windows by the workflow;
@@ -113,32 +180,35 @@ PC = needs a person on a real PC to check (audio, devices, look and feel).
 
 | feature | native | notes |
 |---|---|---|
-| sign in / sign up, saved sign-in, server URL | built, CI | shares the Tauri build's data folder |
-| servers, text channels, topics; create/join servers, invites, create channels | built, CI (browsing) | |
+| look: frame, dial, type, colours, motion | built, CI (screenshot) | see "The look"; PC for the fine details |
+| sign in / sign up, saved sign-in, server URL | built, CI | splash gives way to login after 5 s if the server is slow or unreachable |
+| servers, text channels, topics; create/join servers, invites, create channels | built, CI (browsing) | channels on the rotary dial; monogram menu for servers |
 | messages: send, optimistic copy, delivery state | built, CI | e2e_feed measures paint latency |
-| edit / delete own, replies with quote | built, CI | context menu; jump-to-message not yet |
-| reactions (toggle, quick React menu) | built, CI | full emoji picker not yet |
+| hover actions: Reply, React, Save, Edit (inline), Delete | built | also on right-click |
+| reactions, emoji picker (search, categories, recent) | built | Twemoji, the web's emoji set |
 | @mentions: autocomplete, encode, highlight | built | |
 | typing indicator | built | |
 | formatting (bold, italic, strike, code, links) | built, tested | Rich.cs ≡ rich.ts on 4552 inputs |
 | attachments: images inline, files, + to upload, paste, drag-and-drop | built | videos as links |
 | GIFs (KLIPY search) | built | |
-| polls (show, vote, create) | built, tested | |
+| polls (New poll sheet, card, vote) | built, tested | |
+| search this channel, saved messages, favourite channels | built | saved/favourites are per PC (`native-local.json`), not shared with the Tauri build's webview storage; jumping needs the message loaded |
 | unread markers, "new messages" divider, day separators | built, tested | |
 | load older history on scroll | built | |
-| presence, people column, "Playing …", status | built, CI | set your status: right-click your name |
+| presence, people column, "Playing …", status | built, CI | |
+| profile card, profile editor (picture, banner, colour, name, about me) | built | |
 | notifications: banners, Windows notifications, per-channel bell | built, tested | |
-| voice: join/leave, mute/deafen, who's speaking | built, CI (compiles) | PC: audio path untested (no SFU in CI) |
-| audio devices, echo/noise/gain | built | PC |
-| push-to-talk; in-app shortcuts (channel/unread/server, Ctrl+T, mute, deafen) | built | PC; rebinding and global hotkeys not yet |
-| per-person voice volume | not yet | core: voice_volume |
-| screen share (share, watch, viewer counts, stream volume) | built, CI spike | core `voice::screen`: libwebrtc DesktopCapturer (WGC/DXGI), H.264 like the web client (OpenH264 encode, FFmpeg decode; CI loopback: 1080p30 and 720p60 at full rate); frames pulled per display refresh at the shown size. Computer sound and camera not yet |
-| in-game overlay | not yet | |
-| games panel | not yet | plan: WebView2 (it shows the games' websites) |
+| voice: join/leave (voice room view), mute/deafen, who's speaking | built, CI (compiles) | PC: audio path untested (no SFU for voice in CI) |
+| per-person voice volume | built | profile card slider when in the same room |
+| audio devices, echo/noise/gain, push-to-talk | built | PC; settings cascade |
+| hotkeys | partly | defaults work in the window; rebinding is saved but not applied yet; no global hotkeys |
+| screen share (share, watch, viewer counts, stream volume) | built, CI loopback | core `voice::screen`: libwebrtc DesktopCapturer (WGC/DXGI), H.264 like the web client; frames pulled per display refresh at the shown size. Computer sound and camera not yet |
+| games panel | built | WebView2 with the core's share hook; PC: check results post from a game's Share |
+| settings (the cascade) | built | Scale shows 100 % (zoom not yet) |
+| server settings | built | the web's sheet: invite, name, channels, people, delete / leave |
+| friends, DMs | built | the web's Friends mode |
 | close to tray, tray menu | built, CI (compiles) | |
-| profile pictures, profile cards, profile editor (name, bio, picture) | built | |
-| server settings (owner) | built | rename, revoke invites, delete (type the name), channel rename/topic/delete, remove members, delete any message |
-| friends, DMs | built | Friends view (👥): requests, accept/decline, DMs |
-| updates (latest.json) | not yet, on purpose | the core's updater installs what latest.json points to, which is the Tauri installer; the native app needs its own manifest + installer first |
+| in-game overlay | not yet | |
+| updates (latest.json) | not yet, on purpose | the core's updater installs what latest.json points to, which is the Tauri installer; the native app needs its own manifest first |
 | zoom / scale | not yet | |
 | installer | built, CI | NSIS per-user, ~25 MB; CI installs, starts and uninstalls it |
